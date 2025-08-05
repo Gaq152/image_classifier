@@ -519,6 +519,9 @@ class ImageClassifier(QMainWindow):
         # 模式选择
         self.create_mode_button(toolbar)
         
+        # 分类模式按钮（单分类/多分类）
+        self.create_category_mode_button(toolbar)
+        
         toolbar.addSeparator()
         
         # 刷新按钮
@@ -526,9 +529,6 @@ class ImageClassifier(QMainWindow):
         refresh_action.triggered.connect(self.refresh_categories)
         refresh_action.setToolTip('刷新类别目录，同步外部变化 (F5)')
         toolbar.addAction(refresh_action)
-        
-        # 分类模式按钮（单分类/多分类）
-        self.create_category_mode_button(toolbar)
         
         # 帮助按钮
         help_action = QAction('📖 帮助', self)
