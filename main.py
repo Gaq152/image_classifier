@@ -187,7 +187,7 @@ def main():
             project_root = Path(__file__).parent.parent
             if str(project_root) not in sys.path:
                 sys.path.insert(0, str(project_root))
-            from image_classifier.ui.main_window import ImageClassifier
+            from .ui.main_window import ImageClassifier
         
         # 创建主窗口
         window = ImageClassifier()
