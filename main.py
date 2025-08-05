@@ -177,17 +177,8 @@ def main():
         QLocale.setDefault(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
         
         # 导入主窗口类 - 支持两种启动方式
-        try:
-            # 作为模块运行时使用相对导入
-            from .ui.main_window import ImageClassifier
-        except ImportError:
-            # 作为脚本运行时使用绝对导入
-            from pathlib import Path
-            # 添加项目根目录到Python路径
-            project_root = Path(__file__).parent.parent
-            if str(project_root) not in sys.path:
-                sys.path.insert(0, str(project_root))
-            from .ui.main_window import ImageClassifier
+        # 使用相对导入
+        from .ui.main_window import ImageClassifier
         
         # 创建主窗口
         window = ImageClassifier()
