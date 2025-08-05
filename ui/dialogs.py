@@ -1,0 +1,1659 @@
+"""
+对话框模块
+
+包含应用程序使用的各种对话框组件。
+"""
+
+import logging
+from pathlib import Path
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+                            QPushButton, QTextEdit, QListWidget, QListWidgetItem, 
+                            QMessageBox, QTabWidget, QProgressBar, QApplication, 
+                            QWidget, QTextBrowser)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QKeySequence
+
+from ..utils.file_operations import normalize_folder_name, retry_file_operation
+from ..utils.exceptions import FileOperationError
+
+
+class CategoryShortcutDialog(QDialog):
+    """类别快捷键设置对话框"""
+    
+    def __init__(self, config, category, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.category = category
+        self.logger = logging.getLogger(__name__)
+        
+        self.setWindowTitle(f'设置类别"{category}"的快捷键')
+        self.setModal(True)
+        
+        layout = QVBoxLayout(self)
+        
+        # 创建快捷键编辑区域
+        row = QHBoxLayout()
+        label = QLabel('快捷键:')
+        self.edit = QLineEdit(self.config.category_shortcuts.get(category, ''))
+        self.edit.setReadOnly(True)
+        self.edit.setPlaceholderText('点击此处按下新的快捷键')
+        row.addWidget(label)
+        row.addWidget(self.edit)
+        layout.addLayout(row)
+        
+        # 添加说明标签
+        tip_label = QLabel('支持单个按键或组合键(Ctrl+, Alt+, Shift+)\\n按ESC清除快捷键')
+        tip_label.setStyleSheet('color: gray;')
+        layout.addWidget(tip_label)
+        
+        # 添加确定和取消按钮
+        buttons = QHBoxLayout()
+        ok_btn = QPushButton('确定')
+        cancel_btn = QPushButton('取消')
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(ok_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+        
+    def keyPressEvent(self, event):
+        """处理按键事件"""
+        try:
+            if event.key() == Qt.Key.Key_Escape:
+                self.edit.clear()
+                if self.category in self.config.category_shortcuts:
+                    del self.config.category_shortcuts[self.category]
+                return
+                
+            # 获取修饰键
+            modifiers = event.modifiers()
+            key = event.key()
+            
+            # 忽略单独的修饰键
+            if key in (Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Shift):
+                return
+                
+            # 构建快捷键文本
+            key_text = QKeySequence(key).toString()
+            if not key_text:
+                return
+                
+            shortcut = ''
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                shortcut += 'Ctrl+'
+            if modifiers & Qt.KeyboardModifier.AltModifier:
+                shortcut += 'Alt+'
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                shortcut += 'Shift+'
+            shortcut += key_text
+            
+            # 检查快捷键是否可用
+            if not self.config.is_shortcut_available(shortcut):
+                # 详细检查冲突原因
+                if shortcut in self.config.reserved_shortcuts:
+                    QMessageBox.warning(self, '快捷键冲突', 
+                        f'快捷键 "{shortcut}" 是系统保留快捷键，不能使用。\\n\\n'
+                        f'系统保留快捷键包括：\\n'
+                        f'• 导航键：← → ↑ ↓ Enter Delete\\n'
+                        f'• 图像控制：Ctrl+0 Ctrl+= Ctrl+- F\\n'
+                        f'• 系统功能：F5 Escape 等\\n'
+                        f'• 常用快捷键：Ctrl+C Ctrl+V 等')
+                elif shortcut in self.config.category_shortcuts.values():
+                    # 找出使用该快捷键的类别
+                    conflict_category = None
+                    for cat, key in self.config.category_shortcuts.items():
+                        if key == shortcut and cat != self.category:
+                            conflict_category = cat
+                            break
+                    QMessageBox.warning(self, '快捷键冲突', 
+                        f'快捷键 "{shortcut}" 已被类别 "{conflict_category}" 使用。\\n'
+                        f'请选择其他快捷键。')
+                return
+                
+            self.edit.setText(shortcut)
+            self.config.category_shortcuts[self.category] = shortcut
+            
+        except Exception as e:
+            self.logger.error(f"处理快捷键事件失败: {e}")
+
+
+class AddCategoriesDialog(QDialog):
+    """批量添加类别对话框"""
+    
+    def __init__(self, existing_categories, parent=None):
+        super().__init__(parent)
+        self.existing_categories = existing_categories
+        self.added_categories = set()
+        self.logger = logging.getLogger(__name__)
+        self.initUI()
+        
+    def initUI(self):
+        """初始化UI"""
+        try:
+            self.setWindowTitle('批量添加类别')
+            self.setMinimumWidth(400)
+            layout = QVBoxLayout(self)
+            
+            # 添加说明标签
+            tip_label = QLabel('请输入类别名称，多个类别用逗号或换行分隔\\n已存在的类别会被自动忽略')
+            tip_label.setStyleSheet('color: gray;')
+            layout.addWidget(tip_label)
+            
+            # 添加文本编辑框
+            self.edit = QTextEdit()
+            self.edit.setPlaceholderText('例如: 类别1, 类别2\\n类别3\\n类别4')
+            self.edit.setMinimumHeight(100)
+            layout.addWidget(self.edit)
+            
+            # 添加预览区域
+            preview_group = QWidget()
+            preview_layout = QVBoxLayout(preview_group)
+            preview_layout.addWidget(QLabel('预览:'))
+            self.preview_list = QListWidget()
+            self.preview_list.setMaximumHeight(150)
+            preview_layout.addWidget(self.preview_list)
+            layout.addWidget(preview_group)
+            
+            # 添加按钮
+            btn_layout = QHBoxLayout()
+            add_btn = QPushButton('添加')
+            add_btn.clicked.connect(self.add_categories)
+            continue_btn = QPushButton('添加并继续')
+            continue_btn.clicked.connect(self.add_and_continue)
+            cancel_btn = QPushButton('取消')
+            cancel_btn.clicked.connect(self.reject)
+            btn_layout.addWidget(add_btn)
+            btn_layout.addWidget(continue_btn)
+            btn_layout.addWidget(cancel_btn)
+            layout.addLayout(btn_layout)
+            
+            # 连接文本变化信号
+            self.edit.textChanged.connect(self.update_preview)
+            
+        except Exception as e:
+            self.logger.error(f"初始化添加类别对话框UI失败: {e}")
+        
+    def update_preview(self):
+        """更新预览列表"""
+        try:
+            self.preview_list.clear()
+            text = self.edit.toPlainText()
+            if not text.strip():
+                return
+                
+            # 分割文本并处理
+            categories = set()
+            for line in text.split('\n'):  # 修复：使用正确的换行符
+                # 同时支持中英文逗号
+                parts = []
+                for part in line.replace('，', ',').split(','):
+                    parts.append(part)
+                for cat in parts:
+                    cat = normalize_folder_name(cat.strip())  # 添加规范化处理
+                    if cat and cat not in self.existing_categories and cat not in categories:
+                        categories.add(cat)
+                        item = QListWidgetItem(cat)
+                        self.preview_list.addItem(item)
+        except Exception as e:
+            self.logger.error(f"更新预览失败: {e}")
+        
+    def add_categories(self):
+        """添加类别并关闭对话框"""
+        if self._add_categories():
+            self.accept()
+        
+    def _add_categories(self):
+        """实际添加类别的逻辑"""
+        try:
+            text = self.edit.toPlainText()
+            if not text.strip():
+                return False
+                
+            # 分割文本并处理
+            added = False
+            errors = []  # 记录错误信息
+            
+            for line in text.split('\n'):  # 修复：使用正确的换行符
+                # 同时支持中英文逗号
+                parts = []
+                for part in line.replace('，', ',').split(','):
+                    parts.append(part)
+                for cat in parts:
+                    chinese_name = normalize_folder_name(cat.strip())  # 规范化类别名称
+                    if not chinese_name:  # 跳过空类别名
+                        continue
+                        
+                    # 检查类别名称长度
+                    if len(chinese_name) > 50:
+                        errors.append(f'类别名称 "{chinese_name}" 超过50个字符')
+                        continue
+                        
+                    if chinese_name in self.existing_categories:
+                        errors.append(f'类别 "{chinese_name}" 已存在')
+                        continue
+                        
+                    try:
+                        # 创建目录(直接使用类别名)
+                        parent = self.parent()
+                        if parent and hasattr(parent, 'current_dir'):
+                            category_dir = Path(parent.current_dir).parent / chinese_name
+                            def create_dir():
+                                category_dir.mkdir(exist_ok=True)
+                            retry_file_operation(create_dir)
+                            self.added_categories.add(chinese_name)
+                            self.existing_categories.add(chinese_name)
+                            added = True
+                            self.logger.info(f"成功创建类别目录: {category_dir}")
+                        else:
+                            errors.append(f'无法获取父目录信息')
+                    except Exception as e:
+                        errors.append(f'创建类别 "{chinese_name}" 失败: {str(e)}')
+                        continue
+            
+            # 如果有错误但也有成功添加的类别
+            if errors and added:
+                error_msg = '\n'.join(errors)
+                QMessageBox.warning(self, '警告', f'部分类别添加失败:\n{error_msg}')
+            # 如果只有错误没有成功添加的类别
+            elif errors and not added:
+                error_msg = '\n'.join(errors)
+                QMessageBox.critical(self, '错误', f'添加类别失败:\n{error_msg}')
+                return False
+                
+            if added:
+                # 强制刷新父窗口的类别列表
+                parent = self.parent()
+                if parent and hasattr(parent, 'load_categories'):
+                    QApplication.processEvents()  # 处理挂起的事件
+                    parent.load_categories()
+                if parent and hasattr(parent, 'update_category_buttons'):
+                    parent.update_category_buttons()
+                    
+            return added
+                
+        except Exception as e:
+            self.logger.error(f"添加类别失败: {e}")
+            QMessageBox.critical(self, '错误', f'添加类别失败: {str(e)}')
+            return False
+
+    def add_and_continue(self):
+        """添加类别并清空输入框"""
+        try:
+            if self._add_categories():
+                # 强制刷新父窗口类别按钮
+                parent = self.parent()
+                if parent and hasattr(parent, 'load_categories'):
+                    QApplication.processEvents()  # 处理挂起的事件
+                    parent.load_categories()
+                if parent and hasattr(parent, 'update_category_buttons'):
+                    parent.update_category_buttons()
+                    
+                # 清空输入框并更新预览
+                self.edit.clear()
+                self.preview_list.clear()
+                self.edit.setFocus()
+                
+                # 重置已添加类别集合
+                self.added_categories = set()
+                
+                # 强制更新UI
+                self.update()
+                QApplication.processEvents()
+        except Exception as e:
+            self.logger.error(f"添加并继续失败: {e}")
+
+
+class TabbedHelpDialog(QDialog):
+    """带标签页的帮助对话框"""
+    
+    def __init__(self, version, parent=None):
+        super().__init__(parent)
+        self.version = version
+        self.logger = logging.getLogger(__name__)
+        self.initUI()
+        
+    def initUI(self):
+        """初始化UI"""
+        try:
+            self.setWindowTitle('帮助和关于')
+            self.setMinimumSize(700, 500)
+            self.setModal(True)
+            
+            # 设置对话框整体样式
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #F8F9FA;
+                    color: #2C3E50;
+                }
+                QTabWidget {
+                    background-color: #FFFFFF;
+                    border: 1px solid #BDC3C7;
+                    border-radius: 6px;
+                }
+                QTabWidget::pane {
+                    background-color: #FFFFFF;
+                    border: 1px solid #BDC3C7;
+                    border-radius: 6px;
+                    top: -1px;
+                }
+                QTabBar::tab {
+                    background-color: #ECF0F1;
+                    color: #2C3E50;
+                    border: 1px solid #BDC3C7;
+                    padding: 8px 16px;
+                    margin-right: 2px;
+                    border-top-left-radius: 6px;
+                    border-top-right-radius: 6px;
+                    font-weight: bold;
+                    min-width: 80px;
+                }
+                QTabBar::tab:selected {
+                    background-color: #3498DB;
+                    color: white;
+                    border-bottom-color: #3498DB;
+                }
+                QTabBar::tab:hover {
+                    background-color: #D5DBDB;
+                }
+                QTabBar::tab:selected:hover {
+                    background-color: #2980B9;
+                }
+                QPushButton {
+                    background-color: #3498DB;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 13px;
+                    font-weight: bold;
+                    min-width: 80px;
+                }
+                QPushButton:hover {
+                    background-color: #2980B9;
+                }
+                QPushButton:pressed {
+                    background-color: #21618C;
+                }
+                QPushButton#clearCacheBtn {
+                    background-color: #E74C3C;
+                }
+                QPushButton#clearCacheBtn:hover {
+                    background-color: #C0392B;
+                }
+            """)
+            
+            layout = QVBoxLayout(self)
+            
+            # 创建标签页控件
+            tab_widget = QTabWidget()
+            
+            # 添加快速入门标签页
+            quick_start_tab = self.create_quick_start_tab()
+            tab_widget.addTab(quick_start_tab, '🚀 快速入门')
+            
+            # 添加详细帮助标签页
+            help_tab = self.create_help_tab()
+            tab_widget.addTab(help_tab, '📖 使用指南')
+            
+            # 添加高级功能标签页
+            advanced_tab = self.create_advanced_tab()
+            tab_widget.addTab(advanced_tab, '⚡ 高级功能')
+            
+            # 添加常见问题标签页
+            faq_tab = self.create_faq_tab()
+            tab_widget.addTab(faq_tab, '❓ 常见问题')
+            
+            # 添加关于标签页
+            about_tab = self.create_about_tab()
+            tab_widget.addTab(about_tab, 'ℹ️ 关于')
+            
+            layout.addWidget(tab_widget)
+            
+            # 添加关闭按钮
+            button_layout = QHBoxLayout()
+            
+            # 添加清理SMB缓存按钮
+            clear_cache_btn = QPushButton('🗑️ 清理SMB缓存')
+            clear_cache_btn.setObjectName("clearCacheBtn")
+            clear_cache_btn.clicked.connect(self.clear_smb_cache)
+            button_layout.addWidget(clear_cache_btn)
+            
+            button_layout.addStretch()
+            
+            close_btn = QPushButton('✖️ 关闭')
+            close_btn.clicked.connect(self.accept)
+            button_layout.addWidget(close_btn)
+            
+            layout.addLayout(button_layout)
+            
+        except Exception as e:
+            self.logger.error(f"初始化帮助对话框UI失败: {e}")
+        
+    def clear_smb_cache(self):
+        """清理SMB缓存"""
+        try:
+            cache_dir = Path.home() / '.image_classifier_cache'
+            if cache_dir.exists():
+                import shutil
+                shutil.rmtree(cache_dir)
+                self._show_styled_message('信息', '清理完成', 'SMB缓存已清理完成')
+            else:
+                self._show_styled_message('信息', '无需清理', '未发现SMB缓存文件')
+        except Exception as e:
+            self.logger.error(f"清理SMB缓存失败: {e}")
+            self._show_styled_message('警告', '清理失败', f'清理SMB缓存失败: {e}')
+    
+    def _show_styled_message(self, msg_type, title, text):
+        """显示样式化的消息框"""
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QIcon
+        
+        msgBox = QMessageBox(self)
+        if msg_type == '信息':
+            msgBox.setIcon(QMessageBox.Icon.Information)
+        elif msg_type == '警告':
+            msgBox.setIcon(QMessageBox.Icon.Warning)
+        elif msg_type == '错误':
+            msgBox.setIcon(QMessageBox.Icon.Critical)
+            
+        msgBox.setWindowTitle(title)
+        msgBox.setText(text)
+        
+        # 设置程序图标
+        try:
+            icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
+            if icon_path.exists():
+                msgBox.setWindowIcon(QIcon(str(icon_path)))
+        except Exception:
+            pass
+        
+        # 设置美化样式
+        msgBox.setStyleSheet("""
+            QMessageBox {
+                background-color: #F8F9FA;
+                color: #2C3E50;
+                border: 1px solid #BDC3C7;
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            QMessageBox QLabel {
+                color: #2C3E50;
+                font-size: 14px;
+                padding: 10px;
+            }
+            QMessageBox QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #21618C;
+            }
+        """)
+        
+        # 中文化按钮
+        msgBox.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msgBox.button(QMessageBox.StandardButton.Ok).setText("确定")
+        
+        msgBox.exec()
+        
+    def create_quick_start_tab(self):
+        """创建快速入门标签页"""
+        from PyQt6.QtWidgets import QWidget, QTextBrowser
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        text_browser = QTextBrowser()
+        
+        quick_start_text = '''
+        <h2>🚀 快速入门指南</h2>
+        
+        <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <h3>🎯 三步快速开始</h3>
+        <ol style="font-size: 16px; line-height: 1.8;">
+        <li><b>📁 选择文件夹</b>：点击"打开目录"选择包含图片的文件夹</li>
+        <li><b>🏷️ 创建类别</b>：点击"新增类别"添加分类标签</li>
+        <li><b>🖱️ 开始分类</b>：双击类别按钮或使用快捷键分类图片</li>
+        </ol>
+        </div>
+        
+        <h3>🖼️ 支持的图片格式</h3>
+        <div style="background-color: #f3e5f5; padding: 10px; border-radius: 6px;">
+        <span style="background-color: #4caf50; color: white; padding: 3px 8px; border-radius: 3px; margin-right: 5px;">JPG</span>
+        <span style="background-color: #2196f3; color: white; padding: 3px 8px; border-radius: 3px; margin-right: 5px;">JPEG</span>
+        <span style="background-color: #ff9800; color: white; padding: 3px 8px; border-radius: 3px; margin-right: 5px;">PNG</span>
+        <span style="background-color: #9c27b0; color: white; padding: 3px 8px; border-radius: 3px; margin-right: 5px;">BMP</span>
+        <span style="background-color: #607d8b; color: white; padding: 3px 8px; border-radius: 3px; margin-right: 5px;">GIF</span>
+        <span style="background-color: #795548; color: white; padding: 3px 8px; border-radius: 3px;">TIFF</span>
+        </div>
+        
+        <h3>⚡ 核心操作</h3>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #ddd;">
+        <tr style="background-color: #f8f9fa;">
+        <th style="width: 25%; padding: 8px; border: 1px solid #ddd;">操作</th>
+        <th style="width: 35%; padding: 8px; border: 1px solid #ddd;">方法</th>
+        <th style="width: 40%; padding: 8px; border: 1px solid #ddd;">说明</th>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">🖼️ 浏览图片</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">← → 键 或 鼠标点击</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">在图片列表中前后导航</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">🏷️ 选择类别</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">↑ ↓ 键</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">在类别列表中上下切换选择</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">📁 分类图片</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">双击类别按钮 或 Enter键</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">将当前图片分类到选中类别</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">🔍 缩放图片</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">鼠标滚轮 或 Ctrl +/-</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">放大缩小查看图片细节</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">🖱️ 移动图片</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">鼠标左键拖拽</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">移动图片查看不同区域</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">🗑️ 移出图片</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">Delete 键</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">将图片移到移出目录</td>
+        </tr>
+        </table>
+        
+        <h3>💡 高效使用技巧</h3>
+        <ul style="line-height: 2;">
+        <li><b>🎹 使用快捷键</b>：按数字键 1-9 快速分类到对应类别</li>
+        <li><b>🔄 模式切换</b>：点击工具栏的"复制模式"/"移动模式"按钮切换</li>
+        <li><b>⏎ 回车确认</b>：选中类别后按 Enter 键快速分类</li>
+        <li><b>🔄 自动同步</b>：程序会自动检测外部文件变化</li>
+        <li><b>💾 状态保存</b>：工作状态会自动保存，重启后恢复</li>
+        </ul>
+        
+        <div style="background-color: #fff3e0; padding: 15px; border-radius: 8px; border-left: 4px solid #ff9800; margin: 20px 0;">
+        <h4>🔥 专业提示</h4>
+        <p>• 使用右键点击类别按钮可以自定义快捷键<br>
+        • 按 F5 键可以刷新文件列表同步外部变化<br>
+        • 按 F 键可以让图片适应窗口大小<br>
+        • 支持批量添加类别，用逗号分隔多个类别名</p>
+        </div>
+        '''
+        
+        text_browser.setHtml(quick_start_text)
+        layout.addWidget(text_browser)
+        
+        return widget
+        
+    def create_help_tab(self):
+        """创建帮助标签页"""
+        from PyQt6.QtWidgets import QWidget, QTextBrowser
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        text_browser = QTextBrowser()
+        
+        help_text = '''
+        <h2>📖 详细使用指南</h2>
+        
+        <h3>�️ 文件管理</h3>
+        <h4>📁 目录操作</h4>
+        <ul>
+        <li><b>打开目录</b>：选择包含待分类图片的根目录</li>
+        <li><b>子目录处理</b>：程序会递归扫描所有子目录中的图片</li>
+        <li><b>目录结构</b>：分类后的图片会按类别名创建对应文件夹</li>
+        <li><b>移出目录</b>：删除的图片会移动到 "_removed" 文件夹</li>
+        </ul>
+        
+        <h4>📋 类别管理</h4>
+        <ul>
+        <li><b>新增类别</b>：单个添加或批量添加（逗号分隔）</li>
+        <li><b>编辑类别</b>：右键类别按钮选择"编辑"</li>
+        <li><b>删除类别</b>：右键类别按钮选择"删除"</li>
+        <li><b>快捷键设置</b>：右键类别按钮选择"设置快捷键"</li>
+        <li><b>类别限制</b>：类别名最长50个字符，支持中英文</li>
+        </ul>
+        
+        <h3>🖼️ 图片浏览与操作</h3>
+        <h4>🔍 视图控制</h4>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%; border: 1px solid #ddd;">
+        <tr style="background-color: #f8f9fa;">
+        <th style="padding: 6px; border: 1px solid #ddd;">功能</th>
+        <th style="padding: 6px; border: 1px solid #ddd;">操作方法</th>
+        <th style="padding: 6px; border: 1px solid #ddd;">快捷键</th>
+        <th style="padding: 6px; border: 1px solid #ddd;">详细说明</th>
+        </tr>
+        <tr>
+        <td style="padding: 6px; border: 1px solid #ddd;">适应窗口</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">菜单/快捷键</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">F</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">自动调整图片大小适应显示区域</td>
+        </tr>
+        <tr>
+        <td style="padding: 6px; border: 1px solid #ddd;">放大图片</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">滚轮向上/菜单</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">Ctrl + =</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">放大图片，最大3倍</td>
+        </tr>
+        <tr>
+        <td style="padding: 6px; border: 1px solid #ddd;">缩小图片</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">滚轮向下/菜单</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">Ctrl + -</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">缩小图片显示</td>
+        </tr>
+        <tr>
+        <td style="padding: 6px; border: 1px solid #ddd;">原始大小</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">菜单/快捷键</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">Ctrl + 0</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">显示图片100%原始大小</td>
+        </tr>
+        <tr>
+        <td style="padding: 6px; border: 1px solid #ddd;">拖拽移动</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">鼠标左键拖拽</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">-</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">移动图片查看不同区域</td>
+        </tr>
+        </table>
+        
+        <h4>📂 分类操作</h4>
+        <ul>
+        <li><b>复制模式</b>：保留原文件，复制到目标类别文件夹（默认）</li>
+        <li><b>移动模式</b>：直接移动文件到目标类别文件夹</li>
+        <li><b>分类方法</b>：双击类别按钮、使用快捷键或按回车键</li>
+        <li><b>批量分类</b>：选择多张图片后统一分类</li>
+        </ul>
+        
+        <h3>� 状态与统计</h3>
+        <h4>🏷️ 状态标识</h4>
+        <ul>
+        <li><b>🟢 已分类</b>：图片已成功分类到某个类别</li>
+        <li><b>🔴 已移出</b>：图片已移动到移出目录</li>
+        <li><b>🟡 未处理</b>：尚未分类的图片</li>
+        <li><b>📊 进度显示</b>：底部状态栏显示处理进度</li>
+        </ul>
+        
+        <h4>📈 实时统计</h4>
+        <ul>
+        <li><b>总数统计</b>：显示图片总数和处理进度</li>
+        <li><b>类别统计</b>：每个类别的图片数量</li>
+        <li><b>效率统计</b>：分类速度和剩余时间估计</li>
+        </ul>
+        
+        <h3>� 同步与刷新</h3>
+        <ul>
+        <li><b>自动同步</b>：程序会定期检测外部文件变化</li>
+        <li><b>手动刷新</b>：按 F5 键立即同步文件状态</li>
+        <li><b>智能检测</b>：检测新增、删除、移动的文件</li>
+        <li><b>状态保存</b>：工作状态自动保存，重启后恢复</li>
+        </ul>
+        
+        <h3>⚙️ 高级设置</h3>
+        <ul>
+        <li><b>主题切换</b>：支持亮色/暗色主题</li>
+        <li><b>性能优化</b>：针对大量图片的性能优化</li>
+        <li><b>网络优化</b>：SMB/NAS网络存储专项优化</li>
+        <li><b>缓存管理</b>：智能图片缓存提高浏览速度</li>
+        </ul>
+        '''
+        
+        text_browser.setHtml(help_text)
+        layout.addWidget(text_browser)
+        
+        return widget
+        
+    def create_advanced_tab(self):
+        """创建高级功能标签页"""
+        from PyQt6.QtWidgets import QWidget, QTextBrowser
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        text_browser = QTextBrowser()
+        
+        advanced_text = '''
+        <h2>⚡ 高级功能详解</h2>
+        
+        <h3>🔧 批量操作</h3>
+        <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <h4>📋 批量分类</h4>
+        <ul>
+        <li><b>多选图片</b>：按住 Ctrl 点击多张图片进行选择</li>
+        <li><b>范围选择</b>：按住 Shift 点击选择连续范围</li>
+        <li><b>全选操作</b>：Ctrl + A 选择所有未分类图片</li>
+        <li><b>批量分类</b>：选中多张图片后双击类别按钮</li>
+        </ul>
+        
+        <h4>🏷️ 批量类别管理</h4>
+        <ul>
+        <li><b>批量添加</b>：输入多个类别名，用逗号分隔</li>
+        <li><b>导入类别</b>：从文本文件导入类别列表</li>
+        <li><b>导出类别</b>：将当前类别列表导出为文本文件</li>
+        <li><b>模板应用</b>：保存常用类别组合为模板</li>
+        </ul>
+        </div>
+        
+        <h3>🎨 自定义功能</h3>
+        <div style="background-color: #fff8e1; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <h4>⌨️ 快捷键自定义</h4>
+        <ul>
+        <li><b>数字键</b>：1-9 对应前9个类别</li>
+        <li><b>字母键</b>：a-z 可自定义对应不同类别</li>
+        <li><b>功能键</b>：F1-F12 可绑定特殊操作</li>
+        <li><b>组合键</b>：支持 Ctrl、Alt、Shift 组合</li>
+        </ul>
+        
+        <h4>🎭 界面定制</h4>
+        <ul>
+        <li><b>主题选择</b>：亮色主题、暗色主题</li>
+        <li><b>布局调整</b>：左右布局、上下布局</li>
+        <li><b>按钮大小</b>：小、中、大三种尺寸</li>
+        <li><b>字体设置</b>：自定义界面字体和大小</li>
+        </ul>
+        </div>
+        
+        <h3>🌐 网络存储优化</h3>
+        <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <h4>📡 SMB/NAS 支持</h4>
+        <ul>
+        <li><b>网络路径</b>：支持 \\\\server\\share 格式</li>
+        <li><b>连接池</b>：维护网络连接池提高效率</li>
+        <li><b>断线重连</b>：自动检测并重新连接网络</li>
+        <li><b>缓存优化</b>：智能缓存网络图片</li>
+        </ul>
+        
+        <h4>🚀 性能优化</h4>
+        <ul>
+        <li><b>预加载</b>：提前加载下一张图片</li>
+        <li><b>内存管理</b>：智能释放不需要的图片内存</li>
+        <li><b>多线程</b>：后台线程处理文件操作</li>
+        <li><b>进度缓存</b>：缓存处理进度避免重复扫描</li>
+        </ul>
+        </div>
+        
+        <h3>🔄 同步与备份</h3>
+        <div style="background-color: #fce4ec; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <h4>📂 文件同步</h4>
+        <ul>
+        <li><b>实时监控</b>：监控目录变化自动更新</li>
+        <li><b>增量同步</b>：只处理变化的文件</li>
+        <li><b>冲突解决</b>：智能处理文件名冲突</li>
+        <li><b>回滚功能</b>：支持撤销最近的分类操作</li>
+        </ul>
+        
+        <h4>💾 状态备份</h4>
+        <ul>
+        <li><b>自动保存</b>：定期保存工作状态</li>
+        <li><b>手动备份</b>：导出当前分类状态</li>
+        <li><b>状态恢复</b>：从备份文件恢复工作状态</li>
+        <li><b>历史记录</b>：保留最近10次分类操作记录</li>
+        </ul>
+        </div>
+        
+        <h3>🔍 图片分析</h3>
+        <div style="background-color: #f3e5f5; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <h4>📊 图片信息</h4>
+        <ul>
+        <li><b>EXIF 数据</b>：显示拍摄时间、相机信息等</li>
+        <li><b>文件属性</b>：大小、分辨率、格式信息</li>
+        <li><b>色彩分析</b>：主色调、亮度、对比度分析</li>
+        <li><b>相似度检测</b>：识别相似或重复图片</li>
+        </ul>
+        
+        <h4>🤖 智能辅助</h4>
+        <ul>
+        <li><b>自动建议</b>：基于文件名和路径建议类别</li>
+        <li><b>批量命名</b>：智能批量重命名功能</li>
+        <li><b>格式转换</b>：支持图片格式转换</li>
+        <li><b>大小调整</b>：批量调整图片尺寸</li>
+        </ul>
+        </div>
+        '''
+        
+        text_browser.setHtml(advanced_text)
+        layout.addWidget(text_browser)
+        
+        return widget
+        
+    def create_faq_tab(self):
+        """创建常见问题标签页"""
+        from PyQt6.QtWidgets import QWidget, QTextBrowser
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        text_browser = QTextBrowser()
+        
+        faq_text = '''
+        <h2>❓ 常见问题解答</h2>
+        
+        <h3>🚀 启动和安装</h3>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #007bff;">
+        <h4>Q: 程序无法启动，显示模块导入错误？</h4>
+        <p><b>A:</b> 请确保已安装 Python 3.8+ 和所有依赖包。运行 <code>pip install -r requirements.txt</code> 安装依赖。</p>
+        
+        <h4>Q: 在 Windows 上双击 .py 文件无反应？</h4>
+        <p><b>A:</b> 确保 Python 已正确安装并关联 .py 文件。建议在命令行中运行 <code>python main.py</code>。</p>
+        </div>
+        
+        <h3>📁 文件和目录</h3>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #28a745;">
+        <h4>Q: 程序支持哪些图片格式？</h4>
+        <p><b>A:</b> 支持 JPG、JPEG、PNG、BMP、GIF、TIFF 等常见格式，区分大小写。</p>
+        
+        <h4>Q: 可以处理子目录中的图片吗？</h4>
+        <p><b>A:</b> 是的，程序会递归扫描选定目录下的所有子目录，自动发现图片文件。</p>
+        
+        <h4>Q: 分类后的图片存储在哪里？</h4>
+        <p><b>A:</b> 在原目录下创建以类别名命名的文件夹，图片会复制或移动到相应文件夹中。</p>
+        
+        <h4>Q: 删除的图片会永久消失吗？</h4>
+        <p><b>A:</b> 不会，删除的图片会移动到 "_removed" 文件夹中，可以手动恢复。</p>
+        </div>
+        
+        <h3>🖼️ 图片显示和操作</h3>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #ffc107;">
+        <h4>Q: 图片显示很慢或模糊？</h4>
+        <p><b>A:</b> 对于大图片，程序会自动优化显示。可以在设置中启用"性能优化模式"。</p>
+        
+        <h4>Q: 如何查看图片的详细信息？</h4>
+        <p><b>A:</b> 右键图片区域或按 Alt+I 查看图片的 EXIF 信息和文件属性。</p>
+        
+        <h4>Q: 缩放后图片位置错乱？</h4>
+        <p><b>A:</b> 按 F 键重置为适应窗口模式，或按 Ctrl+0 显示原始大小。</p>
+        </div>
+        
+        <h3>⚙️ 分类和管理</h3>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #dc3545;">
+        <h4>Q: 复制模式和移动模式有什么区别？</h4>
+        <p><b>A:</b> 复制模式保留原文件并创建副本；移动模式直接移动文件到目标位置。</p>
+        
+        <h4>Q: 可以批量分类多张图片吗？</h4>
+        <p><b>A:</b> 可以，按住 Ctrl 选择多张图片，然后双击类别按钮进行批量分类。</p>
+        
+        <h4>Q: 如何撤销错误的分类操作？</h4>
+        <p><b>A:</b> 按 Ctrl+Z 撤销最近的操作，或手动从目标文件夹移回图片。</p>
+        
+        <h4>Q: 类别名称有长度限制吗？</h4>
+        <p><b>A:</b> 类别名称最长50个字符，支持中英文和常见符号，但不能包含文件系统禁用字符。</p>
+        </div>
+        
+        <h3>🌐 网络存储</h3>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #6f42c1;">
+        <h4>Q: 支持网络驱动器（NAS）吗？</h4>
+        <p><b>A:</b> 支持，但建议启用"网络路径优化"设置以提高性能。</p>
+        
+        <h4>Q: 网络断开后程序崩溃？</h4>
+        <p><b>A:</b> 程序有断线重连机制，但建议保持网络稳定。可以在设置中调整重试次数。</p>
+        
+        <h4>Q: SMB 共享访问很慢？</h4>
+        <p><b>A:</b> 启用"SMB缓存优化"，程序会缓存常用图片以提高访问速度。</p>
+        </div>
+        
+        <h3>🔧 性能和优化</h3>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #20c997;">
+        <h4>Q: 处理大量图片时程序卡顿？</h4>
+        <p><b>A:</b> 启用"性能优化模式"，程序会减少动画效果和预加载数量。</p>
+        
+        <h4>Q: 内存占用过高？</h4>
+        <p><b>A:</b> 程序会自动管理内存，也可以手动清理缓存（帮助对话框中的清理按钮）。</p>
+        
+        <h4>Q: 如何清理程序产生的缓存？</h4>
+        <p><b>A:</b> 在帮助对话框中点击"清理SMB缓存"按钮，或手动删除用户目录下的 .image_classifier_cache 文件夹。</p>
+        </div>
+        
+        <h3>❗ 故障排除</h3>
+        <div style="background-color: #fff3cd; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #856404;">
+        <h4>🔍 常见问题诊断步骤</h4>
+        <ol>
+        <li><b>检查日志</b>：查看 logs/image_classifier.log 了解错误详情</li>
+        <li><b>重启程序</b>：简单重启通常能解决临时问题</li>
+        <li><b>清理缓存</b>：清理程序缓存解决数据冲突</li>
+        <li><b>检查权限</b>：确保对目标目录有读写权限</li>
+        <li><b>更新程序</b>：下载最新版本获得 bug 修复</li>
+        </ol>
+        
+        <h4>📞 获取帮助</h4>
+        <p>如果问题仍未解决，请将错误日志和操作步骤通过以下方式反馈：<br>
+        • 创建 GitHub Issue 描述问题<br>
+        • 发送错误日志到开发者邮箱<br>
+        • 在用户社区寻求帮助</p>
+        </div>
+        '''
+        
+        text_browser.setHtml(faq_text)
+        layout.addWidget(text_browser)
+        
+        return widget
+        
+    def create_about_tab(self):
+        """创建关于标签页"""
+        from PyQt6.QtWidgets import QWidget, QTextBrowser
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        text_browser = QTextBrowser()
+        
+        about_text = f'''
+        <h2>📱 图片分类工具 v{self.version}</h2>
+        
+        <div style="text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
+        <h3 style="margin: 0; color: white;">🎯 专业图片分类管理工具</h3>
+        <p style="margin: 10px 0 0 0; opacity: 0.9;">提高图片整理效率，让分类工作更简单</p>
+        </div>
+        
+        <h3>✨ 核心特性</h3>
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+        <div>
+        <h4 style="color: #2196f3; margin: 0 0 10px 0;">🖼️ 图片处理</h4>
+        <ul style="margin: 0; padding-left: 20px;">
+        <li>支持多种常见图片格式</li>
+        <li>智能图片预览和缩放</li>
+        <li>拖拽移动查看细节</li>
+        <li>EXIF信息显示</li>
+        </ul>
+        </div>
+        <div>
+        <h4 style="color: #4caf50; margin: 0 0 10px 0;">� 文件管理</h4>
+        <ul style="margin: 0; padding-left: 20px;">
+        <li>复制/移动双模式操作</li>
+        <li>批量分类处理</li>
+        <li>智能类别管理</li>
+        <li>自动状态同步</li>
+        </ul>
+        </div>
+        <div>
+        <h4 style="color: #ff9800; margin: 0 0 10px 0;">⌨️ 操作体验</h4>
+        <ul style="margin: 0; padding-left: 20px;">
+        <li>丰富的快捷键支持</li>
+        <li>自定义快捷键设置</li>
+        <li>直观的状态提示</li>
+        <li>实时进度跟踪</li>
+        </ul>
+        </div>
+        <div>
+        <h4 style="color: #9c27b0; margin: 0 0 10px 0;">� 性能优化</h4>
+        <ul style="margin: 0; padding-left: 20px;">
+        <li>网络存储优化</li>
+        <li>智能缓存机制</li>
+        <li>多线程处理</li>
+        <li>内存自动管理</li>
+        </ul>
+        </div>
+        </div>
+        </div>
+        
+        <h3>🛠️ 技术架构</h3>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #ddd;">
+        <tr style="background-color: #f8f9fa;">
+        <th style="width: 30%; padding: 8px; border: 1px solid #ddd;">技术栈</th>
+        <th style="width: 35%; padding: 8px; border: 1px solid #ddd;">版本/库</th>
+        <th style="width: 35%; padding: 8px; border: 1px solid #ddd;">说明</th>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><b>开发语言</b></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">Python 3.8+</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">主要开发语言</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><b>界面框架</b></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">PyQt6</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">现代化GUI框架</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><b>图像处理</b></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">OpenCV + Pillow</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">图片加载和处理</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><b>数据存储</b></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">JSON</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">配置和状态存储</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><b>日志系统</b></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">Python logging</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">错误跟踪和调试</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;"><b>多线程</b></td>
+        <td style="padding: 8px; border: 1px solid #ddd;">QThread</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">后台任务处理</td>
+        </tr>
+        </table>
+        
+        <h3>📈 版本发展历程</h3>
+        <div style="margin: 20px 0;">
+        
+        <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #4caf50;">
+        <h4 style="color: #2e7d32; margin: 0 0 10px 0;">🎉 v5.0.0 (当前版本) - 2025年1月</h4>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+        <li><b>✨ 全新UI设计</b>：现代化界面，支持亮暗双主题</li>
+        <li><b>🖼️ 图片浏览增强</b>：3倍缩放限制，拖拽移动优化</li>
+        <li><b>📖 帮助系统重构</b>：多标签页详细文档</li>
+        <li><b>⚡ 性能大幅提升</b>：网络存储优化，智能缓存</li>
+        <li><b>🔧 工具栏简化</b>：移除冗余按钮，专注核心功能</li>
+        </ul>
+        </div>
+        
+        <div style="background-color: #fff3e0; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #ff9800;">
+        <h4 style="color: #ef6c00; margin: 0 0 10px 0;">🔧 v4.2.0 - 2024年12月</h4>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+        <li>重新设计工具栏布局，提高易用性</li>
+        <li>增加快捷键展示功能</li>
+        <li>实现标签页帮助系统</li>
+        <li>修复批量操作的性能问题</li>
+        </ul>
+        </div>
+        
+        <div style="background-color: #f3e5f5; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #9c27b0;">
+        <h4 style="color: #7b1fa2; margin: 0 0 10px 0;">🎨 v4.1.0 - 2024年11月</h4>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+        <li>优化UI界面美观度</li>
+        <li>修复快捷键冲突问题</li>
+        <li>增强用户交互体验</li>
+        <li>添加状态栏信息显示</li>
+        </ul>
+        </div>
+        
+        <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #2196f3;">
+        <h4 style="color: #1976d2; margin: 0 0 10px 0;">🚀 v4.0.0 - 2024年10月</h4>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+        <li>新增图像缩放和拖拽功能</li>
+        <li>实现智能文件同步</li>
+        <li>大幅性能优化</li>
+        <li>添加网络存储支持</li>
+        </ul>
+        </div>
+        
+        <div style="background-color: #fce4ec; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #e91e63;">
+        <h4 style="color: #c2185b; margin: 0 0 10px 0;">📦 v3.x.x - 2024年初</h4>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+        <li>基础图片分类功能</li>
+        <li>快捷键支持</li>
+        <li>简单的UI界面</li>
+        <li>基本的文件操作</li>
+        </ul>
+        </div>
+        
+        </div>
+        
+        <h3>🎯 开发规划</h3>
+        <div style="background-color: #e8eaf6; padding: 15px; border-radius: 8px; margin: 10px 0;">
+        <h4 style="color: #3f51b5;">🚧 即将推出 (v5.1.0)</h4>
+        <ul>
+        <li>🤖 AI智能分类建议</li>
+        <li>🔍 图片相似度检测</li>
+        <li>📊 更丰富的统计报告</li>
+        <li>🌍 多语言界面支持</li>
+        </ul>
+        
+        <h4 style="color: #3f51b5;">🎯 长期目标</h4>
+        <ul>
+        <li>☁️ 云存储集成</li>
+        <li>🔄 跨平台同步</li>
+        <li>📱 移动端配套应用</li>
+        <li>🧠 机器学习增强</li>
+        </ul>
+        </div>
+        
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; margin: 30px 0;">
+        <h3 style="margin: 0 0 15px 0; color: white;">📝 版权信息</h3>
+        <p style="margin: 5px 0; opacity: 0.9;"><b>© 2025 图片分类工具开发团队</b></p>
+        <p style="margin: 5px 0; opacity: 0.9;">专注于提升图片管理效率的专业软件</p>
+        <p style="margin: 15px 0 5px 0; opacity: 0.8; font-size: 14px;">
+        本软件遵循 MIT 开源协议<br>
+        感谢所有贡献者和用户的支持
+        </p>
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.3);">
+        <span style="opacity: 0.8; font-size: 13px;">
+        🌟 让图片整理变得简单高效 🌟
+        </span>
+        </div>
+        </div>
+        '''
+        
+        text_browser.setHtml(about_text)
+        layout.addWidget(text_browser)
+        
+        return widget
+
+
+class ProgressDialog(QDialog):
+    """增强的进度对话框，支持取消和详细信息"""
+    cancelled = pyqtSignal()
+    
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        self.cancelled_flag = False
+        self._force_closed = False  # 添加强制关闭标志
+        self.logger = logging.getLogger(__name__)
+        
+        layout = QVBoxLayout(self)
+        
+        # 主要进度信息
+        self.main_label = QLabel("正在处理...")
+        layout.addWidget(self.main_label)
+        
+        # 进度条
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        layout.addWidget(self.progress_bar)
+        
+        # 详细信息
+        self.detail_label = QLabel("")
+        self.detail_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(self.detail_label)
+        
+        # 取消按钮
+        button_layout = QHBoxLayout()
+        self.cancel_button = QPushButton("取消")
+        self.cancel_button.clicked.connect(self.cancel_operation)
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+        
+        # 设置样式
+        self.setStyleSheet("""
+            QDialog {
+                background-color: white;
+            }
+            QLabel {
+                padding: 4px;
+            }
+            QProgressBar {
+                text-align: center;
+                min-height: 20px;
+            }
+            QPushButton {
+                padding: 6px 20px;
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        
+    def update_progress(self, value, maximum=100):
+        """更新进度"""
+        try:
+            self.progress_bar.setMaximum(maximum)
+            self.progress_bar.setValue(value)
+        except Exception as e:
+            self.logger.error(f"更新进度失败: {e}")
+        
+    def update_main_text(self, text):
+        """更新主要文本"""
+        try:
+            self.main_label.setText(text)
+        except Exception as e:
+            self.logger.error(f"更新主要文本失败: {e}")
+        
+    def update_detail_text(self, text):
+        """更新详细信息"""
+        try:
+            self.detail_label.setText(text)
+        except Exception as e:
+            self.logger.error(f"更新详细信息失败: {e}")
+        
+    def cancel_operation(self):
+        """取消操作"""
+        try:
+            self.cancelled_flag = True
+            self.cancelled.emit()
+            self.cancel_button.setEnabled(False)
+            self.cancel_button.setText("正在取消...")
+        except Exception as e:
+            self.logger.error(f"取消操作失败: {e}")
+        
+    def force_close(self):
+        """强制关闭对话框"""
+        self._force_closed = True
+        self.close()
+        
+    def is_cancelled(self):
+        """检查是否已取消"""
+        return self.cancelled_flag
+        
+    def closeEvent(self, event):
+        """重写关闭事件"""
+        if self._force_closed:
+            event.accept()
+        else:
+            # 正常情况下需要等待操作完成
+            event.accept()
+
+
+class SettingsDialog(QDialog):
+    """设置对话框"""
+    
+    def __init__(self, current_theme='light', parent=None):
+        super().__init__(parent)
+        self.current_theme = current_theme
+        self.selected_theme = current_theme
+        self.logger = logging.getLogger(__name__)
+        self.initUI()
+        
+    def initUI(self):
+        """初始化UI"""
+        try:
+            self.setWindowTitle('程序设置')
+            self.setMinimumSize(400, 300)
+            self.setModal(True)
+            
+            # 设置程序图标
+            try:
+                icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
+                if icon_path.exists():
+                    from PyQt6.QtGui import QIcon
+                    self.setWindowIcon(QIcon(str(icon_path)))
+            except Exception:
+                pass
+            
+            layout = QVBoxLayout(self)
+            
+            # 主题设置组
+            theme_group = self.create_theme_group()
+            layout.addWidget(theme_group)
+            
+            # 其他设置组
+            other_group = self.create_other_settings_group()
+            layout.addWidget(other_group)
+            
+            # 添加伸缩空间
+            layout.addStretch()
+            
+            # 按钮组
+            button_layout = QHBoxLayout()
+            
+            # 重置按钮
+            reset_btn = QPushButton('重置默认')
+            reset_btn.clicked.connect(self.reset_to_defaults)
+            button_layout.addWidget(reset_btn)
+            
+            button_layout.addStretch()
+            
+            # 取消和确定按钮
+            cancel_btn = QPushButton('取消')
+            cancel_btn.clicked.connect(self.reject)
+            button_layout.addWidget(cancel_btn)
+            
+            ok_btn = QPushButton('确定')
+            ok_btn.clicked.connect(self.accept)
+            ok_btn.setDefault(True)
+            button_layout.addWidget(ok_btn)
+            
+            layout.addLayout(button_layout)
+            
+            # 设置样式
+            self.apply_light_theme()  # 默认亮主题
+            
+        except Exception as e:
+            self.logger.error(f"初始化设置对话框UI失败: {e}")
+    
+    def apply_light_theme(self):
+        """应用亮主题"""
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #FFFFFF;
+                color: #2C3E50;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #E1E8ED;
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+                background-color: #F8F9FA;
+                color: #2C3E50;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #495057;
+            }
+            QRadioButton {
+                padding: 8px;
+                font-size: 14px;
+                color: #2C3E50;
+            }
+            QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #3498DB;
+                border: 3px solid #FFFFFF;
+                border-radius: 9px;
+            }
+            QRadioButton::indicator:unchecked {
+                background-color: #FFFFFF;
+                border: 2px solid #BDC3C7;
+                border-radius: 9px;
+            }
+            QCheckBox {
+                padding: 8px;
+                font-size: 14px;
+                color: #2C3E50;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #3498DB;
+                border: 2px solid #3498DB;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:unchecked {
+                background-color: #FFFFFF;
+                border: 2px solid #BDC3C7;
+                border-radius: 3px;
+            }
+            QLabel {
+                font-size: 13px;
+                color: #6C757D;
+            }
+            QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 20px;
+                font-size: 14px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QPushButton:pressed {
+                background-color: #21618C;
+            }
+            QPushButton:default {
+                background-color: #27AE60;
+            }
+            QPushButton:default:hover {
+                background-color: #229954;
+            }
+        """)
+    
+    def apply_dark_theme(self):
+        """应用暗主题"""
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1E1E1E;
+                color: #E0E0E0;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #3E3E42;
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+                background-color: #2D2D30;
+                color: #E0E0E0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #FF9800;
+                font-weight: bold;
+            }
+            QRadioButton {
+                padding: 8px;
+                font-size: 14px;
+                color: #E0E0E0;
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #3E3E42;
+                border-radius: 8px;
+                background-color: #2D2D30;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #FF9800;
+                border-color: #FFB74D;
+            }
+            QCheckBox {
+                padding: 8px;
+                font-size: 14px;
+                color: #E0E0E0;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #3E3E42;
+                border-radius: 3px;
+                background-color: #2D2D30;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #FF9800;
+                border-color: #FFB74D;
+            }
+            QLabel {
+                color: #E0E0E0;
+                background-color: transparent;
+            }
+            QPushButton {
+                background-color: #FF9800;
+                color: #000000;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #FFB74D;
+            }
+            QPushButton:pressed {
+                background-color: #F57C00;
+            }
+            QPushButton:disabled {
+                background-color: #404040;
+                color: #808080;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #3E3E42;
+                height: 6px;
+                background-color: #252526;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background-color: #FF9800;
+                border: 1px solid #FFB74D;
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                margin: -5px 0;
+            }
+            QComboBox {
+                background-color: #2D2D30;
+                border: 1px solid #3E3E42;
+                border-radius: 4px;
+                padding: 5px 10px;
+                color: #E0E0E0;
+            }
+            QComboBox:hover {
+                border-color: #FF9800;
+            }
+            QComboBox::drop-down {
+                border: none;
+                background-color: #252526;
+                border-radius: 4px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2D2D30;
+                border: 1px solid #3E3E42;
+                color: #E0E0E0;
+                selection-background-color: #FF9800;
+                selection-color: #000000;
+            }
+        """)
+
+    def create_theme_group(self):
+        """创建主题设置组"""
+        from PyQt6.QtWidgets import QGroupBox, QRadioButton, QButtonGroup
+        
+        group = QGroupBox("主题设置")
+        layout = QVBoxLayout(group)
+        
+        # 创建单选按钮组
+        self.theme_button_group = QButtonGroup(self)
+        
+        # 亮主题选项
+        self.light_radio = QRadioButton("🌞 亮主题")
+        self.light_radio.setChecked(self.current_theme == 'light')
+        self.theme_button_group.addButton(self.light_radio, 0)
+        layout.addWidget(self.light_radio)
+        
+        # 暗主题选项
+        self.dark_radio = QRadioButton("🌙 暗主题")
+        self.dark_radio.setChecked(self.current_theme == 'dark')
+        self.theme_button_group.addButton(self.dark_radio, 1)
+        layout.addWidget(self.dark_radio)
+        
+        # 连接信号
+        self.theme_button_group.buttonClicked.connect(self.on_theme_changed)
+        
+        # 添加说明
+        info_label = QLabel("💡 选择您喜欢的界面主题，设置会立即保存")
+        info_label.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
+        layout.addWidget(info_label)
+        
+        return group
+    
+    def create_other_settings_group(self):
+        """创建其他设置组"""
+        from PyQt6.QtWidgets import QGroupBox, QCheckBox
+        
+        group = QGroupBox("其他设置")
+        layout = QVBoxLayout(group)
+        
+        # 性能优化选项
+        self.performance_checkbox = QCheckBox("🚀 启用性能优化模式")
+        self.performance_checkbox.setToolTip("启用后会减少动画效果，提高响应速度")
+        self.performance_checkbox.setChecked(True)  # 默认启用
+        layout.addWidget(self.performance_checkbox)
+        
+        # 自动保存选项
+        self.auto_save_checkbox = QCheckBox("💾 自动保存分类状态")
+        self.auto_save_checkbox.setToolTip("每次分类操作后自动保存状态")
+        self.auto_save_checkbox.setChecked(True)  # 默认启用
+        layout.addWidget(self.auto_save_checkbox)
+        
+        # 缓存优化选项
+        self.cache_optimization_checkbox = QCheckBox("⚡ 智能缓存优化")
+        self.cache_optimization_checkbox.setToolTip("启用智能图片缓存，提高浏览速度")
+        self.cache_optimization_checkbox.setChecked(True)  # 默认启用
+        layout.addWidget(self.cache_optimization_checkbox)
+        
+        # 网络路径优化
+        self.network_optimization_checkbox = QCheckBox("🌐 网络路径优化")
+        self.network_optimization_checkbox.setToolTip("针对SMB/NAS网络存储进行专项优化")
+        self.network_optimization_checkbox.setChecked(True)  # 默认启用
+        layout.addWidget(self.network_optimization_checkbox)
+        
+        # 添加说明
+        info_label = QLabel("ℹ️ 这些优化选项建议保持启用以获得最佳体验")
+        info_label.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px;")
+        layout.addWidget(info_label)
+        
+        return group
+    
+    def on_theme_changed(self, button):
+        """主题选择改变时的处理"""
+        if button == self.light_radio:
+            self.selected_theme = 'light'
+        elif button == self.dark_radio:
+            self.selected_theme = 'dark'
+    
+    def reset_to_defaults(self):
+        """重置为默认设置"""
+        # 重置主题为亮主题
+        self.light_radio.setChecked(True)
+        self.selected_theme = 'light'
+        
+        # 重置其他选项为默认值
+        self.performance_checkbox.setChecked(True)
+        self.auto_save_checkbox.setChecked(True)
+        self.cache_optimization_checkbox.setChecked(True)
+        self.network_optimization_checkbox.setChecked(True)
+        
+        # 显示提示
+        self._show_info_message("重置完成", "所有设置已重置为默认值")
+    
+    def get_selected_theme(self):
+        """获取选择的主题"""
+        return self.selected_theme
+    
+    def _show_info_message(self, title, text):
+        """显示信息提示"""
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QIcon
+        
+        msgBox = QMessageBox(self)
+        msgBox.setIcon(QMessageBox.Icon.Information)
+        msgBox.setWindowTitle(title)
+        msgBox.setText(text)
+        
+        # 设置程序图标
+        try:
+            icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
+            if icon_path.exists():
+                msgBox.setWindowIcon(QIcon(str(icon_path)))
+        except Exception:
+            pass
+        
+        # 设置样式
+        msgBox.setStyleSheet("""
+            QMessageBox {
+                background-color: #F8F9FA;
+                color: #2C3E50;
+            }
+            QMessageBox QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #2980B9;
+            }
+        """)
+        
+        # 中文化按钮
+        msgBox.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msgBox.button(QMessageBox.StandardButton.Ok).setText("确定")
+        
+        msgBox.exec()
