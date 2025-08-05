@@ -13,13 +13,18 @@ def main():
     """启动图像分类工具"""
     # 获取脚本所在目录
     script_dir = Path(__file__).parent.absolute()
+    parent_dir = script_dir.parent
     
-    # 设置工作目录为项目根目录
+    # 将父目录添加到Python路径，这样可以作为包导入
+    if str(parent_dir) not in sys.path:
+        sys.path.insert(0, str(parent_dir))
+    
+    # 设置工作目录
     os.chdir(script_dir)
     
     try:
-        # 直接导入main模块（在同一目录下）
-        from main import main as app_main
+        # 作为包导入和运行
+        from image_classifier.main import main as app_main  # type: ignore
         return app_main()
     except ImportError as e:
         print(f"导入错误: {e}")

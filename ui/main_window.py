@@ -219,10 +219,7 @@ class ImageClassifier(QMainWindow):
             
             # 创建状态栏
             self.create_status_bar()
-            
-            # 应用默认亮主题
-            self.apply_light_theme()
-            
+
             self.logger.info("用户界面初始化完成")
             
         except Exception as e:
@@ -886,16 +883,62 @@ class ImageClassifier(QMainWindow):
     def _delayed_start_sync(self):
         """延迟启动同步操作，确保不阻塞UI"""
         try:
-            if self.categories:
+            if self.categories and hasattr(self, 'file_manager'):
                 self.logger.info("🔄 开始后台同步操作...")
                 self.statusBar.showMessage("🔄 后台同步分类状态中...")
-                # 这里应该调用文件同步方法
-                # self.start_background_sync(quick_mode=True)
+                
+                # 连接同步完成信号
+                if hasattr(self.file_manager, 'file_sync'):
+                    self.file_manager.file_sync.sync_completed.connect(self._on_sync_completed)
+                    self.file_manager.file_sync.sync_progress.connect(self._on_sync_progress)
+                
+                # 启动真正的同步操作
+                try:
+                    self.file_manager.start_background_sync(
+                        self.current_dir, 
+                        self.categories, 
+                        self.classified_images, 
+                        self.removed_images, 
+                        quick_mode=True
+                    )
+                except Exception as sync_error:
+                    self.logger.error(f"启动同步失败: {sync_error}")
+                    self._update_status_with_current_image()
             else:
-                self.logger.debug("无类别，跳过文件同步")
+                self.logger.debug("无类别或文件管理器，跳过文件同步")
+                self._update_status_with_current_image()
         except Exception as e:
             self.logger.error(f"延迟同步启动失败: {e}")
             self.statusBar.showMessage("❌ 同步启动失败，请查看日志")
+    
+    def _on_sync_completed(self, result):
+        """同步完成回调"""
+        try:
+            self.logger.info("后台同步操作完成")
+            self._update_status_with_current_image()
+        except Exception as e:
+            self.logger.error(f"处理同步完成回调失败: {e}")
+    
+    def _on_sync_progress(self, message):
+        """同步进度回调"""
+        try:
+            # 更新状态栏显示同步进度
+            self.statusBar.showMessage(f"🔄 {message}")
+        except Exception as e:
+            self.logger.error(f"处理同步进度回调失败: {e}")
+    
+    def _update_status_with_current_image(self):
+        """使用当前图片信息更新状态栏"""
+        try:
+            if self.image_files and 0 <= self.current_index < len(self.image_files):
+                current_image = self.image_files[self.current_index]
+                image_name = Path(current_image).name
+                self.statusBar.showMessage(f"📷 {image_name}")
+            else:
+                self.statusBar.showMessage("✅ 图片分类工具已就绪")
+        except Exception as e:
+            self.logger.error(f"更新状态栏失败: {e}")
+            self.statusBar.showMessage("✅ 图片分类工具已就绪")
     
     def load_images(self):
         """开始智能加载目录下的图片"""
@@ -1170,10 +1213,7 @@ class ImageClassifier(QMainWindow):
         # 按排序后的顺序添加按钮
         for category_name in self.ordered_categories:
             try:
-                btn = CategoryButton(category_name, self.config)
-                
-                # 为新按钮应用亮主题
-                btn.apply_light_theme()
+                btn = CategoryButton(category_name, self.config)         
                 
                 # 设置按钮为可切换状态，支持选中显示
                 btn.setCheckable(True)
@@ -1375,9 +1415,8 @@ class ImageClassifier(QMainWindow):
                 # 恢复分类模式状态
                 saved_multi_category = state.get('is_multi_category', False)  # 默认为单分类模式
                 self.is_multi_category = saved_multi_category
-                if hasattr(self, 'category_mode_button'):
-                    mode_text = "🔀 多分类模式" if self.is_multi_category else "🔂 单分类模式"
-                    self.category_mode_button.setText(mode_text)
+                # 延迟更新按钮状态，确保UI组件已完全初始化
+                QTimer.singleShot(10, lambda: self._update_category_mode_button_state())
                 
                 modes = []
                 if saved_copy_mode:
@@ -1394,31 +1433,26 @@ class ImageClassifier(QMainWindow):
                 self.logger.debug(f"状态文件路径: {state_file}")
             else:
                 self.logger.info("状态文件不存在，使用空状态")
+                # 确保按钮状态正确（默认单分类模式）
+                self.is_multi_category = False
+                QTimer.singleShot(10, lambda: self._update_category_mode_button_state())
                 
         except Exception as e:
             self.logger.error(f"加载状态失败: {e}")
     
-    def save_state(self):
-        """保存分类状态"""
+    def _update_category_mode_button_state(self):
+        """更新分类模式按钮状态"""
         try:
-            state = {
-                'classified_images': self.classified_images,
-                'removed_images': list(self.removed_images),
-                'is_copy_mode': self.is_copy_mode,
-                'is_multi_category': self.is_multi_category
-            }
-            
-            state_file = self.config.get_state_file_path()
-            state_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            import json
-            with open(state_file, 'w', encoding='utf-8') as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-                
-            self.logger.debug("状态保存完成")
-            
+            if hasattr(self, 'category_mode_button') and self.category_mode_button:
+                mode_text = "🔀 多分类模式" if self.is_multi_category else "🔂 单分类模式"
+                self.category_mode_button.setText(mode_text)
+                self.logger.debug(f"分类模式按钮状态已更新: {mode_text}")
+            else:
+                self.logger.warning("分类模式按钮不存在，无法更新状态")
         except Exception as e:
-            self.logger.error(f"保存状态失败: {e}")
+            self.logger.error(f"更新分类模式按钮状态失败: {e}")
+    
+
     
     def init_category_counts(self):
         """初始化类别计数"""
@@ -1936,7 +1970,19 @@ class ImageClassifier(QMainWindow):
             self.refresh_category_buttons_style()  # 刷新按钮样式，确保多分类状态正确显示
             self.update_category_selection_for_current_image(current_path)
         
-        action = "重新分类" if old_category else "分类"
+        # 根据分类模式和操作类型确定日志信息
+        if self.is_multi_category:
+            # 多分类模式不使用"重新分类"概念，因为图片可以同时属于多个类别
+            current_categories = self.classified_images.get(current_path, [])
+            if isinstance(current_categories, list) and category_name in current_categories:
+                action = "添加"
+            else:
+                # 如果类别被移除了，则是"移除"操作
+                action = "移除"
+        else:
+            # 单分类模式使用"重新分类"概念
+            action = "重新分类" if old_category else "分类"
+        
         self.logger.info(f"图片已{action}到 {category_name}: {Path(current_path).name}")
     
     def _move_between_categories(self, image_path, old_category, new_category):
@@ -2255,28 +2301,56 @@ class ImageClassifier(QMainWindow):
             invalid_classifications = []
             for img_path, category in list(self.classified_images.items()):
                 img_file = Path(img_path)
-                category_dir = parent_dir / category
-                expected_file = category_dir / img_file.name
                 
-                # 检查文件是否还在预期的分类目录中
-                if not expected_file.exists():
-                    # 检查文件是否回到了原目录
-                    original_file = self.current_dir / img_file.name
-                    if original_file.exists():
-                        # 文件被移回原目录
-                        invalid_classifications.append(img_path)
-                        sync_results['moved_files'].append({
-                            'file': img_file.name,
-                            'from': category,
-                            'to': '原目录'
-                        })
-                    else:
-                        # 文件被删除或移动到其他地方
-                        invalid_classifications.append(img_path)
-                        sync_results['removed_files'].append({
-                            'file': img_file.name,
-                            'category': category
-                        })
+                # 处理多分类模式（category可能是列表）
+                if isinstance(category, list):
+                    # 多分类模式：检查每个类别
+                    categories_to_remove = []
+                    for cat in category:
+                        category_dir = parent_dir / cat
+                        expected_file = category_dir / img_file.name
+                        
+                        # 检查文件是否还在预期的分类目录中
+                        if not expected_file.exists():
+                            categories_to_remove.append(cat)
+                            sync_results['moved_files'].append({
+                                'file': img_file.name,
+                                'from': cat,
+                                'to': '已移动或删除'
+                            })
+                    
+                    # 移除不存在的类别
+                    if categories_to_remove:
+                        for cat in categories_to_remove:
+                            category.remove(cat)
+                        
+                        # 如果所有类别都被移除，则移除整个分类记录
+                        if not category:
+                            invalid_classifications.append(img_path)
+                else:
+                    # 单分类模式
+                    category_dir = parent_dir / category
+                    expected_file = category_dir / img_file.name
+                    
+                    # 检查文件是否还在预期的分类目录中
+                    if not expected_file.exists():
+                        # 检查文件是否回到了原目录
+                        original_file = self.current_dir / img_file.name
+                        if original_file.exists():
+                            # 文件被移回原目录
+                            invalid_classifications.append(img_path)
+                            sync_results['moved_files'].append({
+                                'file': img_file.name,
+                                'from': category,
+                                'to': '原目录'
+                            })
+                        else:
+                            # 文件被删除或移动到其他地方
+                            invalid_classifications.append(img_path)
+                            sync_results['removed_files'].append({
+                                'file': img_file.name,
+                                'category': category
+                            })
             
             # 移除无效的分类记录
             for img_path in invalid_classifications:
@@ -2434,6 +2508,9 @@ class ImageClassifier(QMainWindow):
         mode_desc = "多分类模式（一张图片可以同时属于多个类别）" if self.is_multi_category else "单分类模式（一张图片只能属于一个类别）"
         self.statusBar.showMessage(f"已切换为{mode_desc}")
         
+        # 保存分类模式状态
+        self.save_state()
+        
         self.logger.info(f"分类模式已切换为: {'多分类' if self.is_multi_category else '单分类'}")
 
     def fit_to_window(self):
@@ -2550,8 +2627,11 @@ class ImageClassifier(QMainWindow):
             # 使用统一的窗口标题更新方法
             self.update_window_title(image_path)
             
-            # 记录性能信息
+            # 更新状态栏显示当前图片名称
             filename = Path(image_path).name
+            self.statusBar.showMessage(f"📷 {filename}")
+            
+            # 记录性能信息
             self.log_performance_info(
                 "显示图片_完成",
                 文件=filename,
@@ -2861,7 +2941,8 @@ class ImageClassifier(QMainWindow):
                 'removed_images': list(self.removed_images),
                 'last_index': self.current_index,
                 'version': self.version,
-                'is_copy_mode': self.is_copy_mode  # 保存操作模式状态
+                'is_copy_mode': self.is_copy_mode,  # 保存操作模式状态
+                'is_multi_category': self.is_multi_category  # 保存分类模式状态
             }
             
             import json
@@ -2974,214 +3055,7 @@ class ImageClassifier(QMainWindow):
         msgBox.setDefaultButton(QMessageBox.StandardButton.No)
         return msgBox.exec()
     
-    def apply_light_theme(self):
-        """应用亮主题"""
-        light_style = """
-            QMainWindow {
-                background-color: #FFFFFF;
-                color: #2C3E50;
-            }
-            QSplitter {
-                background-color: #FFFFFF;
-            }
-            QSplitter::handle {
-                background-color: #BDC3C7;
-                border: 1px solid #95A5A6;
-                width: 4px;
-                border-radius: 2px;
-            }
-            QSplitter::handle:hover {
-                background-color: #3498DB;
-            }
-            QWidget {
-                background-color: #FFFFFF;
-                color: #2C3E50;
-            }
-            QScrollArea {
-                background-color: #FFFFFF;
-                border: 1px solid #E1E8ED;
-                border-radius: 6px;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: #FFFFFF;
-            }
-            QListWidget {
-                background-color: #FFFFFF;
-                border: 1px solid #E1E8ED;
-                border-radius: 6px;
-                color: #2C3E50;
-                selection-background-color: #3498DB;
-                alternate-background-color: #F8F9FA;
-            }
-            QListWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #F1F3F4;
-                background-color: #FFFFFF;
-                color: #2C3E50;
-                border-radius: 3px;
-                margin: 1px;
-            }
-            QListWidget::item:selected {
-                background-color: #3498DB;
-                color: white;
-                border: 2px solid #2980B9;
-                font-weight: bold;
-            }
-            QListWidget::item:hover {
-                background-color: #EBF3FD;
-                color: #1B4F72;
-                border: 1px solid #85C1E9;
-            }
-            QFrame {
-                background-color: #FFFFFF;
-                border: 1px solid #E1E8ED;
-                border-radius: 6px;
-            }
-            QGroupBox {
-                background-color: #F8F9FA;
-                border: 2px solid #E1E8ED;
-                border-radius: 8px;
-                margin-top: 10px;
-                font-weight: bold;
-                color: #2C3E50;
-                padding-top: 15px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 8px 0 8px;
-                background-color: #FFFFFF;
-                color: #2980B9;
-                border: 1px solid #E1E8ED;
-                border-radius: 3px;
-            }
-            QLabel {
-                color: #2C3E50;
-                background-color: transparent;
-            }
-            QToolBar {
-                background-color: #F8F9FA;
-                border: 1px solid #E1E8ED;
-                border-radius: 6px;
-                spacing: 8px;
-                padding: 8px;
-                margin: 2px;
-            }
-            QToolBar QToolButton {
-                background-color: #FFFFFF;
-                border: 1px solid #E1E8ED;
-                border-radius: 4px;
-                padding: 6px 12px;
-                margin: 2px;
-                font-size: 13px;
-                color: #495057;
-                font-weight: 500;
-            }
-            QToolBar QToolButton:hover {
-                background-color: #E8F4FD;
-                border-color: #3498DB;
-                color: #2980B9;
-            }
-            QToolBar QToolButton:pressed {
-                background-color: #D6EAF8;
-                border-color: #2980B9;
-            }
-            QToolBar QLabel {
-                background-color: #FFFFFF;
-                border: 1px solid #E1E8ED;
-                border-radius: 4px;
-                padding: 6px 12px;
-                color: #6C757D;
-            }
-            QStatusBar {
-                background-color: #F8F9FA;
-                color: #495057;
-                border-top: 1px solid #E1E8ED;
-                padding: 4px;
-            }
-            QPushButton {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980B9;
-            }
-            QPushButton:pressed {
-                background-color: #21618C;
-            }
-            QPushButton:disabled {
-                background-color: #BDC3C7;
-                color: #7F8C8D;
-            }
-            /* 特殊样式的删除按钮 - 使用更高优先级 */
-            QPushButton#deleteButton {
-                background-color: #dc3545 !important;
-                color: white !important;
-                border: none !important;
-                border-radius: 4px !important;
-                padding: 12px 16px !important;
-                font-size: 14px !important;
-                font-weight: bold !important;
-                margin: 8px 0px !important;
-                max-height: 50px !important;
-                min-height: 50px !important;
-            }
-            QPushButton#deleteButton:hover {
-                background-color: #c82333 !important;
-            }
-            QPushButton#deleteButton:pressed {
-                background-color: #bd2130 !important;
-            }
-            QPushButton#deleteButton:disabled {
-                background-color: #BDC3C7 !important;
-                color: #7F8C8D !important;
-            }
-            /* 消息框样式 */
-            QMessageBox {
-                background-color: #F8F9FA;
-                color: #2C3E50;
-                font-size: 14px;
-            }
-            QMessageBox QLabel {
-                color: #2C3E50;
-                font-size: 14px;
-                padding: 10px;
-            }
-            QMessageBox QPushButton {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-            }
-            QMessageBox QPushButton:hover {
-                background-color: #2980B9;
-            }
-            QMessageBox QPushButton:pressed {
-                background-color: #21618C;
-            }
-            QMessageBox QPushButton:default {
-                background-color: #27AE60;
-            }
-            QMessageBox QPushButton:default:hover {
-                background-color: #229954;
-            }
-        """
-        self.setStyleSheet(light_style)
-        
-        # 为所有CategoryButton应用亮主题
-        for i in range(self.button_layout.count()):
-            widget = self.button_layout.itemAt(i).widget()
-            if hasattr(widget, 'apply_light_theme'):
-                widget.apply_light_theme()
+
 
     def refresh_category_buttons_style(self):
         """强制刷新所有类别按钮的样式"""

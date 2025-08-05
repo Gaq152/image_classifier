@@ -74,32 +74,32 @@ class CategoryButton(QPushButton):
                 color: #1565C0;
                 font-weight: bold;
             }
-            /* 已分类状态 - 绿色背景 */
+            /* 已分类状态 - 绿色背景（多分类模式下已选中的类别）*/
             QPushButton[classified="true"] {
                 border: 1px solid #4CAF50;
                 background-color: #E8F5E8;
                 color: #2E7D32;
                 font-weight: bold;
             }
-            /* 已分类且选中状态 - 蓝绿混合 */
+            /* 已分类且当前选中状态 - 蓝色边框，绿色背景 */
             QPushButton[classified="true"]:checked {
                 border: 2px solid #2196F3;
-                background-color: #B2DFDB;
-                color: #00695C;
+                background-color: #C8E6C9;
+                color: #1B5E20;
                 font-weight: bold;
             }
-            /* 多分类状态 - 蓝色背景 */
+            /* 多分类状态 - 绿色背景（用于多分类模式下已分类的类别）*/
             QPushButton[multi_classified="true"] {
-                border: 1px solid #2196F3;
-                background-color: #E3F2FD;
-                color: #1565C0;
+                border: 1px solid #4CAF50;
+                background-color: #E8F5E8;
+                color: #2E7D32;
                 font-weight: bold;
             }
-            /* 多分类且选中状态 */
+            /* 多分类且当前选中状态 - 蓝色边框，绿色背景 */
             QPushButton[multi_classified="true"]:checked {
                 border: 2px solid #2196F3;
-                background-color: #BBDEFB;
-                color: #0D47A1;
+                background-color: #C8E6C9;
+                color: #1B5E20;
                 font-weight: bold;
             }
             /* 已移除状态 - 红色背景 */
@@ -386,140 +386,39 @@ class CategoryButton(QPushButton):
             super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        """处理双击事件"""
+        """处理双击事件 - 支持多分类模式下的选中/取消选择"""
         if not self.is_remove:
             # 获取主窗口并调用分类方法
             main_window = self.window()
             if main_window:
-                # 检查当前图片是否已经被分类到这个类别
-                if hasattr(main_window, 'image_files') and hasattr(main_window, 'current_index') and main_window.image_files:
-                    if 0 <= main_window.current_index < len(main_window.image_files):
-                        current_path = str(main_window.image_files[main_window.current_index])
-                        # 判断当前图片是否已经分类到当前类别，如果是，则不重复处理
-                        current_category = main_window.classified_images.get(current_path)
-                        
-                        # 检查是否已分类到该类别
-                        already_classified = False
-                        if isinstance(current_category, list):
-                            already_classified = self.category_name in current_category
-                        else:
-                            already_classified = current_category == self.category_name
+                # 在多分类模式下，双击可以选中或取消选择
+                if main_window.is_multi_category:
+                    # 多分类模式：双击切换选择状态
+                    main_window.move_to_category(self.category_name)
+                else:
+                    # 单分类模式：保持原有逻辑，检查是否已分类
+                    if hasattr(main_window, 'image_files') and hasattr(main_window, 'current_index') and main_window.image_files:
+                        if 0 <= main_window.current_index < len(main_window.image_files):
+                            current_path = str(main_window.image_files[main_window.current_index])
+                            current_category = main_window.classified_images.get(current_path)
                             
-                        if already_classified:
-                            main_window.logger.info(f"图片已经分类到 {self.category_name}，避免重复处理")
-                            event.accept()
-                            return
-                
-                # 如果未分类或分类到其他类别，则进行分类操作
-                main_window.move_to_category(self.category_name)
-        # 不再调用父类方法
+                            # 检查是否已分类到该类别
+                            already_classified = False
+                            if isinstance(current_category, list):
+                                already_classified = self.category_name in current_category
+                            else:
+                                already_classified = current_category == self.category_name
+                                
+                            if already_classified:
+                                main_window.logger.info(f"图片已经分类到 {self.category_name}，避免重复处理")
+                                event.accept()
+                                return
+                    
+                    # 如果未分类或分类到其他类别，则进行分类操作
+                    main_window.move_to_category(self.category_name)
         event.accept()
     
-    def apply_light_theme(self):
-        """应用亮主题"""
-        self.setStyleSheet("""
-            QPushButton {
-                font-size: 13px;
-                padding: 8px 12px;
-                border: 1px solid #E1E8ED;
-                border-radius: 6px;
-                background-color: #FFFFFF;
-                text-align: left;
-                margin: 2px 0;
-                font-weight: 500;
-                min-height: 24px;
-                color: #2C3E50;
-            }
-            QPushButton:hover {
-                border-color: #3498DB;
-                background-color: #EBF3FD;
-                color: #2980B9;
-            }
-            QPushButton:checked {
-                border: 2px solid #3498DB;
-                background-color: #D6EAF8;
-                color: #1B4F72;
-                font-weight: bold;
-            }
-            QPushButton[classified="true"] {
-                border: 2px solid #27AE60;
-                background-color: #D5EFDB;
-                color: #1E7B43;
-                font-weight: bold;
-            }
-            QPushButton[multi_classified="true"] {
-                border: 2px solid #2196F3;
-                background-color: #E3F2FD;
-                color: #1565C0;
-                font-weight: bold;
-            }
-            QPushButton[removed="true"] {
-                border: 2px solid #E74C3C;
-                background-color: #FADBD8;
-                color: #A93226;
-                font-weight: bold;
-            }
-            QLabel {
-                background: transparent;
-                border: none;
-                font-size: 13px;
-                font-weight: inherit;
-                color: inherit;
-            }
-        """)
-    
-    def apply_dark_theme(self):
-        """应用暗主题"""
-        self.setStyleSheet("""
-            QPushButton {
-                font-size: 13px;
-                padding: 8px 12px;
-                border: 1px solid #3E3E42;
-                border-radius: 6px;
-                background-color: #2D2D30;
-                text-align: left;
-                margin: 2px 0;
-                font-weight: 500;
-                min-height: 24px;
-                color: #E0E0E0;
-            }
-            QPushButton:hover {
-                border-color: #FF9800;
-                background-color: #37373D;
-                color: #FFFFFF;
-            }
-            QPushButton:checked {
-                border: 2px solid #FF9800;
-                background-color: #3E2723;
-                color: #FFE0B2;
-                font-weight: bold;
-            }
-            QPushButton[classified="true"] {
-                border: 2px solid #4CAF50;
-                background-color: #1B5E20;
-                color: #C8E6C9;
-                font-weight: bold;
-            }
-            QPushButton[multi_classified="true"] {
-                border: 2px solid #2196F3;
-                background-color: #E3F2FD;
-                color: #1565C0;
-                font-weight: bold;
-            }
-            QPushButton[removed="true"] {
-                border: 2px solid #F44336;
-                background-color: #B71C1C;
-                color: #FFCDD2;
-                font-weight: bold;
-            }
-            QLabel {
-                background: transparent;
-                border: none;
-                font-size: 13px;
-                font-weight: inherit;
-                color: inherit;
-            }
-        """)
+
 
 
 class ImageListItem(QListWidgetItem):
@@ -634,8 +533,59 @@ class EnhancedImageLabel(QLabel):
         # 启用鼠标追踪，用于拖拽
         self.setMouseTracking(True)
         
+        # 创建信息按钮
+        self.create_info_button()
+        
         self.logger = logging.getLogger(__name__)
         
+    def create_info_button(self):
+        """创建信息按钮"""
+        try:
+            from PyQt6.QtWidgets import QPushButton
+            from PyQt6.QtCore import Qt
+            
+            # 创建圆形信息按钮
+            self.info_button = QPushButton("ℹ️", self)
+            self.info_button.setFixedSize(30, 30)
+            self.info_button.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(0, 0, 0, 120);
+                    color: white;
+                    border: none;
+                    border-radius: 15px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(0, 0, 0, 180);
+                }
+                QPushButton:pressed {
+                    background-color: rgba(0, 0, 0, 220);
+                }
+            """)
+            
+            # 设置提示文本
+            self.info_button.setToolTip("点击查看图片详细信息")
+            
+            # 连接点击事件
+            self.info_button.clicked.connect(self.show_image_info_panel)
+            
+            # 初始位置（右上角）
+            self.position_info_button()
+            
+        except Exception as e:
+            self.logger.error(f"创建信息按钮失败: {e}")
+    
+    def position_info_button(self):
+        """定位信息按钮到右上角"""
+        try:
+            if hasattr(self, 'info_button') and self.info_button:
+                x = self.width() - self.info_button.width() - 10
+                y = 10
+                self.info_button.move(x, y)
+        except Exception as e:
+            self.logger.debug(f"定位信息按钮失败: {e}")
+    
     def set_image(self, pixmap):
         """设置图像"""
         try:
@@ -645,9 +595,18 @@ class EnhancedImageLabel(QLabel):
                 self.image_offset = QPoint(0, 0)
                 self._fit_to_window_mode = True  # 新图像默认适应窗口
                 self.fit_to_window()
+                
+                # 更新信息面板内容（如果存在且可见）
+                if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+                    QTimer.singleShot(100, self.update_info_panel)
             else:
                 self.clear()
                 self.original_pixmap = None
+                
+                # 隐藏信息面板（如果没有图片）
+                if hasattr(self, 'info_panel') and self.info_panel:
+                    self.info_panel.hide()
+                
         except Exception as e:
             self.logger.error(f"设置图像失败: {e}")
         
@@ -670,6 +629,9 @@ class EnhancedImageLabel(QLabel):
             self._fit_to_window_mode = True
             
             self.update_display()
+            # 更新信息面板中的缩放信息
+            if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+                QTimer.singleShot(50, self.update_info_panel)
         except Exception as e:
             self.logger.error(f"适应窗口失败: {e}")
         
@@ -677,17 +639,28 @@ class EnhancedImageLabel(QLabel):
         """放大"""
         if self.scale_factor >= self.max_scale:
             self.logger.info("已达到最大缩放倍数，停止放大防止卡顿")
+            self.show_floating_message("📈 已达到最大缩放倍数 (3.0x)", 3000)
             return
             
         self._fit_to_window_mode = False  # 手动缩放时退出适应窗口模式
         self.scale_factor = min(self.scale_factor + self.scale_step, self.max_scale)
         self.update_display()
+        # 更新信息面板中的缩放信息
+        if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+            QTimer.singleShot(50, self.update_info_panel)
         
     def zoom_out(self):
         """缩小"""
+        if self.scale_factor <= self.min_scale:
+            self.show_floating_message("📉 已达到最小缩放倍数 (0.1x)", 3000)
+            return
+            
         self._fit_to_window_mode = False  # 手动缩放时退出适应窗口模式
         self.scale_factor = max(self.scale_factor - self.scale_step, self.min_scale)
         self.update_display()
+        # 更新信息面板中的缩放信息
+        if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+            QTimer.singleShot(50, self.update_info_panel)
         
     def reset_zoom(self):
         """重置缩放"""
@@ -705,10 +678,14 @@ class EnhancedImageLabel(QLabel):
             # 限制缩放范围，防止过度放大导致卡顿
             if new_scale > self.max_scale:
                 self.logger.info(f"缩放倍数 {new_scale:.1f} 超过限制 {self.max_scale}，已限制")
+                self.show_floating_message("📈 已达到最大缩放倍数 (3.0x)", 3000)
                 new_scale = self.max_scale
                 
             self.scale_factor = max(self.min_scale, min(new_scale, self.max_scale))
             self.update_display()
+            # 更新信息面板中的缩放信息
+            if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+                QTimer.singleShot(50, self.update_info_panel)
         except Exception as e:
             self.logger.error(f"缩放图像失败: {e}")
             
@@ -766,20 +743,50 @@ class EnhancedImageLabel(QLabel):
                     self._fit_to_window_mode = False
                     self.scale_factor = min(self.scale_factor + scale_step, self.max_scale)
                     self.update_display()
+                    # 更新信息面板中的缩放信息
+                    if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+                        QTimer.singleShot(50, self.update_info_panel)
+                else:
+                    # 已达到最大缩放，显示提示
+                    self.show_floating_message("📈 已达到最大缩放倍数 (3.0x)", 3000)
             else:
                 # 向下滚动 - 缩小
-                self._fit_to_window_mode = False
-                self.scale_factor = max(self.scale_factor - scale_step, self.min_scale)
-                self.update_display()
+                if self.scale_factor > self.min_scale:
+                    self._fit_to_window_mode = False
+                    self.scale_factor = max(self.scale_factor - scale_step, self.min_scale)
+                    self.update_display()
+                    # 更新信息面板中的缩放信息
+                    if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+                        QTimer.singleShot(50, self.update_info_panel)
+                else:
+                    # 已达到最小缩放，显示提示
+                    self.show_floating_message("📉 已达到最小缩放倍数 (0.1x)", 3000)
                 
         except Exception as e:
             self.logger.error(f"滚轮事件处理失败: {e}")
             
     def mousePressEvent(self, event):
-        """处理鼠标按下事件 - 开始拖拽"""
+        """处理鼠标按下事件 - 开始拖拽或关闭信息面板"""
         try:
-            if event.button() == Qt.MouseButton.LeftButton and self.scale_factor > 1.0:
-                # 只有在放大状态下才允许拖拽
+            if event.button() == Qt.MouseButton.LeftButton:
+                # 检查是否点击了信息面板区域或信息按钮
+                if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
+                    panel_rect = self.info_panel.geometry()
+                    click_pos = event.position().toPoint()
+                    
+                    # 检查是否点击了信息按钮
+                    if hasattr(self, 'info_button') and self.info_button:
+                        button_rect = self.info_button.geometry()
+                        if button_rect.contains(click_pos):
+                            # 点击了信息按钮，不处理拖拽，让按钮事件处理
+                            return
+                    
+                    # 如果点击在面板外部（且不是信息按钮），隐藏面板
+                    if not panel_rect.contains(click_pos):
+                        self.info_panel.hide()
+                        return
+                    
+                # 允许在任何缩放级别下拖拽图片
                 self.dragging = True
                 self.last_pan_point = event.position().toPoint()
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -800,12 +807,9 @@ class EnhancedImageLabel(QLabel):
                     self.image_offset += delta
                     self.last_pan_point = current_point
                     self.update_display()
-            elif self.scale_factor > 1.0:
-                # 显示可拖拽光标
-                self.setCursor(Qt.CursorShape.OpenHandCursor)
             else:
-                # 恢复默认光标
-                self.setCursor(Qt.CursorShape.ArrowCursor)
+                # 在任何缩放级别下都显示可拖拽光标
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
                 
         except Exception as e:
             self.logger.error(f"鼠标移动事件处理失败: {e}")
@@ -817,11 +821,8 @@ class EnhancedImageLabel(QLabel):
                 self.dragging = False
                 self.last_pan_point = None
                 
-                # 恢复光标
-                if self.scale_factor > 1.0:
-                    self.setCursor(Qt.CursorShape.OpenHandCursor)
-                else:
-                    self.setCursor(Qt.CursorShape.ArrowCursor)
+                # 恢复可拖拽光标
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
         except Exception as e:
             self.logger.error(f"鼠标释放事件处理失败: {e}")
                 
@@ -832,6 +833,430 @@ class EnhancedImageLabel(QLabel):
         if self.original_pixmap and self._fit_to_window_mode:
             # 延迟调整，避免频繁刷新
             QTimer.singleShot(50, self.fit_to_window)
+        
+        # 重新定位信息按钮、面板和悬浮消息
+        QTimer.singleShot(10, self.position_info_button)
+        QTimer.singleShot(10, self.position_info_panel)
+        QTimer.singleShot(10, self._reposition_floating_message)
+            
+    def show_image_info_panel(self):
+        """显示图片信息面板"""
+        try:
+            if hasattr(self, 'info_panel') and self.info_panel:
+                # 如果面板已存在，切换显示状态
+                if self.info_panel.isVisible():
+                    self.info_panel.hide()
+                else:
+                    self.update_info_panel()
+                    self.info_panel.show()
+            else:
+                # 创建新的信息面板
+                self.create_info_panel()
+                
+        except Exception as e:
+            self.logger.error(f"显示图片信息面板失败: {e}")
+            
+    def create_info_panel(self):
+        """创建图片信息面板"""
+        try:
+            from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel, QPushButton
+            from PyQt6.QtCore import Qt
+            from PyQt6.QtGui import QFont
+            
+            # 创建半透明面板
+            self.info_panel = QFrame(self)
+            self.info_panel.setFixedWidth(450)
+            self.info_panel.setStyleSheet("""
+                QFrame {
+                    background-color: rgba(0, 0, 0, 180);
+                    border-radius: 8px;
+                    border: 1px solid rgba(255, 255, 255, 50);
+                }
+                QLabel {
+                    color: white;
+                    background: transparent;
+                    font-size: 12px;
+                    padding: 2px 8px;
+                }
+                QLabel[objectName="info_title"] {
+                    font-size: 14px;
+                    font-weight: bold;
+                    color: #4CAF50;
+                    border-bottom: 1px solid rgba(255, 255, 255, 30);
+                    margin-bottom: 5px;
+                }
+                QPushButton {
+                    background-color: rgba(76, 175, 80, 180);
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                    font-size: 11px;
+                    margin: 2px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(76, 175, 80, 220);
+                }
+            """)
+            
+            layout = QVBoxLayout(self.info_panel)
+            layout.setContentsMargins(10, 10, 10, 10)
+            layout.setSpacing(2)
+            
+            # 标题
+            title_label = QLabel("📷 图片信息")
+            title_label.setObjectName("info_title")
+            layout.addWidget(title_label)
+            
+            # 基本信息标签
+            self.info_labels = {}
+            info_items = [
+                ('filename', '文件名', ''),
+                ('size', '文件大小', ''),
+                ('dimensions', '图片尺寸', ''),
+                ('scale', '当前缩放', ''),
+                ('status', '分类状态', ''),
+                ('categories', '所属类别', '')
+            ]
+            
+            for key, title, value in info_items:
+                label = QLabel(f"{title}: {value}")
+                self.info_labels[key] = label
+                layout.addWidget(label)
+            
+            # 更多信息按钮
+            self.more_info_btn = QPushButton("▼ 更多信息")
+            self.more_info_btn.clicked.connect(self.toggle_more_info)
+            layout.addWidget(self.more_info_btn)
+            
+            # 详细信息区域（默认隐藏）
+            self.detailed_info_widget = QFrame()
+            self.detailed_info_layout = QVBoxLayout(self.detailed_info_widget)
+            self.detailed_info_layout.setContentsMargins(0, 5, 0, 0)
+            
+            # 详细信息标签
+            self.detailed_labels = {}
+            
+            # 特殊处理路径信息（带复制按钮）
+            self.create_path_info_widget()
+            
+            # 其他详细信息
+            other_detailed_items = [
+                ('created', '创建时间', ''),
+                ('modified', '修改时间', ''),
+                ('display_mode', '显示模式', '')
+            ]
+            
+            for key, title, value in other_detailed_items:
+                label = QLabel(f"{title}: {value}")
+                label.setWordWrap(True)
+                self.detailed_labels[key] = label
+                self.detailed_info_layout.addWidget(label)
+            
+            self.detailed_info_widget.hide()
+            layout.addWidget(self.detailed_info_widget)
+            
+            # 设置面板位置（右上角）
+            self.position_info_panel()
+            
+            # 更新信息并显示
+            self.update_info_panel()
+            self.info_panel.show()
+            
+        except Exception as e:
+            self.logger.error(f"创建图片信息面板失败: {e}")
+    
+    def position_info_panel(self):
+        """定位信息面板到右上角"""
+        try:
+            if hasattr(self, 'info_panel') and self.info_panel:
+                panel_width = self.info_panel.width()
+                x = self.width() - panel_width - 10
+                y = 10
+                self.info_panel.move(x, y)
+        except Exception as e:
+            self.logger.debug(f"定位信息面板失败: {e}")
+    
+    def toggle_more_info(self):
+        """切换更多信息显示"""
+        try:
+            if self.detailed_info_widget.isVisible():
+                self.detailed_info_widget.hide()
+                self.more_info_btn.setText("▼ 更多信息")
+                self.info_panel.setFixedHeight(self.info_panel.sizeHint().height())
+            else:
+                self.detailed_info_widget.show()
+                self.more_info_btn.setText("▲ 收起")
+                self.info_panel.setFixedHeight(self.info_panel.sizeHint().height())
+        except Exception as e:
+            self.logger.error(f"切换更多信息失败: {e}")
+    
+    def update_info_panel(self):
+        """更新信息面板内容"""
+        try:
+            if not hasattr(self, 'info_panel') or not self.info_panel:
+                return
+                
+            # 获取当前图片信息
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'image_files'):
+                main_window = main_window.parent()
+            
+            if not main_window or not hasattr(main_window, 'image_files') or not main_window.image_files:
+                return
+                
+            if main_window.current_index < 0 or main_window.current_index >= len(main_window.image_files):
+                return
+                
+            current_image_path = main_window.image_files[main_window.current_index]
+            
+            from PyQt6.QtCore import QFileInfo
+            from pathlib import Path
+            import os
+            from datetime import datetime
+            
+            # 收集图片信息
+            file_info = QFileInfo(str(current_image_path))
+            file_stats = os.stat(str(current_image_path))
+            
+            # 更新基本信息
+            self.info_labels['filename'].setText(f"文件名: {file_info.fileName()}")
+            self.info_labels['size'].setText(f"文件大小: {self.format_file_size(file_stats.st_size)}")
+            
+            # 图片尺寸
+            if self.original_pixmap:
+                width = self.original_pixmap.width()
+                height = self.original_pixmap.height()
+                self.info_labels['dimensions'].setText(f"图片尺寸: {width} × {height}")
+            else:
+                self.info_labels['dimensions'].setText("图片尺寸: 未知")
+            
+            # 当前缩放
+            self.info_labels['scale'].setText(f"当前缩放: {self.scale_factor:.1f}x")
+            
+            # 分类状态
+            image_path_str = str(current_image_path)
+            classification = main_window.classified_images.get(image_path_str)
+            is_removed = image_path_str in main_window.removed_images
+            
+            if is_removed:
+                self.info_labels['status'].setText("分类状态: 已移出")
+                self.info_labels['categories'].setText("所属类别: 无")
+            elif classification:
+                if isinstance(classification, list) and len(classification) > 0:
+                    # 多分类情况：显示已分类，类别显示所有类别名称
+                    self.info_labels['status'].setText("分类状态: 已分类")
+                    categories = ', '.join(classification)
+                    self.info_labels['categories'].setText(f"所属类别: {categories}")
+                elif isinstance(classification, str):
+                    # 单分类情况：显示已分类，类别显示具体类别名称
+                    self.info_labels['status'].setText("分类状态: 已分类")
+                    self.info_labels['categories'].setText(f"所属类别: {classification}")
+                else:
+                    # 空列表或其他异常情况
+                    self.info_labels['status'].setText("分类状态: 未处理")
+                    self.info_labels['categories'].setText("所属类别: 无")
+            else:
+                self.info_labels['status'].setText("分类状态: 未处理")
+                self.info_labels['categories'].setText("所属类别: 无")
+            
+            # 更新详细信息
+            # 更新路径信息（使用QTextEdit）
+            if hasattr(self, 'path_text_edit'):
+                self.path_text_edit.setPlainText(file_info.absoluteFilePath())
+            
+            # 更新其他详细信息
+            self.detailed_labels['created'].setText(f"创建时间: {datetime.fromtimestamp(file_stats.st_ctime).strftime('%Y-%m-%d %H:%M:%S')}")
+            self.detailed_labels['modified'].setText(f"修改时间: {datetime.fromtimestamp(file_stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S')}")
+            self.detailed_labels['display_mode'].setText(f"显示模式: {'适应窗口' if self._fit_to_window_mode else '自由缩放'}")
+            
+        except Exception as e:
+            self.logger.error(f"更新信息面板失败: {e}")
+    
+    def format_file_size(self, size_bytes):
+        """格式化文件大小"""
+        try:
+            if size_bytes == 0:
+                return "0 B"
+            size_names = ["B", "KB", "MB", "GB"]
+            import math
+            i = int(math.floor(math.log(size_bytes, 1024)))
+            p = math.pow(1024, i)
+            s = round(size_bytes / p, 2)
+            return f"{s} {size_names[i]}"
+        except:
+            return f"{size_bytes} B"
+    
+    def show_floating_message(self, message, duration=3000):
+        """显示半透明悬浮提示消息"""
+        try:
+            from PyQt6.QtWidgets import QLabel
+            from PyQt6.QtCore import QTimer, Qt
+            from PyQt6.QtGui import QFont
+            
+            # 如果已有消息框，先隐藏
+            if hasattr(self, 'floating_message') and self.floating_message:
+                self.floating_message.hide()
+                self.floating_message.deleteLater()
+            
+            # 创建悬浮消息标签
+            self.floating_message = QLabel(message, self)
+            self.floating_message.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(0, 0, 0, 200);
+                    color: white;
+                    border-radius: 8px;
+                    padding: 12px 20px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    border: 1px solid rgba(255, 255, 255, 100);
+                }
+            """)
+            
+            # 设置字体
+            font = QFont()
+            font.setPointSize(12)
+            font.setBold(True)
+            self.floating_message.setFont(font)
+            
+            # 调整大小并居中显示在顶部
+            self.floating_message.adjustSize()
+            x = (self.width() - self.floating_message.width()) // 2
+            y = 20  # 距离顶部20像素
+            self.floating_message.move(x, y)
+            
+            # 显示消息
+            self.floating_message.show()
+            self.floating_message.raise_()  # 确保在最顶层
+            
+            # 设置定时器自动隐藏
+            if hasattr(self, 'floating_timer'):
+                self.floating_timer.stop()
+            
+            self.floating_timer = QTimer()
+            self.floating_timer.setSingleShot(True)
+            self.floating_timer.timeout.connect(self._hide_floating_message)
+            self.floating_timer.start(duration)
+            
+        except Exception as e:
+            self.logger.error(f"显示悬浮消息失败: {e}")
+    
+    def _hide_floating_message(self):
+        """隐藏悬浮消息"""
+        try:
+            if hasattr(self, 'floating_message') and self.floating_message:
+                self.floating_message.hide()
+                self.floating_message.deleteLater()
+                self.floating_message = None
+        except Exception as e:
+            self.logger.debug(f"隐藏悬浮消息失败: {e}")
+    
+    def _reposition_floating_message(self):
+        """重新定位悬浮消息"""
+        try:
+            if hasattr(self, 'floating_message') and self.floating_message and self.floating_message.isVisible():
+                x = (self.width() - self.floating_message.width()) // 2
+                y = 20  # 距离顶部20像素
+                self.floating_message.move(x, y)
+        except Exception as e:
+            self.logger.debug(f"重新定位悬浮消息失败: {e}")
+    
+    def create_path_info_widget(self):
+        """创建路径信息组件（带复制按钮）"""
+        try:
+            from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QFrame, QLabel
+            from PyQt6.QtCore import Qt
+            
+            # 创建路径信息容器
+            path_container = QFrame()
+            path_layout = QVBoxLayout(path_container)
+            path_layout.setContentsMargins(0, 0, 0, 5)
+            path_layout.setSpacing(3)
+            
+            # 路径标题
+            path_title = QLabel("完整路径:")
+            path_title.setStyleSheet("font-weight: bold; color: #4CAF50;")
+            path_layout.addWidget(path_title)
+            
+            # 路径显示和复制按钮的容器
+            path_content_layout = QHBoxLayout()
+            path_content_layout.setContentsMargins(0, 0, 0, 0)
+            path_content_layout.setSpacing(5)
+            
+            # 使用QTextEdit显示路径，支持完整显示和选择
+            self.path_text_edit = QTextEdit()
+            self.path_text_edit.setMaximumHeight(60)  # 限制高度但允许滚动
+            self.path_text_edit.setMinimumHeight(40)
+            self.path_text_edit.setReadOnly(True)
+            self.path_text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.path_text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.path_text_edit.setStyleSheet("""
+                QTextEdit {
+                    background-color: rgba(255, 255, 255, 20);
+                    border: 1px solid rgba(255, 255, 255, 50);
+                    border-radius: 4px;
+                    padding: 4px;
+                    font-size: 11px;
+                    color: white;
+                }
+                QTextEdit:focus {
+                    border-color: rgba(76, 175, 80, 150);
+                }
+            """)
+            path_content_layout.addWidget(self.path_text_edit, 1)  # 占据大部分空间
+            
+            # 复制按钮
+            copy_button = QPushButton("📋")
+            copy_button.setFixedSize(30, 30)
+            copy_button.setToolTip("复制完整路径到剪贴板")
+            copy_button.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(76, 175, 80, 180);
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: rgba(76, 175, 80, 220);
+                }
+                QPushButton:pressed {
+                    background-color: rgba(76, 175, 80, 255);
+                }
+            """)
+            copy_button.clicked.connect(self.copy_path_to_clipboard)
+            path_content_layout.addWidget(copy_button)
+            
+            path_layout.addLayout(path_content_layout)
+            
+            # 将路径容器添加到详细信息布局
+            self.detailed_info_layout.addWidget(path_container)
+            
+            # 保存引用以便后续更新
+            self.path_container = path_container
+            
+        except Exception as e:
+            self.logger.error(f"创建路径信息组件失败: {e}")
+    
+    def copy_path_to_clipboard(self):
+        """复制路径到剪贴板"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            
+            if hasattr(self, 'path_text_edit'):
+                path_text = self.path_text_edit.toPlainText()
+                if path_text:
+                    clipboard = QApplication.clipboard()
+                    clipboard.setText(path_text)
+                    # 显示复制成功提示
+                    self.show_floating_message("📋 路径已复制到剪贴板", 2000)
+                else:
+                    self.show_floating_message("❌ 没有路径可复制", 2000)
+            
+        except Exception as e:
+            self.logger.error(f"复制路径到剪贴板失败: {e}")
+            self.show_floating_message("❌ 复制失败", 2000)
 
 
 class StatisticsPanel(QWidget):
