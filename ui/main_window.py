@@ -43,7 +43,7 @@ class ImageClassifier(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.version = "5.2.0"
+        self.version = "5.3.0"
         self.logger = logging.getLogger(__name__)
         
         # 初始化核心组件
@@ -57,6 +57,38 @@ class ImageClassifier(QMainWindow):
         
         # 设置快捷键
         self.setup_shortcuts()
+    
+    def _get_resource_path(self, relative_path):
+        """获取资源文件路径，兼容开发环境和打包环境"""
+        try:
+            import sys
+            # PyInstaller 打包后的临时目录
+            if hasattr(sys, '_MEIPASS'):
+                base_path = Path(sys._MEIPASS)
+                resource_path = base_path / relative_path
+                if resource_path.exists():
+                    self.logger.debug(f"使用打包环境资源路径: {resource_path}")
+                    return resource_path
+                
+            # 开发环境 - 从当前文件位置查找
+            base_path = Path(__file__).parent.parent
+            resource_path = base_path / relative_path
+            if resource_path.exists():
+                self.logger.debug(f"使用开发环境资源路径: {resource_path}")
+                return resource_path
+                
+            # 尝试从程序运行目录查找
+            base_path = Path.cwd()
+            resource_path = base_path / relative_path
+            if resource_path.exists():
+                self.logger.debug(f"使用运行目录资源路径: {resource_path}")
+                return resource_path
+                
+            self.logger.warning(f"未找到资源文件: {relative_path}")
+            return None
+        except Exception as e:
+            self.logger.error(f"获取资源路径失败: {e}")
+            return None
         
         # 启动性能监控
         if self.enable_performance_logging:
@@ -164,8 +196,8 @@ class ImageClassifier(QMainWindow):
             
             # 设置应用程序图标
             try:
-                icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
-                if icon_path.exists():
+                icon_path = self._get_resource_path('assets/icon.ico')
+                if icon_path and icon_path.exists():
                     app_icon = QIcon(str(icon_path))
                     self.setWindowIcon(app_icon)
                     # 同时设置应用程序图标
@@ -2421,8 +2453,8 @@ class ImageClassifier(QMainWindow):
         
         # 设置程序图标
         try:
-            icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
-            if icon_path.exists():
+            icon_path = self._get_resource_path('assets/icon.ico')
+            if icon_path and icon_path.exists():
                 msg.setWindowIcon(QIcon(str(icon_path)))
         except Exception:
             pass
@@ -3311,8 +3343,8 @@ class ImageClassifier(QMainWindow):
         
         # 设置程序图标
         try:
-            icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
-            if icon_path.exists():
+            icon_path = self._get_resource_path('assets/icon.ico')
+            if icon_path and icon_path.exists():
                 msgBox.setWindowIcon(QIcon(str(icon_path)))
         except Exception:
             pass
