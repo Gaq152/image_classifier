@@ -43,7 +43,7 @@ class ImageClassifier(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.version = "5.0.0"
+        self.version = "5.2.0"
         self.logger = logging.getLogger(__name__)
         
         # 初始化核心组件
