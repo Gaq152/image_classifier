@@ -311,6 +311,34 @@ class TabbedHelpDialog(QDialog):
         self.version = version
         self.logger = logging.getLogger(__name__)
         self.initUI()
+    
+    def _get_resource_path(self, relative_path):
+        """获取资源文件路径，兼容开发环境和打包环境"""
+        try:
+            import sys
+            from pathlib import Path
+            # PyInstaller 打包后的临时目录
+            if hasattr(sys, '_MEIPASS'):
+                base_path = Path(sys._MEIPASS)
+                resource_path = base_path / relative_path
+                if resource_path.exists():
+                    return resource_path
+                
+            # 开发环境 - 从当前文件位置查找
+            base_path = Path(__file__).parent.parent
+            resource_path = base_path / relative_path
+            if resource_path.exists():
+                return resource_path
+                
+            # 尝试从程序运行目录查找
+            base_path = Path.cwd()
+            resource_path = base_path / relative_path
+            if resource_path.exists():
+                return resource_path
+                
+            return None
+        except Exception:
+            return None
         
     def initUI(self):
         """初始化UI"""
@@ -461,8 +489,8 @@ class TabbedHelpDialog(QDialog):
         
         # 设置程序图标
         try:
-            icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
-            if icon_path.exists():
+            icon_path = self._get_resource_path('assets/icon.ico')
+            if icon_path and icon_path.exists():
                 msgBox.setWindowIcon(QIcon(str(icon_path)))
         except Exception:
             pass
@@ -1117,7 +1145,29 @@ class TabbedHelpDialog(QDialog):
         <div style="margin: 20px 0;">
         
         <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #4caf50;">
-        <h4 style="color: #2e7d32; margin: 0 0 10px 0;">🎉 v5.0.0 (当前版本) - 2025年1月</h4>
+        <h4 style="color: #2e7d32; margin: 0 0 10px 0;">🎉 v5.3.0 (当前版本) - 2025年8月</h4>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+        <li><b>🔧 多分类增强</b>：修复撤销操作，复制模式自动删除文件</li>
+        <li><b>🚫 模式保护</b>：移动/多分类模式互斥，双向拦截保护</li>
+        <li><b>🔍 重复检测</b>：完善同名文件处理，支持Hash比较和智能选择</li>
+        <li><b>💬 弹窗优化</b>：统一样式设计，中文化按钮，提升用户体验</li>
+        <li><b>🛠️ 路径修复</b>：解决打包后图标和日志路径问题</li>
+        <li><b>📊 日志增强</b>：智能路径选择机制，兼容开发和部署环境</li>
+        </ul>
+        </div>
+        
+        <div style="background-color: #f0f7ff; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #2196f3;">
+        <h4 style="color: #1565c0; margin: 0 0 10px 0;">✨ v5.2.0 - 2025年8月</h4>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+        <li><b>🎨 界面美化</b>：统一滚动条样式设计</li>
+        <li><b>🐛 构建修复</b>：解决编码问题，优化打包流程</li>
+        <li><b>⚡ 体积优化</b>：exe文件减少37%，降至86MB</li>
+        <li><b>🔧 功能完善</b>：改进快捷键系统和类别管理</li>
+        </ul>
+        </div>
+        
+        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #6c757d;">
+        <h4 style="color: #495057; margin: 0 0 10px 0;">🚀 v5.0.0 - 2025年7月</h4>
         <ul style="margin: 5px 0; padding-left: 20px;">
         <li><b>✨ 全新UI设计</b>：现代化界面</li>
         <li><b>🖼️ 图片浏览增强</b>：3倍缩放限制，拖拽移动优化</li>
@@ -1128,37 +1178,17 @@ class TabbedHelpDialog(QDialog):
         </div>
         
         <div style="background-color: #fff3e0; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #ff9800;">
-        <h4 style="color: #ef6c00; margin: 0 0 10px 0;">🔧 v4.2.0 - 2024年12月</h4>
+        <h4 style="color: #ef6c00; margin: 0 0 10px 0;">🔧 v4.2.0 - 2025年6月</h4>
         <ul style="margin: 5px 0; padding-left: 20px;">
         <li>重新设计工具栏布局，提高易用性</li>
         <li>增加快捷键展示功能</li>
         <li>实现标签页帮助系统</li>
-        <li>修复批量操作的性能问题</li>
-        </ul>
-        </div>
-        
-        <div style="background-color: #f3e5f5; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #9c27b0;">
-        <h4 style="color: #7b1fa2; margin: 0 0 10px 0;">🎨 v4.1.0 - 2024年11月</h4>
-        <ul style="margin: 5px 0; padding-left: 20px;">
-        <li>优化UI界面美观度</li>
-        <li>修复快捷键冲突问题</li>
-        <li>增强用户交互体验</li>
-        <li>添加状态栏信息显示</li>
-        </ul>
-        </div>
-        
-        <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #2196f3;">
-        <h4 style="color: #1976d2; margin: 0 0 10px 0;">🚀 v4.0.0 - 2024年10月</h4>
-        <ul style="margin: 5px 0; padding-left: 20px;">
-        <li>新增图像缩放和拖拽功能</li>
-        <li>实现智能文件同步</li>
-        <li>大幅性能优化</li>
-        <li>添加网络存储支持</li>
+        <li>增加手动同步目录改动功能</li>
         </ul>
         </div>
         
         <div style="background-color: #fce4ec; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #e91e63;">
-        <h4 style="color: #c2185b; margin: 0 0 10px 0;">📦 v3.x.x - 2024年初</h4>
+        <h4 style="color: #c2185b; margin: 0 0 10px 0;">📦 v3.8.0 - 2025年3月</h4>
         <ul style="margin: 5px 0; padding-left: 20px;">
         <li>基础图片分类功能</li>
         <li>快捷键支持</li>
