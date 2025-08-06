@@ -387,6 +387,47 @@ class ImageClassifier(QMainWindow):
                 color: white;
                 border-color: #0D47A1;
             }
+            QScrollBar:vertical {
+                border: 1px solid #B3D9FF;
+                background: #F3F9FF;
+                width: 10px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #2196F3;
+                border-radius: 3px;
+                min-height: 15px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #1976D2;
+            }
+            QScrollBar::handle:vertical:pressed {
+                background: #0D47A1;
+            }
+            QScrollBar:horizontal {
+                border: 1px solid #B3D9FF;
+                background: #F3F9FF;
+                height: 10px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #2196F3;
+                border-radius: 3px;
+                min-width: 15px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #1976D2;
+            }
+            QScrollBar::handle:horizontal:pressed {
+                background: #0D47A1;
+            }
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical,
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {
+                border: none;
+                background: none;
+            }
         """)
         self.image_list.itemClicked.connect(self.on_image_list_item_clicked)
         layout.addWidget(self.image_list, 1)  # 设置拉伸权重1
@@ -430,6 +471,36 @@ class ImageClassifier(QMainWindow):
                 background: #FF9800;
                 border-radius: 3px;
                 min-height: 15px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #F57C00;
+            }
+            QScrollBar::handle:vertical:pressed {
+                background: #E65100;
+            }
+            QScrollBar:horizontal {
+                border: 1px solid #FFB74D;
+                background: #FFF8E1;
+                height: 10px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #FF9800;
+                border-radius: 3px;
+                min-width: 15px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #F57C00;
+            }
+            QScrollBar::handle:horizontal:pressed {
+                background: #E65100;
+            }
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical,
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {
+                border: none;
+                background: none;
             }
         """)
         
