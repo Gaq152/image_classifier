@@ -1991,7 +1991,8 @@ class ImageClassifier(QMainWindow):
                 if was_removed:
                     self._move_from_remove_to_category(current_path, category_name)
                 else:
-                    self._execute_file_operation(current_path, category_name, is_remove=False)
+                    # 无论内存状态如何，都检查目标文件是否存在
+                    self._execute_file_operation_with_check(current_path, category_name, is_remove=False)
         else:
             # 单分类模式 - 原有逻辑
             # 如果是重新分类，需要从旧目录移动到新目录
@@ -2014,7 +2015,8 @@ class ImageClassifier(QMainWindow):
                 self._move_from_remove_to_category(current_path, category_name)
             else:
                 # 首次分类：从原目录复制/移动到分类目录
-                self._execute_file_operation(current_path, category_name, is_remove=False)
+                # 无论内存状态如何，都检查目标文件是否存在
+                self._execute_file_operation_with_check(current_path, category_name, is_remove=False)
             
             # 单分类模式下，直接更新为新类别
             self.classified_images[current_path] = category_name
@@ -2514,6 +2516,71 @@ class ImageClassifier(QMainWindow):
             if not new_target.exists():
                 return str(new_target)
             counter += 1
+
+    def _execute_file_operation_with_check(self, source_path, category_name, is_remove=False):
+        """执行文件操作前先检查目标文件是否存在，确保重复检测不被绕过"""
+        try:
+            source_file = Path(source_path)
+            if not source_file.exists():
+                self.logger.warning(f"源文件不存在: {source_path}")
+                return
+            
+            # 计算目标路径
+            parent_dir = self.current_dir.parent
+            if is_remove:
+                target_dir = parent_dir / 'remove'
+            else:
+                target_dir = parent_dir / category_name
+            
+            target_file = target_dir / source_file.name
+            
+            # 关键：无论内存状态如何，都检查目标文件是否已存在
+            if target_file.exists():
+                self.logger.info(f"检测到目标文件已存在，触发重复处理: {target_file}")
+                # 触发重复文件处理逻辑
+                handled_target = self._handle_duplicate_file(source_path, str(target_file))
+                if handled_target is None:
+                    # 用户选择取消
+                    self.logger.info(f"用户取消文件操作: {source_file.name}")
+                    return
+                # 如果用户选择了重命名，更新目标路径
+                target_file = Path(handled_target)
+                
+                # 如果选择覆盖，需要在执行时直接覆盖
+                if str(target_file) == str(target_dir / source_file.name):
+                    self.logger.info(f"用户选择覆盖现有文件: {target_file}")
+            
+            # 执行实际的文件操作
+            self._execute_file_operation_direct(source_path, str(target_file), is_remove)
+            
+        except Exception as e:
+            self.logger.error(f"文件操作检查失败: {e}")
+            # 回退到原来的逻辑
+            self._execute_file_operation(source_path, category_name, is_remove)
+    
+    def _execute_file_operation_direct(self, source_path, target_path, is_remove=False):
+        """直接执行文件操作，不再检查重复"""
+        try:
+            source_file = Path(source_path)
+            target_file = Path(target_path)
+            
+            # 创建目标目录
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 执行文件操作
+            if self.is_copy_mode:
+                import shutil
+                shutil.copy2(source_file, target_file)
+                operation_type = "复制"
+            else:
+                source_file.rename(target_file)
+                operation_type = "移动"
+            
+            self.logger.info(f"文件{operation_type}成功: {source_file.name} -> {target_file}")
+            
+        except Exception as e:
+            self.logger.error(f"直接文件操作失败: {e}")
+            raise
 
     def refresh_categories(self):
         """刷新类别并同步文件状态"""
