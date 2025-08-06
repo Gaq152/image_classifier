@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""
+图像分类工具优化打包脚本
+精简依赖，修复编码问题，生成最小体积的exe文件
+版本: 5.2.0
+"""
+
+import os
+import sys
+import shutil
+import subprocess
+from pathlib import Path
+
+
+def check_pyinstaller():
+    """检查PyInstaller是否已安装"""
+    try:
+        import PyInstaller
+        print(f"✓ PyInstaller已安装，版本: {PyInstaller.__version__}")
+        return True
+    except ImportError:
+        print("✗ PyInstaller未安装")
+        response = input("是否自动安装PyInstaller? (y/n): ").lower()
+        if response == 'y':
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
+                print("✓ PyInstaller安装成功")
+                return True
+            except subprocess.CalledProcessError:
+                print("✗ PyInstaller安装失败")
+                return False
+        return False
+
+
+def clean_build_dirs():
+    """清理之前的构建目录"""
+    dirs_to_clean = ['build', 'dist', '__pycache__']
+    for dir_name in dirs_to_clean:
+        if os.path.exists(dir_name):
+            print(f"清理目录: {dir_name}")
+            shutil.rmtree(dir_name)
+    
+    # 清理.spec文件
+    spec_files = list(Path('.').glob('*.spec'))
+    for spec_file in spec_files:
+        print(f"删除spec文件: {spec_file}")
+        spec_file.unlink()
+
+
+def check_dependencies():
+    """检查必要的依赖库"""
+    required_deps = {
+        'PyQt6': 'PyQt6',
+        'cv2': 'opencv-python',
+        'PIL': 'Pillow',
+        'psutil': 'psutil'
+    }
+    
+    missing_deps = []
+    for import_name, package_name in required_deps.items():
+        try:
+            __import__(import_name)
+            print(f"✓ {package_name} 已安装")
+        except ImportError:
+            print(f"✗ {package_name} 未安装")
+            missing_deps.append(package_name)
+    
+    if missing_deps:
+        print(f"\n缺少以下依赖包: {', '.join(missing_deps)}")
+        response = input("是否自动安装缺少的依赖? (y/n): ").lower()
+        if response == 'y':
+            for dep in missing_deps:
+                try:
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", dep])
+                    print(f"✓ {dep} 安装成功")
+                except subprocess.CalledProcessError:
+                    print(f"✗ {dep} 安装失败")
+                    return False
+        else:
+            return False
+    
+    return True
+
+
+def build_executable():
+    """构建可执行文件 - 优化版本"""
+    print("开始构建可执行文件（优化版本）...")
+    
+    # 项目信息 - 使用英文名称避免编码问题
+    app_name = "ImageClassifier"
+    version = "5.2.0"
+    final_name = f"ImageClassifier_v{version}"
+    
+    # 构建PyInstaller命令 - 精简版本
+    cmd = [
+        sys.executable, '-m', 'PyInstaller',
+        '--onefile',  # 打包为单一文件
+        '--windowed',  # Windows下不显示控制台
+        '--name', final_name,  # 设置输出文件名
+        '--icon', 'assets/icon.ico',  # 设置图标
+        '--add-data', 'assets;assets',  # 包含assets目录
+        
+        # ========= 精简的必要导入 - 仅包含实际使用的模块 =========
+        '--hidden-import', 'PyQt6.QtWidgets',
+        '--hidden-import', 'PyQt6.QtCore',
+        '--hidden-import', 'PyQt6.QtGui',
+        '--hidden-import', 'cv2',
+        '--hidden-import', 'PIL.Image',  # 只导入Image，不导入其他PIL子模块
+        '--hidden-import', 'psutil',
+        
+        # ========= 优化选项 =========
+        '--optimize', '2',  # Python字节码优化
+        '--strip',  # 去除调试信息
+        '--clean',  # 清理临时文件
+        '--noconfirm',  # 不询问确认
+        
+        # ========= 排除不需要的模块以减小体积 =========
+        '--exclude-module', 'tkinter',  # 排除tkinter
+        '--exclude-module', 'matplotlib',  # 排除matplotlib
+        '--exclude-module', 'scipy',  # 排除scipy
+        '--exclude-module', 'pandas',  # 排除pandas
+        '--exclude-module', 'numpy.testing',  # 排除numpy测试模块
+        '--exclude-module', 'PIL.ImageQt',  # 排除不需要的PIL模块
+        '--exclude-module', 'PIL.ImageDraw',
+        '--exclude-module', 'PIL.ImageFilter',
+        '--exclude-module', 'test',  # 排除测试模块
+        '--exclude-module', 'unittest',  # 排除单元测试
+        '--exclude-module', 'doctest',  # 排除文档测试
+        
+        'run.py'  # 入口文件
+    ]
+    
+    print(f"执行命令: {' '.join(cmd[:10])}... (命令过长，已截断)")
+    print("注意: 使用精简依赖配置以减小文件体积")
+    
+    try:
+        # 运行PyInstaller - 修复编码问题
+        print("正在执行PyInstaller...")
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            encoding='cp936',  # Windows中文编码
+            errors='replace'  # 替换无法解码的字符
+        )
+        
+        if result.returncode == 0:
+            print("✓ 构建成功!")
+            
+            # 检查输出文件
+            exe_path = Path('dist') / f'{final_name}.exe'
+            if exe_path.exists():
+                size_mb = exe_path.stat().st_size / (1024 * 1024)
+                print(f"✓ 可执行文件已生成: {exe_path}")
+                print(f"✓ 文件大小: {size_mb:.1f} MB")
+                
+                # 重命名为中文名称
+                chinese_name = f"图像分类工具_v{version}.exe"
+                chinese_path = Path('dist') / chinese_name
+                try:
+                    exe_path.rename(chinese_path)
+                    print(f"✓ 文件已重命名为: {chinese_name}")
+                except Exception as e:
+                    print(f"重命名警告: {e}")
+                    print(f"请手动将 {exe_path.name} 重命名为 {chinese_name}")
+                
+                return True
+            else:
+                print("✗ 可执行文件生成失败")
+                return False
+        else:
+            print("✗ 构建失败")
+            if result.stderr:
+                print("错误输出:")
+                print(result.stderr)
+            if result.stdout:
+                print("标准输出:")
+                print(result.stdout)
+            return False
+            
+    except Exception as e:
+        print(f"✗ 构建过程中出现异常: {e}")
+        return False
+
+
+def main():
+    """主函数"""
+    print("=" * 60)
+    print("图像分类工具 - 优化构建脚本")
+    print("版本: 5.2.0")
+    print("特点: 精简依赖 + 修复编码 + 最小体积")
+    print("=" * 60)
+    
+    # 检查当前目录
+    if not Path('run.py').exists():
+        print("✗ 请在项目根目录下运行此脚本")
+        return 1
+    
+    # 检查图标文件
+    if not Path('assets/icon.ico').exists():
+        print("✗ 图标文件 assets/icon.ico 不存在")
+        return 1
+    
+    # 检查PyInstaller
+    if not check_pyinstaller():
+        print("✗ PyInstaller检查失败")
+        return 1
+    
+    # 检查依赖
+    if not check_dependencies():
+        print("✗ 依赖检查失败")
+        return 1
+    
+    # 清理构建目录
+    clean_build_dirs()
+    
+    # 构建可执行文件
+    if not build_executable():
+        print("✗ 构建失败")
+        return 1
+    
+    print("\n" + "=" * 60)
+    print("✅ 优化构建完成!")
+    print("📁 可执行文件: dist/图像分类工具_v5.2.0.exe")
+    print("✨ 包含完整功能，去除冗余依赖")
+    print("=" * 60)
+    
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
