@@ -5,7 +5,7 @@
 一个高性能的图像分类整理工具，支持智能预加载、网络路径优化、
 多种图像格式、自定义快捷键等功能。
 
-版本: 5.2.0
+版本: 5.3.0
 """
 
 import sys
@@ -22,6 +22,43 @@ os.environ["EXIFTOOL_DEBUG"] = "0"
 os.environ["PIL_DEBUG"] = "0"
 
 
+def get_log_directory():
+    """获取日志目录，兼容开发环境和打包环境"""
+    try:
+        # 方案1: 优先使用exe文件同目录（打包环境）
+        if hasattr(sys, '_MEIPASS'):
+            # 获取exe文件的实际位置
+            exe_dir = Path(sys.executable).parent
+            log_dir = exe_dir / 'logs'
+            # 尝试创建测试，检查是否有权限
+            try:
+                log_dir.mkdir(exist_ok=True)
+                test_file = log_dir / 'test.tmp'
+                test_file.touch()
+                test_file.unlink()
+                return log_dir
+            except (PermissionError, OSError):
+                pass
+        
+        # 方案2: 开发环境使用项目根目录
+        if not hasattr(sys, '_MEIPASS'):
+            project_dir = Path(__file__).parent
+            log_dir = project_dir / 'logs'
+            try:
+                log_dir.mkdir(exist_ok=True)
+                return log_dir
+            except (PermissionError, OSError):
+                pass
+          
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir
+        
+    except Exception as e:
+        # 最后的备用方案 - 当前目录
+        print(f"日志目录创建失败，使用当前目录: {e}")
+        return Path.cwd() / 'logs'
+
+
 def setup_logging():
     """设置日志系统"""
     try:
@@ -30,9 +67,8 @@ def setup_logging():
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
         
-        # 创建日志目录 - 在程序运行目录下
-        current_dir = Path.cwd()
-        log_dir = current_dir / 'logs'
+        # 创建日志目录 - 智能选择位置
+        log_dir = get_log_directory()
         log_dir.mkdir(exist_ok=True)
         
         # 禁用第三方库的调试输出
