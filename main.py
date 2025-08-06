@@ -5,7 +5,7 @@
 一个高性能的图像分类整理工具，支持智能预加载、网络路径优化、
 多种图像格式、自定义快捷键等功能。
 
-版本: 5.0.0
+版本: 5.2.0
 """
 
 import sys
@@ -167,7 +167,7 @@ def main():
         # 创建应用程序实例
         app = QApplication(sys.argv)
         app.setApplicationName("图像分类工具")
-        app.setApplicationVersion("5.0.0")
+        app.setApplicationVersion("5.2.0")
         app.setOrganizationName("ImageClassifier")
         
         # PyQt6默认已启用高DPI支持，无需手动设置
