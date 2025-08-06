@@ -1974,6 +1974,10 @@ class ImageClassifier(QMainWindow):
                 old_category.remove(category_name)
                 self.logger.info(f"多分类模式: 从 {category_name} 中移除 {Path(current_path).name}")
                 
+                # 在复制模式下，需要删除已复制的文件
+                if self.is_copy_mode:
+                    self._remove_copied_file_from_category(current_path, category_name)
+                
                 # 如果列表为空，则完全移除分类记录
                 if not old_category:
                     del self.classified_images[current_path]
@@ -2322,8 +2326,195 @@ class ImageClassifier(QMainWindow):
                 self.removed_images.discard(source_path)
             else:
                 if source_path in self.classified_images:
-                    del self.classified_images[source_path]
+                    if isinstance(self.classified_images[source_path], list):
+                        # 多分类模式：从列表中移除这个类别
+                        if category_name in self.classified_images[source_path]:
+                            self.classified_images[source_path].remove(category_name)
+                            if not self.classified_images[source_path]:
+                                del self.classified_images[source_path]
+                    else:
+                        # 单分类模式：完全移除记录
+                        del self.classified_images[source_path]
+            raise FileOperationError(f"文件操作失败: {e}")
     
+    def _remove_copied_file_from_category(self, source_path, category_name):
+        """从指定类别目录中删除已复制的文件"""
+        try:
+            source_file = Path(source_path)
+            parent_dir = self.current_dir.parent
+            category_dir = parent_dir / category_name
+            
+            # 查找目标文件（可能有编号后缀）
+            target_files = []
+            base_name = source_file.stem
+            ext = source_file.suffix
+            
+            # 检查原文件名
+            original_target = category_dir / source_file.name
+            if original_target.exists():
+                target_files.append(original_target)
+            
+            # 检查带编号后缀的文件
+            counter = 1
+            while True:
+                numbered_target = category_dir / f"{base_name}_{counter}{ext}"
+                if numbered_target.exists():
+                    target_files.append(numbered_target)
+                    counter += 1
+                else:
+                    break
+            
+            # 删除找到的文件（通常只有一个）
+            for target_file in target_files:
+                # 简单的验证：检查文件大小是否相同
+                if target_file.stat().st_size == source_file.stat().st_size:
+                    target_file.unlink()
+                    self.logger.info(f"已删除复制的文件: {target_file}")
+                    break
+            
+        except Exception as e:
+            self.logger.error(f"删除复制文件失败: {e}")
+    
+    def _get_file_hash(self, file_path):
+        """计算文件的MD5哈希值"""
+        import hashlib
+        try:
+            hash_md5 = hashlib.md5()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+            return hash_md5.hexdigest()
+        except Exception as e:
+            self.logger.error(f"计算文件哈希失败: {e}")
+            return None
+    
+    def _handle_duplicate_file(self, source_path, target_path):
+        """处理文件重复的情况"""
+        source_file = Path(source_path)
+        target_file = Path(target_path)
+        
+        # 计算哈希值比较
+        source_hash = self._get_file_hash(source_path)
+        target_hash = self._get_file_hash(target_path)
+        
+        # 判断是否为相同文件
+        is_same_file = (source_hash == target_hash and source_hash is not None)
+        
+        # 准备提示信息
+        if is_same_file:
+            hash_info = "✅ 文件内容完全相同（哈希值匹配）"
+            main_text = f"目标位置已存在同名文件：\n{target_file.name}"
+            detail_text = f"{hash_info}\n\n这是同一张图片，建议选择「覆盖」或「取消」。"
+        else:
+            hash_info = "⚠️ 文件内容不同（哈希值不匹配）"
+            main_text = f"目标位置已存在同名文件：\n{target_file.name}"
+            detail_text = f"{hash_info}\n\n虽然文件名相同，但这是不同的图片。"
+        
+        # 创建自定义消息框
+        msg = QMessageBox(self)
+        msg.setWindowTitle("文件名冲突")
+        msg.setText(main_text)
+        msg.setInformativeText(detail_text)
+        msg.setIcon(QMessageBox.Icon.Question)
+        
+        # 设置程序图标
+        try:
+            icon_path = Path(__file__).parent.parent / 'assets' / 'icon.ico'
+            if icon_path.exists():
+                msg.setWindowIcon(QIcon(str(icon_path)))
+        except Exception:
+            pass
+        
+        # 设置统一样式
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: #F8F9FA;
+                color: #2C3E50;
+                border: 1px solid #BDC3C7;
+                border-radius: 8px;
+                font-size: 14px;
+                min-width: 400px;
+            }
+            QMessageBox QLabel {
+                color: #2C3E50;
+                font-size: 14px;
+                padding: 10px;
+            }
+            QMessageBox QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 80px;
+                margin: 2px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #21618C;
+            }
+            QMessageBox QPushButton[text="覆盖"] {
+                background-color: #E74C3C;
+            }
+            QMessageBox QPushButton[text="覆盖"]:hover {
+                background-color: #C0392B;
+            }
+            QMessageBox QPushButton[text="重命名"] {
+                background-color: #F39C12;
+            }
+            QMessageBox QPushButton[text="重命名"]:hover {
+                background-color: #E67E22;
+            }
+        """)
+        
+        # 添加中文按钮
+        overwrite_btn = msg.addButton("覆盖", QMessageBox.ButtonRole.AcceptRole)
+        rename_btn = msg.addButton("重命名", QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        
+        # 设置默认按钮
+        if is_same_file:
+            msg.setDefaultButton(overwrite_btn)
+        else:
+            msg.setDefaultButton(rename_btn)
+        
+        # 显示对话框
+        msg.exec()
+        
+        clicked_button = msg.clickedButton()
+        
+        if clicked_button == overwrite_btn:
+            # 覆盖：返回原路径
+            self.logger.info(f"用户选择覆盖同名文件: {target_file.name}")
+            return target_path
+        elif clicked_button == rename_btn:
+            # 重命名：返回新路径
+            renamed_path = self._get_renamed_target(target_path)
+            self.logger.info(f"用户选择重命名文件: {target_file.name} -> {Path(renamed_path).name}")
+            return renamed_path
+        else:
+            # 取消：返回None
+            self.logger.info(f"用户取消文件操作: {target_file.name}")
+            return None
+    
+    def _get_renamed_target(self, target_path):
+        """获取重命名后的目标路径"""
+        target_file = Path(target_path)
+        base_name = target_file.stem
+        ext = target_file.suffix
+        parent_dir = target_file.parent
+        
+        counter = 1
+        while True:
+            new_target = parent_dir / f"{base_name}_{counter}{ext}"
+            if not new_target.exists():
+                return str(new_target)
+            counter += 1
+
     def refresh_categories(self):
         """刷新类别并同步文件状态"""
         if self.current_dir:
@@ -2519,6 +2710,16 @@ class ImageClassifier(QMainWindow):
     
     def set_mode(self, is_copy):
         """设置操作模式"""
+        # 如果要切换到移动模式，但当前是多分类模式，拒绝切换
+        if not is_copy and self.is_multi_category:
+            self._create_styled_message_box(
+                QMessageBox.Icon.Warning,
+                "模式切换",
+                "移动模式不支持多分类功能。\n请先切换为单分类模式，然后再切换到移动模式。"
+            ).exec()
+            # 拒绝切换，保持原来的复制模式
+            return
+        
         self.is_copy_mode = is_copy
         
         # 更新按钮文本
@@ -2569,6 +2770,15 @@ class ImageClassifier(QMainWindow):
     
     def toggle_category_mode(self):
         """切换单分类/多分类模式"""
+        # 移动模式不支持多分类
+        if not self.is_copy_mode and not self.is_multi_category:
+            self._create_styled_message_box(
+                QMessageBox.Icon.Warning,
+                "模式限制",
+                "移动模式不支持多分类功能。\n请先切换到复制模式。"
+            ).exec()
+            return
+        
         self.is_multi_category = not self.is_multi_category
         
         # 更新按钮文本
