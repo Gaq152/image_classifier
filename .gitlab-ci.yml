@@ -3,6 +3,13 @@
 
 image: registry.desauto.cn/ops/python:3.10.14-bookworm
 
+# 工作流规则：在 MR、标签和默认分支上运行
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 stages:
   - build
   - deploy
@@ -95,7 +102,6 @@ release:
     - .is_deploy
   dependencies:
     - windows_build
-    # - linux_build  # 如果需要Linux版本则取消注释
   script:
     - set -x
     # 设置认证
@@ -112,12 +118,6 @@ release:
     - 'curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $WINDOWS_FILE)"'
     - 'curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/$(basename $WINDOWS_FILE)"'
     - echo "✓ Windows 版本上传成功"
-    # 上传 Linux 版本（如果存在）
-    - LINUX_FILE=$(find . -name "*linux" -type f | head -1)
-    - 'if [ -f "$LINUX_FILE" ]; then echo "上传 Linux 版本: $LINUX_FILE"; chmod +x "$LINUX_FILE"; else echo "⚠ 未找到 Linux 版本文件（跳过）"; fi'
-    - 'if [ -f "$LINUX_FILE" ]; then curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$LINUX_FILE" "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $LINUX_FILE)"; fi'
-    - 'if [ -f "$LINUX_FILE" ]; then curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$LINUX_FILE" "${PACKAGE_REGISTRY_URL}/latest/$(basename $LINUX_FILE)"; fi'
-    - 'if [ -f "$LINUX_FILE" ]; then echo "✓ Linux 版本上传成功"; fi'
   
   # GitLab Release 配置
   release:
@@ -169,7 +169,4 @@ test:
     - python -c "import psutil; print('✓ psutil 可用')"
     - echo "✅ 所有测试通过"
   
-  rules:
-    # 在合并请求和主分支推送时运行测试
-    - if: $CI_MERGE_REQUEST_ID
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  # 测试任务会根据 workflow 规则自动运行
