@@ -15,10 +15,9 @@ stages:
   - deploy
 
 variables:
-  # 包注册表配置（上传用）
+  # 包注册表配置（上传和下载都用这个URL）
+  # See https://docs.gitlab.com/ee/user/packages/generic_packages/#publish-a-package-file
   PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/image_classifier"
-  # 下载链接配置（用户下载用）
-  DOWNLOAD_BASE_URL: "$CI_SERVER_URL/$CI_PROJECT_PATH/-/packages/generic/image_classifier"
   # 应用信息
   APP_NAME: "图像分类工具"
   APP_VERSION: "5.3.0"
@@ -96,8 +95,8 @@ release:
       ## 🚀 图像分类工具 $CI_COMMIT_TAG 发布
       
       ### 📥 下载链接
-      - **Windows 版本**: [$RELEASE_FILENAME]($DOWNLOAD_BASE_URL/$RELEASE_VERSION/$RELEASE_FILENAME)
-      - **最新版本**: [ImageClassifier_latest.exe]($DOWNLOAD_BASE_URL/latest/$RELEASE_FILENAME)
+      - **Windows 版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME)
+      - **最新版本**: [ImageClassifier_latest.exe]($PACKAGE_REGISTRY_URL/latest/$RELEASE_FILENAME)
       
       ### 📋 系统要求
       - **操作系统**: Windows 7 及以上版本
@@ -117,7 +116,7 @@ release:
     assets:
       links:
         - name: 'Windows 版本'
-          url: "$DOWNLOAD_BASE_URL/$RELEASE_VERSION/$RELEASE_FILENAME"
+          url: "$PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME"
           link_type: 'package'
 
 # 测试任务（可选）
