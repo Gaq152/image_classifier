@@ -11,13 +11,24 @@
 
 
 
-[功能特性](#功能特性) • [安装使用](#安装使用) • [开发指南](#开发指南) • [构建发布](#构建发布)
+[快速下载](#快速下载) • [功能特性](#功能特性) • [安装使用](#安装使用) • [开发指南](#开发指南) • [构建发布](#构建发布)
 
 </div>
 
 ## 📖 项目简介
 
 图像分类工具是一个基于 PyQt6 开发的桌面应用程序，专为需要快速整理和分类大量图片的用户设计。该工具具有直观的用户界面，支持多种图像格式，提供了高效的图像预加载和智能分类功能。
+
+## 📥 快速下载
+
+**最新版本**: [访问 Releases 页面下载](https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/releases)
+
+| 版本 | 平台 | 下载链接 | 大小 |
+|------|------|----------|------|
+| v5.3.0 | Windows | [ImageClassifier_v5.3.0.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/5.3.0/ImageClassifier_v5.3.0.exe) | ~86MB |
+| Latest | Windows | [ImageClassifier_latest.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/ImageClassifier_v5.3.0.exe) | ~86MB |
+
+> 💡 **快速开始**: 下载exe文件后双击即可运行，无需安装Python环境。
 
 ### 🎯 适用场景
 
@@ -93,8 +104,10 @@
 下载已编译的可执行文件，无需安装Python环境：
 
 1. 访问项目地址：https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier
-2. 进入 `dist/` 目录下载最新版本的 `图像分类工具_vx.x.x.exe`
+2. 进入 **Releases** 页面下载最新版本的 `ImageClassifier_vx.x.x.exe`
 3. 双击运行即可使用
+
+> 💡 **下载提示**: 点击 Release 页面的下载链接即可获取最新版本，无需克隆整个项目。
 
 ### 方式二：源码运行
 
@@ -116,7 +129,7 @@ python run.py
 
 ### 基本操作流程
 
-1. **启动程序**: 运行 `图像分类工具_v5.3.0.exe` 或 `python run.py`
+1. **启动程序**: 运行下载的 `ImageClassifier_vx.x.x.exe` 或 `python run.py`
 2. **选择目录**: 点击工具栏的"打开文件夹"按钮，选择包含图片的目录
 3. **创建分类**: 在分类区域添加需要的分类类别
 4. **开始分类**: 
@@ -221,26 +234,37 @@ python run.py
 
 ## 📦 构建发布
 
-### 构建可执行文件
+### 🤖 自动化发布流程
 
-项目提供了自动化构建脚本：
+项目使用 GitLab CI/CD 实现自动化构建和发布：
 
-```bash
-# 使用优化的构建脚本
-python build.py
-```
+**发布流程**：
+1. 推送版本标签（如 `v5.3.0`）
+2. 自动触发 CI/CD 构建流程
+3. 生成优化的 EXE 文件
+4. 上传到 Package Registry
+5. 创建 GitLab Release 页面
 
-构建特性：
+**构建特性**：
 - ✅ 单文件exe，无需额外依赖
 - ✅ 包含应用图标和资源文件  
 - ✅ 优化文件体积（约86MB）
 - ✅ 支持Windows 7+系统
-- ✅ 自动处理编码问题
+- ✅ 自动版本号管理
 
-### 构建输出
+### 🛠️ 本地构建（开发用）
 
-构建完成后会在 `dist/` 目录生成：
-- `图像分类工具_vx.x.x.exe` - 主程序文件
+开发者可以使用本地构建脚本进行测试：
+
+```bash
+# 安装构建依赖
+pip install pyinstaller
+
+# 运行构建脚本
+python build.py
+```
+
+> 📌 **注意**: 正式发布请使用 CI/CD 流程，确保构建一致性和版本管理。
 
 ## 🐛 问题排查
 
