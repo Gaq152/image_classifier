@@ -1,0 +1,275 @@
+# 图像分类工具 - GitLab CI/CD 配置
+# 支持 Windows 构建和自动发布
+
+image: registry.desauto.cn/ops/python:3.10.14-bookworm
+
+stages:
+  - build
+  - deploy
+
+variables:
+  # 包注册表配置
+  PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/image_classifier"
+  # 应用信息
+  APP_NAME: "图像分类工具"
+  APP_VERSION: "5.3.0"
+
+# 部署条件：仅在推送标签时执行
+.is_deploy:
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# Windows 构建任务
+windows_build:
+  stage: build
+  extends:
+    - .is_deploy
+  tags:
+    - win  # 需要 Windows Runner
+  before_script:
+    # 设置编码避免中文问题
+    - chcp 65001
+    - $env:PYTHONIOENCODING="utf-8"
+  script:
+    # 创建构建目录
+    - mkdir -Force dist
+    
+    # 检查 Python 版本
+    - python --version
+    - pip --version
+    
+    # 安装依赖
+    - echo "安装项目依赖..."
+    - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+    
+    # 安装 PyInstaller
+    - echo "安装 PyInstaller..."
+    - pip install pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+    
+    # 动态更新版本号（如果有标签）
+    - |
+      if ($env:CI_COMMIT_TAG) {
+        $version = $env:CI_COMMIT_TAG -replace '^v', ''
+        echo "更新版本号为: $version"
+        
+        # 更新 __init__.py 中的版本号
+        (Get-Content __init__.py) -replace '__version__ = "[^"]*"', "__version__ = `"$version`"" | Set-Content __init__.py
+        
+        # 更新 main.py 中的版本号
+        (Get-Content main.py) -replace '版本: \d+\.\d+\.\d+', "版本: $version" | Set-Content main.py
+        
+        # 更新 ui/main_window.py 中的版本号
+        (Get-Content ui/main_window.py) -replace 'self\.version = "[^"]*"', "self.version = `"$version`"" | Set-Content ui/main_window.py
+      }
+    
+    # 执行构建
+    - echo "开始构建可执行文件..."
+    - python build.py
+    
+    # 检查构建结果
+    - |
+      $exeFile = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
+      if ($exeFile) {
+        $size = [math]::Round($exeFile.Length / 1MB, 1)
+        echo "✓ 构建成功! 文件: $($exeFile.Name), 大小: ${size}MB"
+        
+        # 重命名为标准格式（如果有标签版本）
+        if ($env:CI_COMMIT_TAG) {
+          $version = $env:CI_COMMIT_TAG -replace '^v', ''
+          $newName = "图像分类工具_v${version}.exe"
+          if ($exeFile.Name -ne $newName) {
+            Rename-Item -Path $exeFile.FullName -NewName $newName
+            echo "✓ 文件已重命名为: $newName"
+          }
+        }
+      } else {
+        echo "✗ 构建失败，未找到exe文件"
+        exit 1
+      }
+  
+  artifacts:
+    name: "image_classifier_$CI_COMMIT_TAG"
+    paths:
+      - dist/*.exe
+    expire_in: 1 week
+    reports:
+      # 生成构建报告
+      artifacts: dist/*.exe
+
+# # Linux 构建任务（可选，如果需要支持Linux版本）
+# linux_build:
+#   stage: build
+#   extends:
+#     - .is_deploy
+#   script:
+#     # 安装系统依赖（用于 PyQt6 和 OpenCV）
+#     - apt-get update
+#     - apt-get install -y qt6-base-dev libgl1-mesa-glx libxcb-xinerama0 libxcb-cursor0
+    
+#     # 创建构建目录
+#     - mkdir -p dist
+    
+#     # 安装 Python 依赖
+#     - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+#     - pip install pyinstaller staticx
+    
+#     # 动态更新版本号
+#     - |
+#       if [ ! -z "$CI_COMMIT_TAG" ]; then
+#         version=$(echo $CI_COMMIT_TAG | sed 's/^v//')
+#         echo "更新版本号为: $version"
+        
+#         # 更新版本号
+#         sed -i "s/__version__ = \"[^\"]*\"/__version__ = \"$version\"/" __init__.py
+#         sed -i "s/版本: [0-9.]\+/版本: $version/" main.py
+#         sed -i "s/self\.version = \"[^\"]*\"/self.version = \"$version\"/" ui/main_window.py
+#       fi
+    
+#     # 构建 Linux 版本
+#     - python -m PyInstaller --onefile --windowed --name image_classifier_linux --icon assets/icon.ico run.py
+    
+#     # 使用 staticx 创建静态链接版本
+#     - staticx dist/image_classifier_linux image_classifier_linux_static
+#     - chmod +x image_classifier_linux_static
+    
+#     # 重命名为版本化文件名
+#     - |
+#       if [ ! -z "$CI_COMMIT_TAG" ]; then
+#         version=$(echo $CI_COMMIT_TAG | sed 's/^v//')
+#         mv image_classifier_linux_static "image_classifier_v${version}_linux"
+#         echo "✓ Linux版本构建完成: image_classifier_v${version}_linux"
+#       fi
+  
+#   artifacts:
+#     name: "image_classifier_linux_$CI_COMMIT_TAG"  
+#     paths:
+#       - image_classifier_v*_linux
+#     expire_in: 1 week
+  
+#   # 仅在需要Linux版本时启用
+#   when: manual
+
+# 发布任务
+release:
+  stage: deploy
+  image: registry.gddi.com/ops/release-cli:v0.14.0
+  extends:
+    - .is_deploy
+  dependencies:
+    - windows_build
+    # - linux_build  # 如果需要Linux版本则取消注释
+  script:
+    - set -x
+    
+    # 设置认证
+    - echo "machine gitlab.desauto.cn login gitlab-ci-token password $CI_JOB_TOKEN" > ~/.netrc
+    
+    # 检查构建产物
+    - ls -la dist/
+    - ls -la ./ | grep -E "\.(exe|linux)$" || true
+    
+    # 获取版本信息
+    - VERSION=$(echo $CI_COMMIT_TAG | sed 's/^v//')
+    - echo "发布版本: $VERSION"
+    
+    # 上传 Windows 版本
+    - |
+      WINDOWS_FILE=$(find dist -name "*.exe" -type f | head -1)
+      if [ -f "$WINDOWS_FILE" ]; then
+        echo "上传 Windows 版本: $WINDOWS_FILE"
+        
+        # 上传到指定版本目录
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+             --upload-file "$WINDOWS_FILE" \
+             "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $WINDOWS_FILE)"
+             
+        # 上传到 latest 目录
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+             --upload-file "$WINDOWS_FILE" \
+             "${PACKAGE_REGISTRY_URL}/latest/$(basename $WINDOWS_FILE)"
+             
+        echo "✓ Windows 版本上传成功"
+      else
+        echo "✗ 未找到 Windows exe 文件"
+        exit 1
+      fi
+    
+    # 上传 Linux 版本（如果存在）
+    - |
+      LINUX_FILE=$(find . -name "*linux" -type f | head -1)
+      if [ -f "$LINUX_FILE" ]; then
+        echo "上传 Linux 版本: $LINUX_FILE"
+        chmod +x "$LINUX_FILE"
+        
+        # 上传到指定版本目录
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+             --upload-file "$LINUX_FILE" \
+             "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $LINUX_FILE)"
+             
+        # 上传到 latest 目录  
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
+             --upload-file "$LINUX_FILE" \
+             "${PACKAGE_REGISTRY_URL}/latest/$(basename $LINUX_FILE)"
+             
+        echo "✓ Linux 版本上传成功"
+      else
+        echo "⚠ 未找到 Linux 版本文件（跳过）"
+      fi
+  
+  # GitLab Release 配置
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: '图像分类工具 $CI_COMMIT_TAG'
+    description: |
+      ## 🚀 图像分类工具 $CI_COMMIT_TAG 发布
+      
+      ### 📥 下载链接
+      - **Windows 版本**: [图像分类工具_v${CI_COMMIT_TAG#v}.exe](${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/图像分类工具_v${CI_COMMIT_TAG#v}.exe)
+      - **最新版本**: [latest](${PACKAGE_REGISTRY_URL}/latest/)
+      
+      ### 📋 系统要求
+      - **操作系统**: Windows 7 及以上版本
+      - **内存**: 4GB RAM 以上
+      - **存储**: 200MB 可用空间
+      
+      ### 🎯 主要功能
+      - 🖼️ 支持多种图片格式
+      - 📁 智能分类管理
+      - ⌨️ 丰富快捷键支持
+      - 🔄 复制/移动双模式
+      - 🎨 现代化用户界面
+      
+      ### 📝 更新说明
+      详细更新内容请查看 [CHANGELOG.md](../README.md#更新日志)
+    
+    assets:
+      links:
+        - name: 'Windows 版本'
+          url: "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/图像分类工具_v${CI_COMMIT_TAG#v}.exe"
+          filepath: '/图像分类工具.exe'
+          link_type: 'package'
+
+# 测试任务（可选）
+test:
+  stage: build
+  script:
+    - echo "运行项目测试..."
+    - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+    
+    # 语法检查
+    - python -m py_compile main.py
+    - python -m py_compile run.py
+    - python -c "import image_classifier; print('✓ 模块导入测试通过')"
+    
+    # 依赖检查
+    - python -c "import PyQt6; print('✓ PyQt6 可用')"
+    - python -c "import cv2; print('✓ OpenCV 可用')"
+    - python -c "import PIL; print('✓ Pillow 可用')"
+    - python -c "import psutil; print('✓ psutil 可用')"
+    
+    echo "✅ 所有测试通过"
+  
+  rules:
+    # 在合并请求和主分支推送时运行测试
+    - if: $CI_MERGE_REQUEST_ID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
