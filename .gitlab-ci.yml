@@ -38,55 +38,14 @@ windows_build:
     - chcp 65001
     - $env:PYTHONIOENCODING="utf-8"
   script:
-    # 创建构建目录
     - mkdir -Force dist
-    # 检查 Python 版本
-    - python --version
-    - pip --version
-    # 安装依赖
-    - echo "安装项目依赖..."
-    - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-    # 安装 PyInstaller
-    - echo "安装 PyInstaller..."
-    - pip install pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-    # 动态更新版本号（如果有标签）
-    - |
-      if ($env:CI_COMMIT_TAG) {
-        $version = $env:CI_COMMIT_TAG -replace '^v', ''
-        echo "更新版本号为: $version"
-        
-        # 更新 __init__.py 中的版本号
-        (Get-Content __init__.py) -replace '__version__ = "[^"]*"', "__version__ = `"$version`"" | Set-Content __init__.py
-        
-        # 更新 main.py 中的版本号
-        (Get-Content main.py) -replace '版本: \d+\.\d+\.\d+', "版本: $version" | Set-Content main.py
-        
-        # 更新 ui/main_window.py 中的版本号
-        (Get-Content ui/main_window.py) -replace 'self\.version = "[^"]*"', "self.version = `"$version`"" | Set-Content ui/main_window.py
-      }
-    # 执行构建
-    - echo "开始构建可执行文件..."
+    - pip install -r requirements.txt pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+    - if ($env:CI_COMMIT_TAG) { $version = $env:CI_COMMIT_TAG -replace '^v', ''; (Get-Content __init__.py) -replace '__version__ = "[^"]*"', "__version__ = `"$version`"" | Set-Content __init__.py }
     - python build.py
-    # 检查构建结果
-    - |
-      $exeFile = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
-      if ($exeFile) {
-        $size = [math]::Round($exeFile.Length / 1MB, 1)
-        echo "✓ 构建成功! 文件: $($exeFile.Name), 大小: ${size}MB"
-        
-        # 重命名为标准格式（如果有标签版本）
-        if ($env:CI_COMMIT_TAG) {
-          $version = $env:CI_COMMIT_TAG -replace '^v', ''
-          $newName = "图像分类工具_v${version}.exe"
-          if ($exeFile.Name -ne $newName) {
-            Rename-Item -Path $exeFile.FullName -NewName $newName
-            echo "✓ 文件已重命名为: $newName"
-          }
-        }
-      } else {
-        echo "✗ 构建失败，未找到exe文件"
-        exit 1
-      }
+    - $exe = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
+    - if (-not $exe) { echo "构建失败"; exit 1 }
+    - if ($env:CI_COMMIT_TAG) { $v = $env:CI_COMMIT_TAG -replace '^v', ''; Rename-Item $exe.FullName "图像分类工具_v$v.exe" }
+    - echo "✓ 构建完成"
   
   artifacts:
     name: "image_classifier_$CI_COMMIT_TAG"
@@ -94,32 +53,30 @@ windows_build:
       - dist/*.exe
     expire_in: 1 week
 
-# 发布任务
+# 上传文件任务
+upload:
+  stage: deploy
+  extends:
+    - .is_deploy
+  dependencies:
+    - windows_build
+  script:
+    - echo "machine gitlab.desauto.cn login gitlab-ci-token password $CI_JOB_TOKEN" > ~/.netrc
+    - WINDOWS_FILE=$(find dist -name "*.exe" -type f | head -1)
+    - test -f "$WINDOWS_FILE" || (echo "未找到exe文件" && exit 1)
+    - VERSION=$(echo $CI_COMMIT_TAG | sed 's/^v//')
+    - curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $WINDOWS_FILE)"
+    - curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/$(basename $WINDOWS_FILE)"
+    - echo "✓ 版本 $VERSION 上传成功"
+
+# GitLab Release 创建任务
 release:
   stage: deploy
   image: registry.gddi.com/ops/release-cli:v0.14.0
   extends:
     - .is_deploy
   dependencies:
-    - windows_build
-  script:
-    - set -x
-    # 设置认证
-    - echo "machine gitlab.desauto.cn login gitlab-ci-token password $CI_JOB_TOKEN" > ~/.netrc
-    # 检查构建产物
-    - ls -la dist/
-    - ls -la ./ | grep -E "\.(exe|linux)$" || true
-    # 获取版本信息
-    - VERSION=$(echo $CI_COMMIT_TAG | sed 's/^v//')
-    - echo "发布版本: $VERSION"
-    # 上传 Windows 版本
-    - WINDOWS_FILE=$(find dist -name "*.exe" -type f | head -1)
-    - 'if [ -f "$WINDOWS_FILE" ]; then echo "上传 Windows 版本: $WINDOWS_FILE"; else echo "✗ 未找到 Windows exe 文件"; exit 1; fi'
-    - 'curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $WINDOWS_FILE)"'
-    - 'curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/$(basename $WINDOWS_FILE)"'
-    - echo "✓ Windows 版本上传成功"
-  
-  # GitLab Release 配置
+    - upload
   release:
     tag_name: $CI_COMMIT_TAG
     name: '图像分类工具 $CI_COMMIT_TAG'
@@ -156,17 +113,8 @@ release:
 test:
   stage: build
   script:
-    - echo "运行项目测试..."
     - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-    # 语法检查
-    - python -m py_compile main.py
-    - python -m py_compile run.py
-    - python -c "import image_classifier; print('✓ 模块导入测试通过')"
-    # 依赖检查
-    - python -c "import PyQt6; print('✓ PyQt6 可用')"
-    - python -c "import cv2; print('✓ OpenCV 可用')"
-    - python -c "import PIL; print('✓ Pillow 可用')"
-    - python -c "import psutil; print('✓ psutil 可用')"
-    - echo "✅ 所有测试通过"
+    - python -m py_compile main.py run.py
+    - python -c "import image_classifier, PyQt6, cv2, PIL, psutil; print('✅ 所有测试通过')"
   
   # 测试任务会根据 workflow 规则自动运行
