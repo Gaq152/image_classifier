@@ -267,7 +267,7 @@ test:
     - python -c "import PIL; print('✓ Pillow 可用')"
     - python -c "import psutil; print('✓ psutil 可用')"
     
-    echo "✅ 所有测试通过"
+    - echo "✅ 所有测试通过"
   
   rules:
     # 在合并请求和主分支推送时运行测试
