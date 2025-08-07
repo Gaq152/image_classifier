@@ -92,9 +92,6 @@ windows_build:
     paths:
       - dist/*.exe
     expire_in: 1 week
-    reports:
-      # 生成构建报告
-      artifacts: dist/*.exe
 
 # # Linux 构建任务（可选，如果需要支持Linux版本）
 # linux_build:
@@ -173,47 +170,29 @@ release:
     - echo "发布版本: $VERSION"
     
     # 上传 Windows 版本
+    - WINDOWS_FILE=$(find dist -name "*.exe" -type f | head -1)
     - |
-      WINDOWS_FILE=$(find dist -name "*.exe" -type f | head -1)
       if [ -f "$WINDOWS_FILE" ]; then
-        echo "上传 Windows 版本: $WINDOWS_FILE"
-        
-        # 上传到指定版本目录
-        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
-             --upload-file "$WINDOWS_FILE" \
-             "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $WINDOWS_FILE)"
-             
-        # 上传到 latest 目录
-        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
-             --upload-file "$WINDOWS_FILE" \
-             "${PACKAGE_REGISTRY_URL}/latest/$(basename $WINDOWS_FILE)"
-             
-        echo "✓ Windows 版本上传成功"
+        echo "上传 Windows 版本: $WINDOWS_FILE";
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $WINDOWS_FILE)";
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/$(basename $WINDOWS_FILE)";
+        echo "✓ Windows 版本上传成功";
       else
-        echo "✗ 未找到 Windows exe 文件"
-        exit 1
+        echo "✗ 未找到 Windows exe 文件";
+        exit 1;
       fi
     
     # 上传 Linux 版本（如果存在）
+    - LINUX_FILE=$(find . -name "*linux" -type f | head -1)
     - |
-      LINUX_FILE=$(find . -name "*linux" -type f | head -1)
       if [ -f "$LINUX_FILE" ]; then
-        echo "上传 Linux 版本: $LINUX_FILE"
-        chmod +x "$LINUX_FILE"
-        
-        # 上传到指定版本目录
-        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
-             --upload-file "$LINUX_FILE" \
-             "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $LINUX_FILE)"
-             
-        # 上传到 latest 目录  
-        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" \
-             --upload-file "$LINUX_FILE" \
-             "${PACKAGE_REGISTRY_URL}/latest/$(basename $LINUX_FILE)"
-             
-        echo "✓ Linux 版本上传成功"
+        echo "上传 Linux 版本: $LINUX_FILE";
+        chmod +x "$LINUX_FILE";
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$LINUX_FILE" "${PACKAGE_REGISTRY_URL}/$CI_COMMIT_TAG/$(basename $LINUX_FILE)";
+        curl --fail --header "PRIVATE-TOKEN: ${CI_JOB_TOKEN}" --upload-file "$LINUX_FILE" "${PACKAGE_REGISTRY_URL}/latest/$(basename $LINUX_FILE)";
+        echo "✓ Linux 版本上传成功";
       else
-        echo "⚠ 未找到 Linux 版本文件（跳过）"
+        echo "⚠ 未找到 Linux 版本文件（跳过）";
       fi
   
   # GitLab Release 配置
@@ -266,7 +245,6 @@ test:
     - python -c "import cv2; print('✓ OpenCV 可用')"
     - python -c "import PIL; print('✓ Pillow 可用')"
     - python -c "import psutil; print('✓ psutil 可用')"
-    
     - echo "✅ 所有测试通过"
   
   rules:
