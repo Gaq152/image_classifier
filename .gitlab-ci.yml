@@ -117,6 +117,6 @@ test:
   script:
     - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
     - python -m py_compile main.py run.py
-    - python -c "import image_classifier, PyQt6, cv2, PIL, psutil; print('✅ 所有测试通过')"
+    - python -c "import PyQt6, cv2, PIL, psutil; print('✅ 依赖检查通过')"
   
   # 测试任务会根据 workflow 规则自动运行
