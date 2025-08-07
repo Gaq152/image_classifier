@@ -87,59 +87,6 @@ windows_build:
       - dist/*.exe
     expire_in: 1 week
 
-# # Linux 构建任务（可选，如果需要支持Linux版本）
-# linux_build:
-#   stage: build
-#   extends:
-#     - .is_deploy
-#   script:
-#     # 安装系统依赖（用于 PyQt6 和 OpenCV）
-#     - apt-get update
-#     - apt-get install -y qt6-base-dev libgl1-mesa-glx libxcb-xinerama0 libxcb-cursor0
-    
-#     # 创建构建目录
-#     - mkdir -p dist
-    
-#     # 安装 Python 依赖
-#     - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-#     - pip install pyinstaller staticx
-    
-#     # 动态更新版本号
-#     - |
-#       if [ ! -z "$CI_COMMIT_TAG" ]; then
-#         version=$(echo $CI_COMMIT_TAG | sed 's/^v//')
-#         echo "更新版本号为: $version"
-        
-#         # 更新版本号
-#         sed -i "s/__version__ = \"[^\"]*\"/__version__ = \"$version\"/" __init__.py
-#         sed -i "s/版本: [0-9.]\+/版本: $version/" main.py
-#         sed -i "s/self\.version = \"[^\"]*\"/self.version = \"$version\"/" ui/main_window.py
-#       fi
-    
-#     # 构建 Linux 版本
-#     - python -m PyInstaller --onefile --windowed --name image_classifier_linux --icon assets/icon.ico run.py
-    
-#     # 使用 staticx 创建静态链接版本
-#     - staticx dist/image_classifier_linux image_classifier_linux_static
-#     - chmod +x image_classifier_linux_static
-    
-#     # 重命名为版本化文件名
-#     - |
-#       if [ ! -z "$CI_COMMIT_TAG" ]; then
-#         version=$(echo $CI_COMMIT_TAG | sed 's/^v//')
-#         mv image_classifier_linux_static "image_classifier_v${version}_linux"
-#         echo "✓ Linux版本构建完成: image_classifier_v${version}_linux"
-#       fi
-  
-#   artifacts:
-#     name: "image_classifier_linux_$CI_COMMIT_TAG"  
-#     paths:
-#       - image_classifier_v*_linux
-#     expire_in: 1 week
-  
-#   # 仅在需要Linux版本时启用
-#   when: manual
-
 # 发布任务
 release:
   stage: deploy
