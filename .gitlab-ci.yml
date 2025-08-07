@@ -33,19 +33,15 @@ windows_build:
   script:
     # 创建构建目录
     - mkdir -Force dist
-    
     # 检查 Python 版本
     - python --version
     - pip --version
-    
     # 安装依赖
     - echo "安装项目依赖..."
     - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-    
     # 安装 PyInstaller
     - echo "安装 PyInstaller..."
     - pip install pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-    
     # 动态更新版本号（如果有标签）
     - |
       if ($env:CI_COMMIT_TAG) {
@@ -61,11 +57,9 @@ windows_build:
         # 更新 ui/main_window.py 中的版本号
         (Get-Content ui/main_window.py) -replace 'self\.version = "[^"]*"', "self.version = `"$version`"" | Set-Content ui/main_window.py
       }
-    
     # 执行构建
     - echo "开始构建可执行文件..."
     - python build.py
-    
     # 检查构建结果
     - |
       $exeFile = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
@@ -157,18 +151,14 @@ release:
     # - linux_build  # 如果需要Linux版本则取消注释
   script:
     - set -x
-    
     # 设置认证
     - echo "machine gitlab.desauto.cn login gitlab-ci-token password $CI_JOB_TOKEN" > ~/.netrc
-    
     # 检查构建产物
     - ls -la dist/
     - ls -la ./ | grep -E "\.(exe|linux)$" || true
-    
     # 获取版本信息
     - VERSION=$(echo $CI_COMMIT_TAG | sed 's/^v//')
     - echo "发布版本: $VERSION"
-    
     # 上传 Windows 版本
     - WINDOWS_FILE=$(find dist -name "*.exe" -type f | head -1)
     - |
@@ -181,7 +171,6 @@ release:
         echo "✗ 未找到 Windows exe 文件";
         exit 1;
       fi
-    
     # 上传 Linux 版本（如果存在）
     - LINUX_FILE=$(find . -name "*linux" -type f | head -1)
     - |
@@ -234,12 +223,10 @@ test:
   script:
     - echo "运行项目测试..."
     - pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-    
     # 语法检查
     - python -m py_compile main.py
     - python -m py_compile run.py
     - python -c "import image_classifier; print('✓ 模块导入测试通过')"
-    
     # 依赖检查
     - python -c "import PyQt6; print('✓ PyQt6 可用')"
     - python -c "import cv2; print('✓ OpenCV 可用')"
