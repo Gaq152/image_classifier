@@ -46,6 +46,15 @@ class ImageClassifier(QMainWindow):
         self.version = "5.3.0"
         self.logger = logging.getLogger(__name__)
         
+        # 初始化焦点管理
+        self._shortcuts_active = True
+        self._last_focus_time = time.time()
+        
+        # 设置定期的快捷键状态检查定时器
+        self._shortcut_monitor_timer = QTimer()
+        self._shortcut_monitor_timer.timeout.connect(self._periodic_shortcut_check)
+        self._shortcut_monitor_timer.start(30000)  # 每30秒检查一次
+        
         # 初始化核心组件
         self.init_core_components()
         
@@ -709,52 +718,115 @@ class ImageClassifier(QMainWindow):
     
     @performance_monitor
     def setup_shortcuts(self):
-        """设置快捷键"""
-        # 清除现有的快捷键
-        for action in self.actions():
-            self.removeAction(action)
+        """设置快捷键 - 改进版本，增加错误处理和状态检查"""
+        try:
+            self.logger.debug("开始设置快捷键...")
             
-        # 设置基本导航快捷键
-        shortcuts = {
-            Qt.Key.Key_Left: self.prev_image,
-            Qt.Key.Key_Right: self.next_image,
-            Qt.Key.Key_Up: self.prev_category,
-            Qt.Key.Key_Down: self.next_category,
-            Qt.Key.Key_Return: self.confirm_category,
-            Qt.Key.Key_Delete: self.move_to_remove,
-            Qt.Key.Key_F: lambda: self.image_label.fit_to_window(),
-            Qt.Key.Key_F5: self.refresh_categories,
-        }
-        
-        # 设置组合快捷键（用于图像控制）
-        combo_shortcuts = {
-            'Ctrl+=': lambda: self.image_label.zoom_in(),
-            'Ctrl+-': lambda: self.image_label.zoom_out(),
-            'Ctrl+0': lambda: self.image_label.reset_zoom(),
-        }
-        
-        # 创建基本快捷键
-        for key, func in shortcuts.items():
-            action = QAction(self)
-            action.setShortcut(QKeySequence(key))
-            action.triggered.connect(func)
-            self.addAction(action)
+            # 清除现有的快捷键，但保留系统默认的
+            existing_actions = self.actions()
+            for action in existing_actions[:]:  # 使用副本避免迭代时修改列表
+                try:
+                    self.removeAction(action)
+                    action.deleteLater()  # 确保清理资源
+                except Exception as e:
+                    self.logger.warning(f"清除快捷键失败: {e}")
+                    
+            # 设置基本导航快捷键
+            shortcuts = {
+                Qt.Key.Key_Left: self.prev_image,
+                Qt.Key.Key_Right: self.next_image,
+                Qt.Key.Key_Up: self.prev_category,
+                Qt.Key.Key_Down: self.next_category,
+                Qt.Key.Key_Return: self.confirm_category,
+                Qt.Key.Key_Delete: self.move_to_remove,
+                Qt.Key.Key_F: lambda: self.image_label.fit_to_window() if hasattr(self, 'image_label') else None,
+                Qt.Key.Key_F5: self.refresh_categories,
+            }
             
-        # 创建组合快捷键
-        for key_combo, func in combo_shortcuts.items():
-            action = QAction(self)
-            action.setShortcut(QKeySequence(key_combo))
-            action.triggered.connect(func)
-            self.addAction(action)
+            # 设置组合快捷键（用于图像控制）
+            combo_shortcuts = {
+                'Ctrl+=': lambda: self.image_label.zoom_in() if hasattr(self, 'image_label') else None,
+                'Ctrl+-': lambda: self.image_label.zoom_out() if hasattr(self, 'image_label') else None,
+                'Ctrl+0': lambda: self.image_label.reset_zoom() if hasattr(self, 'image_label') else None,
+            }
             
-        # 设置类别快捷键
-        if hasattr(self, 'config') and self.config:
-            for category_name, key in self.config.category_shortcuts.items():
-                if key and category_name in self.categories:
+            # 创建基本快捷键
+            success_count = 0
+            for key, func in shortcuts.items():
+                try:
                     action = QAction(self)
                     action.setShortcut(QKeySequence(key))
-                    action.triggered.connect(lambda checked, name=category_name: self.quick_classify_by_name(name))
+                    # 使用安全的连接方式
+                    action.triggered.connect(lambda checked, f=func: self._safe_execute_shortcut(f))
                     self.addAction(action)
+                    success_count += 1
+                except Exception as e:
+                    self.logger.error(f"创建基本快捷键失败 {key}: {e}")
+                    
+            # 创建组合快捷键
+            for key_combo, func in combo_shortcuts.items():
+                try:
+                    action = QAction(self)
+                    action.setShortcut(QKeySequence(key_combo))
+                    action.triggered.connect(lambda checked, f=func: self._safe_execute_shortcut(f))
+                    self.addAction(action)
+                    success_count += 1
+                except Exception as e:
+                    self.logger.error(f"创建组合快捷键失败 {key_combo}: {e}")
+                    
+            # 设置类别快捷键
+            if hasattr(self, 'config') and self.config and hasattr(self, 'categories'):
+                for category_name, key in self.config.category_shortcuts.items():
+                    try:
+                        if key and category_name in self.categories:
+                            action = QAction(self)
+                            action.setShortcut(QKeySequence(key))
+                            action.triggered.connect(lambda checked, name=category_name: self._safe_execute_shortcut(lambda: self.quick_classify_by_name(name)))
+                            self.addAction(action)
+                            success_count += 1
+                    except Exception as e:
+                        self.logger.error(f"创建类别快捷键失败 {category_name}->{key}: {e}")
+            
+            self.logger.debug(f"快捷键设置完成，成功创建 {success_count} 个快捷键")
+            
+        except Exception as e:
+            self.logger.error(f"设置快捷键时发生严重错误: {e}")
+            # 尝试恢复基本功能
+            self._setup_minimal_shortcuts()
+    
+    def _safe_execute_shortcut(self, func):
+        """安全执行快捷键函数"""
+        try:
+            if not self._shortcuts_active:
+                self.logger.debug("快捷键被禁用，跳过执行")
+                return
+                
+            if func:
+                func()
+        except Exception as e:
+            self.logger.error(f"执行快捷键函数失败: {e}")
+    
+    def _setup_minimal_shortcuts(self):
+        """设置最小化快捷键集合（紧急恢复用）"""
+        try:
+            self.logger.info("尝试设置最小化快捷键...")
+            minimal_shortcuts = {
+                Qt.Key.Key_Left: self.prev_image,
+                Qt.Key.Key_Right: self.next_image,
+                Qt.Key.Key_F5: self.refresh_categories,
+            }
+            
+            for key, func in minimal_shortcuts.items():
+                try:
+                    action = QAction(self)
+                    action.setShortcut(QKeySequence(key))
+                    action.triggered.connect(func)
+                    self.addAction(action)
+                except Exception as e:
+                    self.logger.error(f"最小化快捷键设置失败 {key}: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"最小化快捷键设置严重失败: {e}")
     
     def quick_classify_by_name(self, category):
         """通过类别名称快速分类"""
@@ -2629,6 +2701,9 @@ class ImageClassifier(QMainWindow):
                 # 强制重新计算类别计数
                 self.init_category_counts()
                 
+                # 健康检查并修复快捷键（这是关键修复）
+                QTimer.singleShot(100, self._check_and_fix_shortcuts)
+                
                 # 强制更新所有UI组件，无论是否检测到变化
                 self.schedule_ui_update('image_list', 'category_buttons', 'category_counts', 'statistics')
                 
@@ -2644,6 +2719,54 @@ class ImageClassifier(QMainWindow):
             except Exception as e:
                 self.logger.error(f"刷新目录状态失败: {e}")
                 self.show_error_message("错误", f"刷新失败: {str(e)}")
+    
+    def _check_and_fix_shortcuts(self):
+        """检查并修复快捷键状态 - 这是解决按键失效的关键方法"""
+        try:
+            self.logger.debug("开始快捷键健康检查...")
+            
+            # 检查当前快捷键数量
+            current_actions = len(self.actions())
+            expected_minimum = 10  # 预期最少应该有10个快捷键
+            
+            if current_actions < expected_minimum:
+                self.logger.warning(f"检测到快捷键数量异常: {current_actions} < {expected_minimum}，正在重新设置")
+                self.setup_shortcuts()
+            
+            # 重新激活快捷键状态
+            self._shortcuts_active = True
+            
+            # 确保窗口有焦点时快捷键可用
+            if self.isActiveWindow():
+                self.setFocus()
+                self.logger.debug("窗口焦点已恢复")
+            
+            self.logger.debug(f"快捷键健康检查完成 - 当前快捷键数量: {len(self.actions())}")
+            
+        except Exception as e:
+            self.logger.error(f"快捷键健康检查失败: {e}")
+            # 作为最后手段，重新设置快捷键
+            try:
+                self.setup_shortcuts()
+            except Exception as setup_error:
+                self.logger.error(f"紧急修复快捷键也失败: {setup_error}")
+    
+    def _periodic_shortcut_check(self):
+        """定期检查快捷键状态（每30秒执行一次）"""
+        try:
+            current_actions = len(self.actions())
+            expected_minimum = 8  # 至少应有的基本快捷键数量
+            
+            if current_actions < expected_minimum:
+                self.logger.warning(f"定期检查发现快捷键丢失: {current_actions} < {expected_minimum}")
+                self._check_and_fix_shortcuts()
+            elif not self._shortcuts_active and self.isActiveWindow():
+                # 如果窗口是激活的但快捷键被禁用，重新激活
+                self._shortcuts_active = True
+                self.logger.debug("定期检查：重新激活快捷键状态")
+                
+        except Exception as e:
+            self.logger.error(f"定期快捷键检查失败: {e}")
     
     def _sync_file_states(self):
         """同步文件状态与实际目录"""
@@ -3051,11 +3174,48 @@ class ImageClassifier(QMainWindow):
         dialog = TabbedHelpDialog(self.version, self)
         dialog.exec()
     
+    def focusInEvent(self, event):
+        """窗口获得焦点时的处理"""
+        try:
+            super().focusInEvent(event)
+            self._shortcuts_active = True
+            self._last_focus_time = time.time()
+            self.logger.debug("窗口获得焦点，快捷键已激活")
+        except Exception as e:
+            self.logger.error(f"焦点获得事件处理失败: {e}")
+    
+    def focusOutEvent(self, event):
+        """窗口失去焦点时的处理"""
+        try:
+            super().focusOutEvent(event)
+            # 不立即禁用快捷键，给一个短暂的缓冲期
+            QTimer.singleShot(500, self._check_focus_status)
+            self.logger.debug("窗口失去焦点，延迟检查快捷键状态")
+        except Exception as e:
+            self.logger.error(f"焦点丢失事件处理失败: {e}")
+    
+    def _check_focus_status(self):
+        """检查焦点状态"""
+        try:
+            if not self.isActiveWindow():
+                self._shortcuts_active = False
+                self.logger.debug("窗口非激活状态，快捷键已暂停")
+            else:
+                self._shortcuts_active = True
+                self.logger.debug("窗口恢复激活状态，快捷键已重新激活")
+        except Exception as e:
+            self.logger.error(f"焦点状态检查失败: {e}")
+
     def keyPressEvent(self, event):
         """处理键盘事件 - 恢复上下键选择类别功能"""
         try:
+            # 检查快捷键是否激活
+            if not self._shortcuts_active:
+                self.logger.debug("快捷键未激活，尝试重新激活")
+                self._shortcuts_active = True
+                
             key = event.key()
-            self.logger.debug(f"键盘按键: {key} ({event.text()})")
+            self.logger.debug(f"键盘按键: {key} ({event.text()}) - 快捷键状态: {'激活' if self._shortcuts_active else '禁用'}")
             
             # 上下键选择类别
             if key == Qt.Key.Key_Up:
@@ -3307,15 +3467,12 @@ class ImageClassifier(QMainWindow):
             self.show_error_message("错误", f"删除失败: {str(e)}")
     
     def save_state(self):
-        """保存当前状态到图片同级目录"""
+        """异步保存当前状态到图片同级目录"""
         try:
             if not self.current_dir:
                 return
                 
-            # 状态文件保存在图片目录的父目录（同级目录），而不是图片目录内
-            parent_dir = self.current_dir.parent
-            state_file = parent_dir / 'classification_state.json'
-            
+            # 准备状态数据
             state_data = {
                 'classified_images': dict(self.classified_images),
                 'removed_images': list(self.removed_images),
@@ -3325,14 +3482,35 @@ class ImageClassifier(QMainWindow):
                 'is_multi_category': self.is_multi_category  # 保存分类模式状态
             }
             
+            # 状态文件保存在图片目录的父目录（同级目录），而不是图片目录内
+            parent_dir = self.current_dir.parent
+            state_file = parent_dir / 'classification_state.json'
+            
+            # 异步保存，避免阻塞UI
+            QTimer.singleShot(0, lambda: self._async_save_state(state_file, state_data))
+                
+        except Exception as e:
+            self.logger.error(f"准备保存状态失败: {e}")
+    
+    def _async_save_state(self, state_file, state_data):
+        """异步执行状态保存"""
+        try:
             import json
             with open(state_file, 'w', encoding='utf-8') as f:
                 json.dump(state_data, f, ensure_ascii=False, indent=2)
                 
-            self.logger.debug(f"状态已保存到: {state_file}")
+            self.logger.debug(f"状态已异步保存到: {state_file}")
                 
         except Exception as e:
-            self.logger.error(f"保存状态失败: {e}")
+            self.logger.error(f"异步保存状态失败: {e}")
+            # 如果异步保存失败，尝试同步保存作为备份
+            try:
+                import json
+                with open(state_file, 'w', encoding='utf-8') as f:
+                    json.dump(state_data, f, ensure_ascii=False, indent=2)
+                self.logger.info(f"备份同步保存成功: {state_file}")
+            except Exception as backup_error:
+                self.logger.error(f"备份保存也失败: {backup_error}")
 
     def _create_styled_message_box(self, icon_type, title, text, buttons=None):
         """创建具有统一样式和中文按钮的消息框"""
