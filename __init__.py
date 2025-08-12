@@ -2,5 +2,5 @@
 图像分类工具包初始化
 """
 
-__version__ = "5.3.0"
+from _version_ import __version__
 __author__ = "Image Classifier Team"
