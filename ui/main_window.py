@@ -43,7 +43,8 @@ class ImageClassifier(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.version = "5.3.0"
+        from .._version_ import __version__
+        self.version = __version__
         self.logger = logging.getLogger(__name__)
         
         # 初始化焦点管理

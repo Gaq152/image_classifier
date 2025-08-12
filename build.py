@@ -2,7 +2,7 @@
 """
 图像分类工具优化打包脚本
 精简依赖，修复编码问题，生成最小体积的exe文件
-版本: 5.3.0
+版本信息由 _version_.py 统一管理
 """
 
 import os
@@ -10,6 +10,7 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
+from _version_ import __version__, get_full_version_string, get_download_urls, print_version_info
 
 
 def check_pyinstaller():
@@ -88,7 +89,7 @@ def build_executable():
     
     # 项目信息 - 使用英文名称避免编码问题
     app_name = "ImageClassifier"
-    version = "5.3.0"
+    version = __version__
     final_name = f"ImageClassifier_v{version}"
     
     # 构建PyInstaller命令 - 精简版本
@@ -187,7 +188,7 @@ def main():
     """主函数"""
     print("=" * 60)
     print("图像分类工具 - 优化构建脚本")
-    print("版本: 5.3.0")
+    print(f"版本: {__version__}")
     print("特点: 精简依赖 + 修复编码 + 最小体积")
     print("=" * 60)
     
@@ -221,7 +222,8 @@ def main():
     
     print("\n" + "=" * 60)
     print("✅ 优化构建完成!")
-    print("📁 可执行文件: dist/图像分类工具_v5.3.0.exe")
+    download_urls = get_download_urls()
+    print(f"📁 可执行文件: dist/{download_urls['exe_name_chinese']}")
     print("✨ 包含完整功能，去除冗余依赖")
     print("=" * 60)
     

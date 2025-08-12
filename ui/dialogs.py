@@ -15,6 +15,7 @@ from PyQt6.QtGui import QKeySequence
 
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..utils.exceptions import FileOperationError
+from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY
 
 
 class CategoryShortcutDialog(QDialog):
@@ -1042,6 +1043,51 @@ class TabbedHelpDialog(QDialog):
         layout.addWidget(text_browser)
         
         return widget
+    
+    def _generate_version_history_html(self):
+        """生成版本历史HTML内容"""
+        html_parts = []
+        
+        # 版本样式配色
+        version_styles = [
+            {"bg": "#e8f5e8", "border": "#4caf50", "text": "#2e7d32", "emoji": "🎉", "label": "(当前版本)"},
+            {"bg": "#f0f7ff", "border": "#2196f3", "text": "#1565c0", "emoji": "✨", "label": ""},
+            {"bg": "#f8f9fa", "border": "#6c757d", "text": "#495057", "emoji": "🚀", "label": ""},
+            {"bg": "#fff3e0", "border": "#ff9800", "text": "#ef6c00", "emoji": "🔧", "label": ""},
+            {"bg": "#fce4ec", "border": "#e91e63", "text": "#c2185b", "emoji": "📦", "label": ""},
+        ]
+        
+        for i, version_info in enumerate(VERSION_HISTORY):
+            style = version_styles[min(i, len(version_styles) - 1)]
+            
+            # 当前版本标记
+            version_label = style["label"] if i == 0 else ""
+            
+            html_part = f'''
+            <div style="background-color: {style["bg"]}; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid {style["border"]};">
+            <h4 style="color: {style["text"]}; margin: 0 0 10px 0;">{style["emoji"]} v{version_info["version"]} {version_label} - {version_info["date"]}</h4>
+            '''
+            
+            if version_info.get("title"):
+                html_part += f'<p style="margin: 0 0 10px 0; font-weight: bold; color: {style["text"]};">{version_info["title"]}</p>'
+            
+            # 添加亮点
+            if version_info.get("highlights"):
+                html_part += '<ul style="margin: 5px 0; padding-left: 20px;">'
+                for highlight in version_info["highlights"]:
+                    html_part += f'<li>{highlight}</li>'
+                html_part += '</ul>'
+            # 如果没有亮点，使用详细信息的前几项
+            elif version_info.get("details"):
+                html_part += '<ul style="margin: 5px 0; padding-left: 20px;">'
+                for detail in version_info["details"][:4]:  # 只显示前4项
+                    html_part += f'<li>{detail}</li>'
+                html_part += '</ul>'
+            
+            html_part += '</div>'
+            html_parts.append(html_part)
+        
+        return '\n'.join(html_parts)
         
     def create_about_tab(self):
         """创建关于标签页"""
@@ -1052,8 +1098,11 @@ class TabbedHelpDialog(QDialog):
         
         text_browser = QTextBrowser()
         
+        # 获取版本信息
+        about_info = get_about_info()
+        
         about_text = f'''
-        <h2>📱 图片分类工具 v{self.version}</h2>
+        <h2>📱 图片分类工具 v{about_info["version"]}</h2>
         
         <div style="text-align: center; background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); color: black; padding: 20px; border-radius: 10px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border: 1px solid #ddd;">
         <h3 style="margin: 0; color: black;">🎯 专业图片分类管理工具</h3>
@@ -1143,60 +1192,7 @@ class TabbedHelpDialog(QDialog):
         
         <h3>📈 版本发展历程</h3>
         <div style="margin: 20px 0;">
-        
-        <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #4caf50;">
-        <h4 style="color: #2e7d32; margin: 0 0 10px 0;">🎉 v5.3.0 (当前版本) - 2025年8月</h4>
-        <ul style="margin: 5px 0; padding-left: 20px;">
-        <li><b>🔧 多分类增强</b>：修复撤销操作，复制模式自动删除文件</li>
-        <li><b>🚫 模式保护</b>：移动/多分类模式互斥，双向拦截保护</li>
-        <li><b>🔍 重复检测</b>：完善同名文件处理，支持Hash比较和智能选择</li>
-        <li><b>💬 弹窗优化</b>：统一样式设计，中文化按钮，提升用户体验</li>
-        <li><b>🛠️ 路径修复</b>：解决打包后图标和日志路径问题</li>
-        <li><b>📊 日志增强</b>：智能路径选择机制，兼容开发和部署环境</li>
-        </ul>
-        </div>
-        
-        <div style="background-color: #f0f7ff; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #2196f3;">
-        <h4 style="color: #1565c0; margin: 0 0 10px 0;">✨ v5.2.0 - 2025年8月</h4>
-        <ul style="margin: 5px 0; padding-left: 20px;">
-        <li><b>🎨 界面美化</b>：统一滚动条样式设计</li>
-        <li><b>🐛 构建修复</b>：解决编码问题，优化打包流程</li>
-        <li><b>⚡ 体积优化</b>：exe文件减少37%，降至86MB</li>
-        <li><b>🔧 功能完善</b>：改进快捷键系统和类别管理</li>
-        </ul>
-        </div>
-        
-        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #6c757d;">
-        <h4 style="color: #495057; margin: 0 0 10px 0;">🚀 v5.0.0 - 2025年7月</h4>
-        <ul style="margin: 5px 0; padding-left: 20px;">
-        <li><b>✨ 全新UI设计</b>：现代化界面</li>
-        <li><b>🖼️ 图片浏览增强</b>：3倍缩放限制，拖拽移动优化</li>
-        <li><b>📖 帮助系统重构</b>：多标签页详细文档</li>
-        <li><b>⚡ 性能大幅提升</b>：网络存储优化，智能缓存</li>
-        <li><b>🔧 工具栏简化</b>：移除冗余按钮，专注核心功能</li>
-        </ul>
-        </div>
-        
-        <div style="background-color: #fff3e0; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #ff9800;">
-        <h4 style="color: #ef6c00; margin: 0 0 10px 0;">🔧 v4.2.0 - 2025年6月</h4>
-        <ul style="margin: 5px 0; padding-left: 20px;">
-        <li>重新设计工具栏布局，提高易用性</li>
-        <li>增加快捷键展示功能</li>
-        <li>实现标签页帮助系统</li>
-        <li>增加手动同步目录改动功能</li>
-        </ul>
-        </div>
-        
-        <div style="background-color: #fce4ec; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #e91e63;">
-        <h4 style="color: #c2185b; margin: 0 0 10px 0;">📦 v3.8.0 - 2025年3月</h4>
-        <ul style="margin: 5px 0; padding-left: 20px;">
-        <li>基础图片分类功能</li>
-        <li>快捷键支持</li>
-        <li>简单的UI界面</li>
-        <li>基本的文件操作</li>
-        </ul>
-        </div>
-        
+        {self._generate_version_history_html()}
         </div>
 
         
