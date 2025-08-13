@@ -11,11 +11,15 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                             QMessageBox, QTabWidget, QProgressBar, QApplication, 
                             QWidget, QTextBrowser)
 from PyQt6.QtCore import Qt, pyqtSignal
+from typing import Optional
+import os
+import sys
 from PyQt6.QtGui import QKeySequence
 
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..utils.exceptions import FileOperationError
-from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY
+from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url
+from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
 
 
 class CategoryShortcutDialog(QDialog):
@@ -332,9 +336,10 @@ class AddCategoriesDialog(QDialog):
 class TabbedHelpDialog(QDialog):
     """带标签页的帮助对话框"""
     
-    def __init__(self, version, parent=None):
+    def __init__(self, version, parent=None, config=None):
         super().__init__(parent)
         self.version = version
+        self.config = getattr(parent, 'config', None) if config is None else config
         self.logger = logging.getLogger(__name__)
         self.initUI()
     
@@ -441,6 +446,52 @@ class TabbedHelpDialog(QDialog):
             # 创建标签页控件
             tab_widget = QTabWidget()
             
+            # 顶部操作区：更新相关
+            top_btn_bar = QHBoxLayout()
+            check_btn = QPushButton('检查更新')
+            # 使用带平滑动画的拨动开关（自绘QSS实现简单动画感）
+            from PyQt6.QtWidgets import QCheckBox
+            auto_chk = QCheckBox('')
+            auto_chk.setToolTip('启动时自动检查更新')
+            auto_chk.setStyleSheet('''
+                QCheckBox { spacing: 8px; }
+                QCheckBox::indicator {
+                    width: 44px; height: 24px;
+                }
+                QCheckBox::indicator:unchecked {
+                    border-radius: 12px;
+                    background-color: #cfd8dc;
+                    box-shadow: inset 0 0 2px rgba(0,0,0,.2);
+                }
+                QCheckBox::indicator:checked {
+                    border-radius: 12px;
+                    background-color: #66bb6a;
+                    box-shadow: inset 0 0 2px rgba(0,0,0,.2);
+                }
+            ''')
+            auto_enabled = True
+            if self.config and hasattr(self.config, 'auto_update_enabled'):
+                auto_enabled = bool(self.config.auto_update_enabled)
+            auto_chk.setChecked(auto_enabled)
+            def toggle_auto():
+                if not self.config:
+                    return
+                self.config.auto_update_enabled = bool(auto_chk.isChecked())
+                try:
+                    self.config.save_config()
+                except Exception as e:
+                    self.logger.error(f"保存自动更新配置失败: {e}")
+            auto_chk.clicked.connect(toggle_auto)
+            check_btn.clicked.connect(self._handle_check_update)
+            top_btn_bar.addWidget(check_btn)
+            top_btn_bar.addStretch()
+            # 右侧只显示拨动开关和标签，不重复文字
+            auto_label = QLabel('自动检查')
+            top_btn_bar.addWidget(auto_label)
+            top_btn_bar.addWidget(auto_chk)
+
+            layout.addLayout(top_btn_bar)
+
             # 添加快速入门标签页
             quick_start_tab = self.create_quick_start_tab()
             tab_widget.addTab(quick_start_tab, '🚀 快速入门')
@@ -482,6 +533,82 @@ class TabbedHelpDialog(QDialog):
             
         except Exception as e:
             self.logger.error(f"初始化帮助对话框UI失败: {e}")
+
+    def _handle_check_update(self):
+        try:
+            endpoint = None
+            token = ''
+            if self.config:
+                endpoint = getattr(self.config, 'update_endpoint', None)
+                token = getattr(self.config, 'update_token', '')
+            if not endpoint:
+                endpoint = get_manifest_url(latest=True)
+
+            manifest = fetch_manifest(endpoint, token or None)
+            new_ver = str(manifest.get('version', '')).strip()
+            url = str(manifest.get('url', '')).strip()
+            sha256 = str(manifest.get('sha256', '')).strip()
+            size_bytes = int(manifest.get('size_bytes', 0) or 0)
+            notes = str(manifest.get('notes', '')).strip()
+
+            from .._version_ import compare_version, __version__
+            if not new_ver or compare_version(new_ver, __version__) <= 0:
+                QMessageBox.information(self, '检查更新', '当前已是最新版本。')
+                return
+
+            size_mb = f"{size_bytes/1024/1024:.1f} MB" if size_bytes else "未知"
+            msg = f"发现新版本: v{new_ver}\n大小: {size_mb}\n\n更新说明:\n{notes or '无'}\n\n是否立即下载并更新？"
+            if QMessageBox.question(self, '发现新版本', msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+                return
+
+            # 下载
+            temp_dir = Path(os.getenv('TEMP') or Path.cwd())
+            dest = temp_dir / f"ImageClassifier_v{new_ver}.exe"
+
+            progress_dialog = QDialog(self)
+            progress_dialog.setWindowTitle('下载更新')
+            p_layout = QVBoxLayout(progress_dialog)
+            p_label = QLabel('正在下载更新包...')
+            p_bar = QProgressBar()
+            p_bar.setRange(0, 0)
+            p_layout.addWidget(p_label)
+            p_layout.addWidget(p_bar)
+            progress_dialog.setModal(True)
+            progress_dialog.show()
+            QApplication.processEvents()
+
+            def on_progress(done: int, total: Optional[int]):
+                if total and total > 0:
+                    p_bar.setRange(0, total)
+                    p_bar.setValue(done)
+                else:
+                    p_bar.setRange(0, 0)
+                QApplication.processEvents()
+
+            try:
+                download_with_progress(url, dest, token or None, on_progress)
+            finally:
+                progress_dialog.close()
+
+            # 校验哈希
+            if sha256:
+                actual = sha256_file(dest)
+                if actual.lower() != sha256.lower():
+                    QMessageBox.critical(self, '更新失败', f'文件校验失败，期望SHA256: {sha256}\n实际: {actual}')
+                    try:
+                        dest.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return
+
+            # 触发自更新
+            exe_path = Path(sys.executable)
+            launch_self_update(exe_path, dest)
+            QMessageBox.information(self, '更新', '更新程序已启动，应用将退出并自动完成更新。')
+            QApplication.quit()
+        except Exception as e:
+            self.logger.error(f"检查/更新失败: {e}")
+            QMessageBox.critical(self, '检查更新失败', str(e))
         
     def clear_smb_cache(self):
         """清理SMB缓存"""

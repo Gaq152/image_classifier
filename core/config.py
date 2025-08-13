@@ -124,6 +124,15 @@ class Config:
                 with self._lock:
                     self.category_order = config_data.get('category_order', [])
                     self.category_shortcuts = config_data.get('category_shortcuts', {})
+                    # 自动更新相关配置（默认值）
+                    self.auto_update_enabled = bool(config_data.get('auto_update_enabled', True))
+                    self.last_update_check_ts = int(config_data.get('last_update_check_ts', 0))
+                    # 默认读取 latest manifest
+                    from .._version_ import get_download_urls
+                    default_manifest = f"https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"
+                    self.update_endpoint = config_data.get('update_endpoint', default_manifest)
+                    # 私有仓库令牌（可为空）。建议使用只读 Project Access Token/Deploy Token
+                    self.update_token = config_data.get('update_token', '')
         except FileNotFoundError:
             with self._lock:
                 self.category_shortcuts = {}
@@ -139,7 +148,11 @@ class Config:
         try:
             config = {
                 'category_order': self.category_order,
-                'category_shortcuts': self.category_shortcuts
+                'category_shortcuts': self.category_shortcuts,
+                'auto_update_enabled': getattr(self, 'auto_update_enabled', True),
+                'last_update_check_ts': getattr(self, 'last_update_check_ts', 0),
+                'update_endpoint': getattr(self, 'update_endpoint', f"https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"),
+                'update_token': getattr(self, 'update_token', ''),
             }
             # 确保配置文件目录存在
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
