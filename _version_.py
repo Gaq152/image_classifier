@@ -190,7 +190,7 @@ BUILD_INFO = {
 # 下载信息
 DOWNLOAD_INFO = {
     "exe_name_template": "ImageClassifier_v{version}.exe",
-    "exe_name_chinese_template": "图像分类工具_v{version}.exe", 
+    "exe_name_chinese_template": "图像分类工具_v{version}.exe",
     "expected_size_mb": "~86MB",
     "gitlab_project_id": "820",
     "package_registry_base": "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier"
