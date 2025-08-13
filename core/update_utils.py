@@ -131,15 +131,11 @@ def build_update_batch(target_exe: Path, new_file: Path) -> str:
     return "\r\n".join(lines) + "\r\n"
 
 
-def launch_self_update(target_exe: Path, new_file: Path) -> None:
-    """写入批处理脚本并启动更新，随后由上层负责退出应用。"""
-    import subprocess
-
+def launch_self_update(target_exe: Path, new_file: Path) -> Path:
+    """写入批处理脚本并返回路径；由调用方决定何时启动、是否退出应用。"""
     temp_dir = Path(os.getenv('TEMP') or Path.cwd())
     batch_path = temp_dir / f"update_{int(time.time())}.cmd"
     batch_path.write_text(build_update_batch(target_exe, new_file), encoding='utf-8')
-
-    # 使用 start 独立窗口执行
-    subprocess.Popen(["cmd", "/c", "start", "", str(batch_path)], shell=False)
+    return batch_path
 
 

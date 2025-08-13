@@ -133,6 +133,8 @@ class Config:
                     self.update_endpoint = config_data.get('update_endpoint', default_manifest)
                     # 私有仓库令牌（可为空）。建议使用只读 Project Access Token/Deploy Token
                     self.update_token = config_data.get('update_token', '')
+                    # 待应用的本地更新包信息
+                    self.pending_update = config_data.get('pending_update', {})
         except FileNotFoundError:
             with self._lock:
                 self.category_shortcuts = {}
@@ -153,6 +155,7 @@ class Config:
                 'last_update_check_ts': getattr(self, 'last_update_check_ts', 0),
                 'update_endpoint': getattr(self, 'update_endpoint', f"https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"),
                 'update_token': getattr(self, 'update_token', ''),
+                'pending_update': getattr(self, 'pending_update', {}),
             }
             # 确保配置文件目录存在
             self.config_file.parent.mkdir(parents=True, exist_ok=True)

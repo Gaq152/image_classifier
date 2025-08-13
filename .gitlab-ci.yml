@@ -45,7 +45,7 @@ windows_build:
     - python build.py
     - $exe = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
     - if (-not $exe) { echo "构建失败"; exit 1 }
-    - if ($env:CI_COMMIT_TAG) { $v = $env:CI_COMMIT_TAG -replace '^v', ''; Rename-Item $exe.FullName "ImageClassifier_v$v.exe" }
+    - if ($env:CI_COMMIT_TAG) { $v = $env:CI_COMMIT_TAG -replace '^v', ''; Rename-Item $exe.FullName "ImageClassifier_v$v.exe" -Force }
     - echo "✓ 构建完成"
   
   artifacts:

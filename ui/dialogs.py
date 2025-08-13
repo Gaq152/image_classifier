@@ -461,12 +461,10 @@ class TabbedHelpDialog(QDialog):
                 QCheckBox::indicator:unchecked {
                     border-radius: 12px;
                     background-color: #cfd8dc;
-                    box-shadow: inset 0 0 2px rgba(0,0,0,.2);
                 }
                 QCheckBox::indicator:checked {
                     border-radius: 12px;
                     background-color: #66bb6a;
-                    box-shadow: inset 0 0 2px rgba(0,0,0,.2);
                 }
             ''')
             auto_enabled = True
@@ -563,6 +561,7 @@ class TabbedHelpDialog(QDialog):
 
             # 下载
             temp_dir = Path(os.getenv('TEMP') or Path.cwd())
+            # 文件名统一英文，避免编码问题；实际显示名不影响使用
             dest = temp_dir / f"ImageClassifier_v{new_ver}.exe"
 
             progress_dialog = QDialog(self)
@@ -601,11 +600,42 @@ class TabbedHelpDialog(QDialog):
                         pass
                     return
 
-            # 触发自更新
+            # 生成更新脚本，但不立即执行；由用户确认是否重启
             exe_path = Path(sys.executable)
-            launch_self_update(exe_path, dest)
-            QMessageBox.information(self, '更新', '更新程序已启动，应用将退出并自动完成更新。')
-            QApplication.quit()
+            batch_path = launch_self_update(exe_path, dest)
+
+            # 记录待更新信息到配置
+            if self.config:
+                self.config.pending_update = {
+                    'version': new_ver,
+                    'download_path': str(dest),
+                    'batch_path': str(batch_path),
+                    'sha256': sha256,
+                }
+                try:
+                    self.config.save_config()
+                except Exception as e:
+                    self.logger.debug(f"保存pending_update失败: {e}")
+
+            # 询问是否立即重启更新
+            reply = QMessageBox.question(
+                self,
+                '更新下载完成',
+                '更新包已准备就绪，是否立即重启并完成更新？\n\n选择“否”将暂不重启，下次启动会继续提示。',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                # 启动批处理并退出
+                try:
+                    import subprocess
+                    subprocess.Popen(["cmd", "/c", "start", "", str(batch_path)], shell=False)
+                except Exception as e:
+                    QMessageBox.critical(self, '更新失败', f'无法启动更新程序: {e}')
+                    return
+                QMessageBox.information(self, '更新', '更新程序已启动，应用将退出并自动完成更新。')
+                QApplication.quit()
+            else:
+                QMessageBox.information(self, '更新已准备', '已保存更新包，稍后您可在帮助中手动执行更新。')
         except Exception as e:
             self.logger.error(f"检查/更新失败: {e}")
             QMessageBox.critical(self, '检查更新失败', str(e))
