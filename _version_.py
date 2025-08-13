@@ -16,7 +16,7 @@ __version__ = "6.0.0"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
-RELEASE_DATE = "2025-08-13"
+RELEASE_DATE = "2025-08-14"
 RELEASE_NAME = "图像分类工具"
 
 # ================================
@@ -24,6 +24,25 @@ RELEASE_NAME = "图像分类工具"
 # ================================
 
 VERSION_HISTORY = [
+    {
+        "version": "6.0.0",
+        "date": "2025-08-14",
+        "title": "自动更新功能（重大更新）",
+        "highlights": [
+            "✨ 内置在线更新：latest/manifest.json 检查、下载、校验、自动重启安装",
+            "🧩 统一 update/update.bat：支持程序调用与手动双击运行",
+            "🔒 原子替换与清理：.new/.old 机制，保留新文件名并删除旧版",
+            "🌐 URL/中文路径全面兼容：UTF-8 控制台、URL 编码与中文文件名",
+            "🧰 更详细的更新日志与可控自动检查开关"
+        ],
+        "details": [
+            "新增：应用内一键更新流程，下载完成后可选择立即重启安装",
+            "新增：统一的 update.bat 持久化脚本，支持在线/离线安装",
+            "改进：批处理 3s 延迟启动新程序，避免 Python DLL 读写竞争",
+            "改进：更新日志等级分级，保留关键 INFO，细节 DEBUG",
+            "修复：PyInstaller _MEI 临时目录相关报错弹窗",
+        ]
+    },
     {
         "version": "5.4.4",
         "date": "2025-08-13", 
