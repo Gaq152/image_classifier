@@ -43,7 +43,7 @@ class CategoryShortcutDialog(QDialog):
         layout.addLayout(row)
         
         # 添加说明标签
-        tip_label = QLabel('支持单个按键或组合键(Ctrl+, Alt+, Shift+)\\n按ESC清除快捷键')
+        tip_label = QLabel('支持单个按键或组合键(Ctrl+, Alt+, Shift+)\n按ESC清除快捷键')
         tip_label.setStyleSheet('color: gray;')
         layout.addWidget(tip_label)
         
@@ -91,28 +91,53 @@ class CategoryShortcutDialog(QDialog):
             # 检查快捷键是否可用
             if not self.config.is_shortcut_available(shortcut):
                 # 详细检查冲突原因
-                if shortcut in self.config.reserved_shortcuts:
+                normalized_shortcut = self.config._normalize_shortcut(shortcut)
+                
+                # 检查是否为保留快捷键
+                if normalized_shortcut in self.config.reserved_shortcuts:
                     QMessageBox.warning(self, '快捷键冲突', 
-                        f'快捷键 "{shortcut}" 是系统保留快捷键，不能使用。\\n\\n'
-                        f'系统保留快捷键包括：\\n'
-                        f'• 导航键：← → ↑ ↓ Enter Delete\\n'
-                        f'• 图像控制：Ctrl+0 Ctrl+= Ctrl+- F\\n'
-                        f'• 系统功能：F5 Escape 等\\n'
+                        f'快捷键 "{shortcut}" 是系统保留快捷键，不能使用。\n\n'
+                        f'系统保留快捷键包括：\n'
+                        f'• 导航键：← → ↑ ↓ Enter Delete\n'
+                        f'• 图像控制：Ctrl+0 Ctrl+= Ctrl+- Ctrl+F\n'
+                        f'• 系统功能：F5 Escape 等\n'
                         f'• 常用快捷键：Ctrl+C Ctrl+V 等')
-                elif shortcut in self.config.category_shortcuts.values():
-                    # 找出使用该快捷键的类别
+                else:
+                    # 找出使用该快捷键的类别（大小写不敏感）
                     conflict_category = None
+                    conflict_key = None
                     for cat, key in self.config.category_shortcuts.items():
-                        if key == shortcut and cat != self.category:
+                        if cat != self.category and self.config._normalize_shortcut(key) == normalized_shortcut:
                             conflict_category = cat
+                            conflict_key = key
                             break
-                    QMessageBox.warning(self, '快捷键冲突', 
-                        f'快捷键 "{shortcut}" 已被类别 "{conflict_category}" 使用。\\n'
-                        f'请选择其他快捷键。')
+                    
+                    if conflict_category:
+                        case_note = ""
+                        if conflict_key != shortcut:
+                            case_note = f"\n\n注意：该快捷键已以 \"{conflict_key}\" 的形式被使用。\n字母快捷键不区分大小写。"
+                        
+                        QMessageBox.warning(self, '快捷键冲突', 
+                            f'快捷键 "{shortcut}" 已被类别 "{conflict_category}" 使用。{case_note}\n'
+                            f'请选择其他快捷键。')
+                    else:
+                        QMessageBox.warning(self, '快捷键冲突', 
+                            f'快捷键 "{shortcut}" 已被占用，请选择其他快捷键。')
                 return
                 
-            self.edit.setText(shortcut)
-            self.config.category_shortcuts[self.category] = shortcut
+            # 统一存储格式：单字母快捷键存储为小写
+            stored_shortcut = shortcut
+            if len(shortcut) == 1 and shortcut.isalpha():
+                stored_shortcut = shortcut.lower()
+            elif '+' in shortcut:
+                # 组合键，只将最后的字母部分转为小写
+                parts = shortcut.split('+')
+                if len(parts[-1]) == 1 and parts[-1].isalpha():
+                    parts[-1] = parts[-1].lower()
+                    stored_shortcut = '+'.join(parts)
+            
+            self.edit.setText(shortcut)  # 显示用户输入的原始格式
+            self.config.category_shortcuts[self.category] = stored_shortcut  # 存储标准化格式
             
         except Exception as e:
             self.logger.error(f"处理快捷键事件失败: {e}")
@@ -136,13 +161,13 @@ class AddCategoriesDialog(QDialog):
             layout = QVBoxLayout(self)
             
             # 添加说明标签
-            tip_label = QLabel('请输入类别名称，多个类别用逗号或换行分隔\\n已存在的类别会被自动忽略')
+            tip_label = QLabel('请输入类别名称，多个类别用逗号或换行分隔\n已存在的类别会被自动忽略')
             tip_label.setStyleSheet('color: gray;')
             layout.addWidget(tip_label)
             
             # 添加文本编辑框
             self.edit = QTextEdit()
-            self.edit.setPlaceholderText('例如: 类别1, 类别2\\n类别3\\n类别4')
+            self.edit.setPlaceholderText('例如: 类别1, 类别2\n类别3\n类别4')
             self.edit.setMinimumHeight(100)
             layout.addWidget(self.edit)
             
@@ -618,7 +643,7 @@ class TabbedHelpDialog(QDialog):
         <h4>🔥 专业提示</h4>
         <p>• 使用右键点击类别按钮可以自定义快捷键<br>
         • 按 F5 键可以刷新文件列表同步外部变化<br>
-        • 按 F 键可以让图片适应窗口大小<br>
+        • 按 Ctrl+F 键可以让图片适应窗口大小<br>
         • 支持批量添加类别，用逗号分隔多个类别名<br>
         • <b>🔀 多分类模式</b>：再次点击已分类的类别可取消分类<br>
         • <b>蓝色按钮</b>：表示当前图片属于该类别（多分类模式下）</p>
@@ -682,7 +707,7 @@ class TabbedHelpDialog(QDialog):
         <tr>
         <td style="padding: 6px; border: 1px solid #ddd;">适应窗口</td>
         <td style="padding: 6px; border: 1px solid #ddd;">菜单/快捷键</td>
-        <td style="padding: 6px; border: 1px solid #ddd;">F</td>
+        <td style="padding: 6px; border: 1px solid #ddd;">Ctrl+F</td>
         <td style="padding: 6px; border: 1px solid #ddd;">自动调整图片大小适应显示区域</td>
         </tr>
         <tr>
@@ -716,7 +741,7 @@ class TabbedHelpDialog(QDialog):
         <li><b>复制模式</b>：保留原文件，复制到目标类别文件夹（默认）</li>
         <li><b>移动模式</b>：直接移动文件到目标类别文件夹</li>
         <li><b>分类方法</b>：双击类别按钮、使用快捷键或按回车键</li>
-        <li><b>批量分类</b>：选择多张图片后统一分类</li>
+        <li><b>多分类模式</b>：同一张图片可分配到多个类别</li>
         </ul>
         
         <h4>🔀 分类模式详解</h4>
@@ -834,22 +859,22 @@ class TabbedHelpDialog(QDialog):
         advanced_text = '''
         <h2>⚡ 高级功能详解</h2>
         
-        <h3>🔧 批量操作</h3>
+        <h3>🔧 分类操作</h3>
         <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0;">
-        <h4>📋 批量分类</h4>
+        <h4>📋 当前分类功能</h4>
         <ul>
-        <li><b>多选图片</b>：按住 Ctrl 点击多张图片进行选择</li>
-        <li><b>范围选择</b>：按住 Shift 点击选择连续范围</li>
-        <li><b>全选操作</b>：Ctrl + A 选择所有未分类图片</li>
-        <li><b>批量分类</b>：选中多张图片后双击类别按钮</li>
+        <li><b>单张分类</b>：双击类别按钮分类当前图片</li>
+        <li><b>快捷键分类</b>：使用数字键1-9或自定义快捷键</li>
+        <li><b>多分类模式</b>：一张图片可同时分配到多个类别</li>
+        <li><b>快速导航</b>：使用方向键浏览图片和选择类别</li>
         </ul>
         
-        <h4>🏷️ 批量类别管理</h4>
+        <h4>🏷️ 类别管理</h4>
         <ul>
         <li><b>批量添加</b>：输入多个类别名，用逗号分隔</li>
-        <li><b>导入类别</b>：从文本文件导入类别列表</li>
-        <li><b>导出类别</b>：将当前类别列表导出为文本文件</li>
-        <li><b>模板应用</b>：保存常用类别组合为模板</li>
+        <li><b>快捷键绑定</b>：右键类别按钮自定义快捷键</li>
+        <li><b>类别排序</b>：拖拽调整类别显示顺序</li>
+        <li><b>状态统计</b>：实时显示每个类别的图片数量</li>
         </ul>
         </div>
         
@@ -863,11 +888,11 @@ class TabbedHelpDialog(QDialog):
         <li><b>组合键</b>：支持 Ctrl、Alt、Shift 组合</li>
         </ul>
         
-        <h4>🎭 界面定制</h4>
+        <h4>🎭 界面特性</h4>
         <ul>
-        <li><b>布局调整</b>：左右布局、上下布局</li>
-        <li><b>按钮大小</b>：小、中、大三种尺寸</li>
-        <li><b>字体设置</b>：自定义界面字体和大小</li>
+        <li><b>响应式布局</b>：界面自动适应窗口大小</li>
+        <li><b>分割面板</b>：可拖拽调整各区域大小</li>
+        <li><b>状态保存</b>：界面布局自动保存和恢复</li>
         </ul>
         </div>
         
@@ -971,7 +996,7 @@ class TabbedHelpDialog(QDialog):
         <p><b>A:</b> 点击图片右上角的 ℹ️ 按钮即可显示半透明的信息面板，查看图片的基本信息、尺寸属性和分类状态。点击"更多信息"可展开查看详细的文件信息。</p>
         
         <h4>Q: 缩放后图片位置错乱？</h4>
-        <p><b>A:</b> 按 F 键重置为适应窗口模式，或按 Ctrl+0 显示原始大小。</p>
+        <p><b>A:</b> 按 Ctrl+F 键重置为适应窗口模式，或按 Ctrl+0 显示原始大小。</p>
         </div>
         
         <h3>⚙️ 分类和管理</h3>

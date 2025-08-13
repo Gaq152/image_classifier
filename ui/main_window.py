@@ -740,12 +740,12 @@ class ImageClassifier(QMainWindow):
                 Qt.Key.Key_Down: self.next_category,
                 Qt.Key.Key_Return: self.confirm_category,
                 Qt.Key.Key_Delete: self.move_to_remove,
-                Qt.Key.Key_F: lambda: self.image_label.fit_to_window() if hasattr(self, 'image_label') else None,
                 Qt.Key.Key_F5: self.refresh_categories,
             }
             
             # 设置组合快捷键（用于图像控制）
             combo_shortcuts = {
+                'Ctrl+F': lambda: self.image_label.fit_to_window() if hasattr(self, 'image_label') else None,
                 'Ctrl+=': lambda: self.image_label.zoom_in() if hasattr(self, 'image_label') else None,
                 'Ctrl+-': lambda: self.image_label.zoom_out() if hasattr(self, 'image_label') else None,
                 'Ctrl+0': lambda: self.image_label.reset_zoom() if hasattr(self, 'image_label') else None,
@@ -803,6 +803,11 @@ class ImageClassifier(QMainWindow):
                 return
                 
             if func:
+                # INFO级别记录QAction快捷键触发（简化记录）
+                func_name = getattr(func, '__name__', 'lambda')
+                if func_name == '<lambda>':
+                    func_name = 'lambda'
+                self.logger.info(f"快捷键执行: {func_name}")
                 func()
         except Exception as e:
             self.logger.error(f"执行快捷键函数失败: {e}")
@@ -2722,35 +2727,91 @@ class ImageClassifier(QMainWindow):
                 self.show_error_message("错误", f"刷新失败: {str(e)}")
     
     def _check_and_fix_shortcuts(self):
-        """检查并修复快捷键状态 - 这是解决按键失效的关键方法"""
+        """检查并修复快捷键状态 - 增强版检测，解决按键失效的关键方法"""
         try:
             self.logger.debug("开始快捷键健康检查...")
             
-            # 检查当前快捷键数量
-            current_actions = len(self.actions())
-            expected_minimum = 10  # 预期最少应该有10个快捷键
+            # 检查当前快捷键数量和有效性
+            current_actions = self.actions()
+            current_count = len(current_actions)
+            expected_minimum = 8  # 预期最少应该有8个基本快捷键
             
-            if current_actions < expected_minimum:
-                self.logger.warning(f"检测到快捷键数量异常: {current_actions} < {expected_minimum}，正在重新设置")
+            # 检查快捷键有效性
+            valid_shortcuts = 0
+            core_shortcuts_found = {
+                'Left': False, 'Right': False, 'F5': False, 'Delete': False
+            }
+            
+            for action in current_actions:
+                try:
+                    shortcut = action.shortcut()
+                    if not shortcut.isEmpty():
+                        valid_shortcuts += 1
+                        # 检查核心快捷键是否存在
+                        key_sequence = shortcut.toString()
+                        if 'Left' in key_sequence:
+                            core_shortcuts_found['Left'] = True
+                        elif 'Right' in key_sequence:
+                            core_shortcuts_found['Right'] = True
+                        elif 'F5' in key_sequence:
+                            core_shortcuts_found['F5'] = True
+                        elif 'Del' in key_sequence:
+                            core_shortcuts_found['Delete'] = True
+                except Exception as e:
+                    self.logger.debug(f"检查快捷键时遇到异常: {e}")
+            
+            # 检查是否需要重建快捷键
+            need_rebuild = False
+            rebuild_reason = []
+            
+            if current_count < expected_minimum:
+                need_rebuild = True
+                rebuild_reason.append(f"快捷键数量不足: {current_count} < {expected_minimum}")
+            
+            if valid_shortcuts < expected_minimum:
+                need_rebuild = True
+                rebuild_reason.append(f"有效快捷键不足: {valid_shortcuts} < {expected_minimum}")
+            
+            missing_core = [k for k, v in core_shortcuts_found.items() if not v]
+            if missing_core:
+                need_rebuild = True
+                rebuild_reason.append(f"缺少核心快捷键: {missing_core}")
+            
+            if not self._shortcuts_active and self.isActiveWindow():
+                need_rebuild = True
+                rebuild_reason.append("快捷键被禁用但窗口处于激活状态")
+            
+            # 执行重建
+            if need_rebuild:
+                self.logger.warning(f"检测到快捷键问题，需要重建: {'; '.join(rebuild_reason)}")
                 self.setup_shortcuts()
+                
+                # 重新验证
+                new_count = len(self.actions())
+                if new_count >= expected_minimum:
+                    self.logger.info(f"快捷键重建成功: {current_count} -> {new_count}")
+                else:
+                    self.logger.error(f"快捷键重建后仍然不足: {new_count}")
             
-            # 重新激活快捷键状态
-            self._shortcuts_active = True
-            
-            # 确保窗口有焦点时快捷键可用
+            # 确保快捷键状态正确
             if self.isActiveWindow():
+                self._shortcuts_active = True
                 self.setFocus()
-                self.logger.debug("窗口焦点已恢复")
+                self.logger.debug("窗口焦点和快捷键状态已恢复")
             
-            self.logger.debug(f"快捷键健康检查完成 - 当前快捷键数量: {len(self.actions())}")
+            self.logger.debug(f"快捷键健康检查完成 - 当前: {len(self.actions())} 个快捷键，有效: {valid_shortcuts} 个")
             
         except Exception as e:
             self.logger.error(f"快捷键健康检查失败: {e}")
             # 作为最后手段，重新设置快捷键
             try:
+                self.logger.warning("执行紧急快捷键修复...")
                 self.setup_shortcuts()
+                self._shortcuts_active = True
             except Exception as setup_error:
                 self.logger.error(f"紧急修复快捷键也失败: {setup_error}")
+                # 最后的备选方案
+                self._setup_minimal_shortcuts()
     
     def _periodic_shortcut_check(self):
         """定期检查快捷键状态（每30秒执行一次）"""
@@ -3207,8 +3268,74 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"焦点状态检查失败: {e}")
 
+    def _is_in_input_mode(self):
+        """检测是否处于输入模式（有输入控件获得焦点）"""
+        try:
+            from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox
+            
+            focused_widget = self.focusWidget()
+            if focused_widget:
+                # 检查是否是输入控件
+                input_widgets = (QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox)
+                return isinstance(focused_widget, input_widgets)
+            return False
+        except Exception:
+            return False
+    
+    def _is_defined_shortcut(self, key, modifiers):
+        """检查按键是否是已定义的快捷键"""
+        try:
+            from PyQt6.QtGui import QKeySequence
+            
+            # 检查基本快捷键
+            basic_shortcuts = {
+                Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
+                Qt.Key.Key_Return, Qt.Key.Key_Delete, Qt.Key.Key_F5
+            }
+            
+            if key in basic_shortcuts and not modifiers:
+                return True
+            
+            # 检查组合快捷键
+            key_text = chr(key) if 32 <= key <= 126 else f"Key_{key}"
+            modifier_text = []
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                modifier_text.append("Ctrl")
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                modifier_text.append("Shift") 
+            if modifiers & Qt.KeyboardModifier.AltModifier:
+                modifier_text.append("Alt")
+            
+            if modifier_text:
+                combo_key = "+".join(modifier_text) + "+" + key_text
+                combo_shortcuts = {'Ctrl+F', 'Ctrl+=', 'Ctrl+-', 'Ctrl+0'}
+                if combo_key in combo_shortcuts:
+                    return True
+            
+            # 检查类别快捷键
+            if hasattr(self, 'config') and self.config and hasattr(self, 'categories'):
+                for category_name, shortcut_key in self.config.category_shortcuts.items():
+                    if shortcut_key and category_name in self.categories:
+                        try:
+                            # 构建当前按键组合
+                            current_key = key_text if not modifier_text else "+".join(modifier_text) + "+" + key_text
+                            # 使用标准化比较，处理大小写不敏感
+                            if hasattr(self.config, '_normalize_shortcut'):
+                                if self.config._normalize_shortcut(shortcut_key) == self.config._normalize_shortcut(current_key):
+                                    return True
+                            else:
+                                # 后备方案：简单的小写比较
+                                if shortcut_key.lower() == current_key.lower():
+                                    return True
+                        except Exception:
+                            continue
+            
+            return False
+        except Exception:
+            return False
+
     def keyPressEvent(self, event):
-        """处理键盘事件 - 恢复上下键选择类别功能"""
+        """处理键盘事件 - 优化按键处理和日志记录"""
         try:
             # 检查快捷键是否激活
             if not self._shortcuts_active:
@@ -3216,20 +3343,63 @@ class ImageClassifier(QMainWindow):
                 self._shortcuts_active = True
                 
             key = event.key()
-            self.logger.debug(f"键盘按键: {key} ({event.text()}) - 快捷键状态: {'激活' if self._shortcuts_active else '禁用'}")
+            modifiers = event.modifiers()
             
-            # 上下键选择类别
-            if key == Qt.Key.Key_Up:
+            # 检查是否在输入模式
+            in_input_mode = self._is_in_input_mode()
+            
+            # 过滤掉纯修饰键，避免日志噪音和冲突
+            modifier_keys = {
+                Qt.Key.Key_Ctrl, Qt.Key.Key_Shift, Qt.Key.Key_Alt, 
+                Qt.Key.Key_Meta, Qt.Key.Key_AltGr, Qt.Key.Key_CapsLock,
+                Qt.Key.Key_NumLock, Qt.Key.Key_ScrollLock
+            }
+            
+            # 记录按键信息 - 分级别记录
+            if not in_input_mode:  # 只在非输入模式下记录按键
+                key_text = event.text() or f"Key_{key}"
+                modifier_text = []
+                if modifiers & Qt.KeyboardModifier.ControlModifier:
+                    modifier_text.append("Ctrl")
+                if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                    modifier_text.append("Shift")
+                if modifiers & Qt.KeyboardModifier.AltModifier:
+                    modifier_text.append("Alt")
+                
+                modifier_str = "+".join(modifier_text)
+                full_key = f"{modifier_str}+{key_text}" if modifier_str else key_text
+                
+                # DEBUG级别：记录所有按键（包括修饰键和不支持的按键）
+                if key in modifier_keys:
+                    self.logger.debug(f"修饰键: {full_key} (code: {key})")
+                else:
+                    self.logger.debug(f"按键: {full_key} (code: {key}) - 快捷键状态: {'激活' if self._shortcuts_active else '禁用'}")
+                
+                # INFO级别：只记录已定义的快捷键
+                if self._is_defined_shortcut(key, modifiers):
+                    self.logger.info(f"快捷键触发: {full_key}")
+            
+            # 处理修饰键
+            if key in modifier_keys:
+                # 纯修饰键不处理，直接传递给父类
+                super().keyPressEvent(event)
+                return
+            
+            # 只处理导航键，其他按键让QAction系统处理
+            navigation_handled = False
+            
+            # 上下键选择类别（仅在没有修饰键时）
+            if key == Qt.Key.Key_Up and not modifiers:
                 self.logger.debug("检测到上箭头键，选择上一个类别")
                 self.select_previous_category()
                 event.accept()
-                return
-            elif key == Qt.Key.Key_Down:
+                navigation_handled = True
+            elif key == Qt.Key.Key_Down and not modifiers:
                 self.logger.debug("检测到下箭头键，选择下一个类别")
                 self.select_next_category()
                 event.accept()
-                return
-            elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+                navigation_handled = True
+            elif (key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter) and not modifiers:
                 self.logger.debug("检测到回车键，确认选择类别")
                 # Enter键确认选择当前高亮的类别
                 if (hasattr(self, 'current_category_index') and 
@@ -3240,12 +3410,13 @@ class ImageClassifier(QMainWindow):
                     self.logger.info(f"通过回车键确认分类到: {category}")
                     self.move_to_category(category)
                     event.accept()
-                    return
+                    navigation_handled = True
                 else:
                     self.logger.debug(f"无法确认类别: current_category_index={getattr(self, 'current_category_index', 'None')}, 类别按钮数量={len(self.category_buttons) if hasattr(self, 'category_buttons') else 0}")
             
-            # 其他键盘快捷键继续传递给父类处理
-            super().keyPressEvent(event)
+            # 如果没有处理导航键，传递给父类让QAction系统处理
+            if not navigation_handled:
+                super().keyPressEvent(event)
             
         except Exception as e:
             self.logger.error(f"键盘事件处理失败: {e}")
