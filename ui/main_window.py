@@ -67,6 +67,12 @@ class ImageClassifier(QMainWindow):
         
         # 设置快捷键
         self.setup_shortcuts()
+
+        # 启动后自动检查更新（非阻塞）
+        try:
+            self._schedule_auto_update_check()
+        except Exception as e:
+            self.logger.debug(f"启动自动检查更新调度失败: {e}")
     
     def _get_resource_path(self, relative_path):
         """获取资源文件路径，兼容开发环境和打包环境"""
@@ -3281,6 +3287,52 @@ class ImageClassifier(QMainWindow):
             return False
         except Exception:
             return False
+
+    # ===== 更新相关 =====
+    def _schedule_auto_update_check(self):
+        """根据配置调度一次自动检查更新（应用启动后几秒执行）"""
+        try:
+            if not hasattr(self, 'config') or not getattr(self.config, 'auto_update_enabled', True):
+                self.logger.debug("自动检查更新已关闭")
+                return
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(5000, self._auto_check_update_once)
+        except Exception as e:
+            self.logger.debug(f"调度自动检查更新失败: {e}")
+
+    def _auto_check_update_once(self):
+        """执行一次静默检查，有更新则弹窗提示"""
+        try:
+            self.logger.info("自动检查更新：开始")
+            from .dialogs import TabbedHelpDialog
+            dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
+            # 复用对话框的检查逻辑，但不显示对话框
+            dlg._handle_check_update()
+            self.logger.info("自动检查更新：完成")
+        except Exception as e:
+            self.logger.debug(f"自动检查更新失败: {e}")
+
+        # 若存在上次下载但未应用的更新，提示是否现在重启更新
+        try:
+            if hasattr(self, 'config') and getattr(self.config, 'pending_update', {}):
+                info = self.config.pending_update
+                ver = info.get('version')
+                batch_path = info.get('batch_path')
+                if batch_path and Path(batch_path).exists():
+                    from PyQt6.QtWidgets import QMessageBox
+                    if QMessageBox.question(self, '发现已下载更新', f'检测到待安装的更新 v{ver}，是否现在重启并完成更新？',
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+                        try:
+                            import subprocess
+                            subprocess.Popen(["cmd", "/c", "start", "", str(batch_path)], shell=False)
+                            from PyQt6.QtWidgets import QApplication
+                            QApplication.quit()
+                        except Exception as e:
+                            self.logger.error(f"启动批处理失败: {e}")
+                    else:
+                        self.logger.info("用户选择暂不重启安装待更新版本")
+        except Exception as e:
+            self.logger.debug(f"检查待安装更新失败: {e}")
     
     def _is_defined_shortcut(self, key, modifiers):
         """检查按键是否是已定义的快捷键"""
