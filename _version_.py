@@ -12,7 +12,7 @@ from typing import Dict, List, Tuple
 # ================================
 
 # 主版本号 - 这是唯一需要手动修改的地方
-__version__ = "5.4.4"
+__version__ = "6.0.0"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息

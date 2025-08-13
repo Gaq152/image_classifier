@@ -3306,8 +3306,8 @@ class ImageClassifier(QMainWindow):
             self.logger.info("自动检查更新：开始")
             from .dialogs import TabbedHelpDialog
             dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
-            # 复用对话框的检查逻辑，但不显示对话框
-            dlg._handle_check_update()
+            # 复用对话框的检查逻辑，但不显示对话框：无更新时静默
+            dlg._handle_check_update(suppress_if_latest=True)
             self.logger.info("自动检查更新：完成")
         except Exception as e:
             self.logger.debug(f"自动检查更新失败: {e}")

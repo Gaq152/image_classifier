@@ -532,7 +532,7 @@ class TabbedHelpDialog(QDialog):
         except Exception as e:
             self.logger.error(f"初始化帮助对话框UI失败: {e}")
 
-    def _handle_check_update(self):
+    def _handle_check_update(self, suppress_if_latest: bool = False):
         try:
             endpoint = None
             token = ''
@@ -548,10 +548,12 @@ class TabbedHelpDialog(QDialog):
             sha256 = str(manifest.get('sha256', '')).strip()
             size_bytes = int(manifest.get('size_bytes', 0) or 0)
             notes = str(manifest.get('notes', '')).strip()
+            display_name = str(manifest.get('display_name', '')).strip()
 
             from .._version_ import compare_version, __version__
             if not new_ver or compare_version(new_ver, __version__) <= 0:
-                QMessageBox.information(self, '检查更新', '当前已是最新版本。')
+                if not suppress_if_latest:
+                    QMessageBox.information(self, '检查更新', '当前已是最新版本。')
                 return
 
             size_mb = f"{size_bytes/1024/1024:.1f} MB" if size_bytes else "未知"
@@ -561,13 +563,14 @@ class TabbedHelpDialog(QDialog):
 
             # 下载
             temp_dir = Path(os.getenv('TEMP') or Path.cwd())
-            # 从URL中优先解析服务端文件名（支持中文）
+            # 优先使用 manifest.display_name（中文友好），否则从 URL 解码
             try:
                 from urllib.parse import urlparse, unquote
                 parsed = urlparse(url)
-                fname = unquote(Path(parsed.path).name) or f"图像分类工具_v{new_ver}.exe"
+                url_name = unquote(Path(parsed.path).name)
             except Exception:
-                fname = f"图像分类工具_v{new_ver}.exe"
+                url_name = ''
+            fname = display_name or url_name or f"图像分类工具_v{new_ver}.exe"
             dest = temp_dir / fname
 
             progress_dialog = QDialog(self)
