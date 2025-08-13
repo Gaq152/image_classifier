@@ -231,6 +231,15 @@ def get_download_urls() -> Dict:
         "exe_name_chinese": DOWNLOAD_INFO["exe_name_chinese_template"].format(version=version)
     }
 
+def get_manifest_url(latest: bool = True, version: str = None) -> str:
+    """返回 manifest.json 的下载地址。
+    latest=True 时返回 latest 路径，否则需要传入版本号。
+    """
+    base_url = DOWNLOAD_INFO["package_registry_base"]
+    if latest or not version:
+        return f"{base_url}/latest/manifest.json"
+    return f"{base_url}/{version}/manifest.json"
+
 def get_latest_version_info() -> Dict:
     """获取最新版本的详细信息"""
     if not VERSION_HISTORY:

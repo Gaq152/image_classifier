@@ -20,7 +20,7 @@ variables:
   PACKAGE_REGISTRY_URL: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/image_classifier"
   # 应用信息
   APP_NAME: "图像分类工具"
-  APP_VERSION: "5.3.0"
+  APP_VERSION: "${CI_COMMIT_TAG#v}"
 
 # 部署条件：仅在推送标签时执行
 .is_deploy:
@@ -45,7 +45,7 @@ windows_build:
     - python build.py
     - $exe = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
     - if (-not $exe) { echo "构建失败"; exit 1 }
-    - if ($env:CI_COMMIT_TAG) { $v = $env:CI_COMMIT_TAG -replace '^v', ''; Rename-Item $exe.FullName "图像分类工具_v$v.exe" }
+    - if ($env:CI_COMMIT_TAG) { $v = $env:CI_COMMIT_TAG -replace '^v', ''; Rename-Item $exe.FullName "ImageClassifier_v$v.exe" }
     - echo "✓ 构建完成"
   
   artifacts:
@@ -62,13 +62,31 @@ upload:
   dependencies:
     - windows_build
   script:
-    - WINDOWS_FILE=$(find dist -name "*.exe" -type f | head -1)
+    - WINDOWS_FILE=$(ls -1 dist/*.exe | head -1)
     - 'test -f "$WINDOWS_FILE" || { echo "未找到exe文件"; exit 1; }'
-    - VERSION=$(echo $CI_COMMIT_TAG | sed 's/^v//')
+    - VERSION=${CI_COMMIT_TAG#v}
     - SAFE_FILENAME="ImageClassifier_v${VERSION}.exe"
     - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/${VERSION}/${SAFE_FILENAME}"'
     - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/${SAFE_FILENAME}"'
-    - echo "✓ 版本 $VERSION 上传成功"
+    # 计算 sha256
+    - 'sha256sum "$WINDOWS_FILE" | awk "{print \$1}" > dist/${SAFE_FILENAME}.sha256'
+    - SHA256=$(cat dist/${SAFE_FILENAME}.sha256)
+    # 生成 manifest.json
+    - SIZE_BYTES=$(stat -c %s "$WINDOWS_FILE")
+    - |
+      cat > dist/manifest.json <<MANI
+      {
+        "version": "${VERSION}",
+        "date": "${CI_COMMIT_TIMESTAMP%%T*}",
+        "url": "${PACKAGE_REGISTRY_URL}/${VERSION}/${SAFE_FILENAME}",
+        "sha256": "${SHA256}",
+        "size_bytes": ${SIZE_BYTES},
+        "notes": "CI 自动生成"
+      }
+      MANI
+    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@dist/manifest.json" "${PACKAGE_REGISTRY_URL}/${VERSION}/manifest.json"'
+    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@dist/manifest.json" "${PACKAGE_REGISTRY_URL}/latest/manifest.json"'
+    - echo "✓ 版本 $VERSION 上传成功，并已生成 manifest.json"
     - echo "RELEASE_VERSION=${VERSION}" >> release.env
     - echo "RELEASE_FILENAME=${SAFE_FILENAME}" >> release.env
   artifacts:

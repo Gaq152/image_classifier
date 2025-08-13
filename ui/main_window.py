@@ -3233,7 +3233,7 @@ class ImageClassifier(QMainWindow):
 
     def show_help_dialog(self):
         """显示帮助对话框"""
-        dialog = TabbedHelpDialog(self.version, self)
+        dialog = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
         dialog.exec()
     
     def focusInEvent(self, event):
