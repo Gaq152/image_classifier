@@ -112,18 +112,31 @@ def download_with_progress(url: str, dest: Path, token: Optional[str] = None,
 
 
 def build_update_batch(target_exe: Path, new_file: Path) -> str:
-    """生成用于覆盖更新并重启的批处理脚本内容。"""
+    """生成用于覆盖更新并重启的批处理脚本内容。
+
+    改进点：
+    - 初始等待 3 秒，确保主进程和文件句柄释放
+    - 循环尝试覆盖，失败则继续等待
+    - 覆盖成功后再延迟 1 秒再启动，避免杀软/索引器干扰
+    """
     target = str(target_exe.resolve())
     source = str(new_file.resolve())
     lines = [
         "@echo off",
         "setlocal enabledelayedexpansion",
         "echo Updating...",
-        ":: 等待主进程退出",
+        ":: 初始等待，确保主程序完全退出",
+        "ping -n 4 127.0.0.1 >nul",
         ":waitloop",
-        "ping -n 2 127.0.0.1 >nul",
+        ":: 尝试覆盖",
         f'copy /y "{source}" "{target}" >nul',
-        "if %errorlevel% neq 0 goto waitloop",
+        "if %errorlevel% neq 0 (",
+        "    echo Waiting for file handle to release...",
+        "    ping -n 2 127.0.0.1 >nul",
+        "    goto waitloop",
+        ")",
+        ":: 覆盖成功后稍等再启动",
+        "ping -n 2 127.0.0.1 >nul",
         f'start "" "{target}"',
         "echo Update done.",
         "del /f /q %~f0",

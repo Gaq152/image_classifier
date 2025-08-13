@@ -561,8 +561,14 @@ class TabbedHelpDialog(QDialog):
 
             # 下载
             temp_dir = Path(os.getenv('TEMP') or Path.cwd())
-            # 文件名统一英文，避免编码问题；实际显示名不影响使用
-            dest = temp_dir / f"ImageClassifier_v{new_ver}.exe"
+            # 从URL中优先解析服务端文件名（支持中文）
+            try:
+                from urllib.parse import urlparse, unquote
+                parsed = urlparse(url)
+                fname = unquote(Path(parsed.path).name) or f"图像分类工具_v{new_ver}.exe"
+            except Exception:
+                fname = f"图像分类工具_v{new_ver}.exe"
+            dest = temp_dir / fname
 
             progress_dialog = QDialog(self)
             progress_dialog.setWindowTitle('下载更新')
