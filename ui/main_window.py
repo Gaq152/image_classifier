@@ -68,9 +68,12 @@ class ImageClassifier(QMainWindow):
         # 设置快捷键
         self.setup_shortcuts()
 
-        # 启动后自动检查更新（非阻塞）
+        # 启动后自动检查更新（非阻塞，可配置开关）
         try:
-            self._schedule_auto_update_check()
+            if getattr(self.config, 'auto_update_enabled', True):
+                self._schedule_auto_update_check()
+            else:
+                self.logger.info("自动检查更新：已关闭")
         except Exception as e:
             self.logger.debug(f"启动自动检查更新调度失败: {e}")
     
@@ -3303,12 +3306,12 @@ class ImageClassifier(QMainWindow):
     def _auto_check_update_once(self):
         """执行一次静默检查，有更新则弹窗提示"""
         try:
-            self.logger.info("自动检查更新：开始")
+            self.logger.debug("自动检查更新：开始")
             from .dialogs import TabbedHelpDialog
             dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
             # 复用对话框的检查逻辑，但不显示对话框：无更新时静默
             dlg._handle_check_update(suppress_if_latest=True)
-            self.logger.info("自动检查更新：完成")
+            self.logger.debug("自动检查更新：完成")
         except Exception as e:
             self.logger.debug(f"自动检查更新失败: {e}")
 

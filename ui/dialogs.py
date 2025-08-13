@@ -542,12 +542,15 @@ class TabbedHelpDialog(QDialog):
             if not endpoint:
                 endpoint = get_manifest_url(latest=True)
 
+            self.logger.debug(f"更新检查：开始，endpoint={endpoint}")
             manifest = fetch_manifest(endpoint, token or None)
             new_ver = str(manifest.get('version', '')).strip()
             url = str(manifest.get('url', '')).strip()
             sha256 = str(manifest.get('sha256', '')).strip()
             size_bytes = int(manifest.get('size_bytes', 0) or 0)
             notes = str(manifest.get('notes', '')).strip()
+            display_name = str(manifest.get('display_name', '')).strip()
+            self.logger.info(f"检查更新：发现新版本 v{new_ver}")
             display_name = str(manifest.get('display_name', '')).strip()
 
             from .._version_ import compare_version, __version__
@@ -558,11 +561,24 @@ class TabbedHelpDialog(QDialog):
 
             size_mb = f"{size_bytes/1024/1024:.1f} MB" if size_bytes else "未知"
             msg = f"发现新版本: v{new_ver}\n大小: {size_mb}\n\n更新说明:\n{notes or '无'}\n\n是否立即下载并更新？"
-            if QMessageBox.question(self, '发现新版本', msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            reply = self._ask_yes_no('发现新版本', msg)
+            if reply != QMessageBox.StandardButton.Yes:
+                self.logger.info("检查更新：用户选择暂不更新")
                 return
 
-            # 下载
-            temp_dir = Path(os.getenv('TEMP') or Path.cwd())
+            # 下载到程序目录下的 update 子目录，确保有权限；失败则回退到 TEMP
+            exe_dir = Path(sys.executable).parent
+            update_dir = exe_dir / 'update'
+            try:
+                update_dir.mkdir(parents=True, exist_ok=True)
+                # 权限探测
+                test_file = update_dir / '.perm_test'
+                test_file.write_text('ok', encoding='utf-8')
+                test_file.unlink(missing_ok=True)
+                dest_root = update_dir
+            except Exception:
+                dest_root = Path(os.getenv('TEMP') or Path.cwd())
+
             # 优先使用 manifest.display_name（中文友好），否则从 URL 解码
             try:
                 from urllib.parse import urlparse, unquote
@@ -571,7 +587,7 @@ class TabbedHelpDialog(QDialog):
             except Exception:
                 url_name = ''
             fname = display_name or url_name or f"图像分类工具_v{new_ver}.exe"
-            dest = temp_dir / fname
+            dest = dest_root / fname
 
             progress_dialog = QDialog(self)
             progress_dialog.setWindowTitle('下载更新')
@@ -594,23 +610,29 @@ class TabbedHelpDialog(QDialog):
                 QApplication.processEvents()
 
             try:
+                self.logger.debug("更新下载：开始")
                 download_with_progress(url, dest, token or None, on_progress)
+                self.logger.info("更新下载：完成")
             finally:
                 progress_dialog.close()
 
             # 校验哈希
             if sha256:
+                self.logger.debug("更新校验：开始")
                 actual = sha256_file(dest)
                 if actual.lower() != sha256.lower():
                     QMessageBox.critical(self, '更新失败', f'文件校验失败，期望SHA256: {sha256}\n实际: {actual}')
+                    self.logger.error(f"更新校验：失败 expected={sha256} actual={actual}")
                     try:
                         dest.unlink(missing_ok=True)
                     except Exception:
                         pass
                     return
+                self.logger.debug("更新校验：通过")
 
             # 生成更新脚本，但不立即执行；由用户确认是否重启
             exe_path = Path(sys.executable)
+            self.logger.debug("更新安装：准备安装脚本")
             batch_path = launch_self_update(exe_path, dest)
 
             # 记录待更新信息到配置
@@ -627,19 +649,20 @@ class TabbedHelpDialog(QDialog):
                     self.logger.debug(f"保存pending_update失败: {e}")
 
             # 询问是否立即重启更新
-            reply = QMessageBox.question(
-                self,
+            reply = self._ask_yes_no(
                 '更新下载完成',
-                '更新包已准备就绪，是否立即重启并完成更新？\n\n选择“否”将暂不重启，下次启动会继续提示。',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                '更新包已准备就绪，是否立即重启并完成更新？\n\n选择“否”将暂不重启，下次启动会继续提示。'
             )
             if reply == QMessageBox.StandardButton.Yes:
                 # 启动批处理并退出
                 try:
                     import subprocess
-                    subprocess.Popen(["cmd", "/c", "start", "", str(batch_path)], shell=False)
+                    # 将已下载的新包绝对路径作为参数传递给 update.bat
+                    subprocess.Popen(["cmd", "/c", "start", "", str(batch_path), str(dest)], shell=False)
+                    self.logger.info("更新安装：已启动安装脚本")
                 except Exception as e:
                     QMessageBox.critical(self, '更新失败', f'无法启动更新程序: {e}')
+                    self.logger.error(f"更新安装：启动脚本失败 {e}")
                     return
                 # 尝试关闭主窗口并处理事件，给批处理释放句柄的时间
                 try:
@@ -648,8 +671,14 @@ class TabbedHelpDialog(QDialog):
                 except Exception:
                     pass
                 QApplication.processEvents()
-                QApplication.quit()
+                # 立即退出进程，确保释放可执行文件句柄
+                try:
+                    self.logger.debug("更新安装：应用即将退出以释放句柄")
+                    os._exit(0)
+                except Exception:
+                    QApplication.quit()
             else:
+                self.logger.info("更新已准备：用户选择稍后安装")
                 QMessageBox.information(self, '更新已准备', '已保存更新包，稍后您可在帮助中手动执行更新。')
         except Exception as e:
             self.logger.error(f"检查/更新失败: {e}")
@@ -730,6 +759,57 @@ class TabbedHelpDialog(QDialog):
         msgBox.button(QMessageBox.StandardButton.Ok).setText("确定")
         
         msgBox.exec()
+
+    def _ask_yes_no(self, title: str, text: str):
+        from PyQt6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setText(text)
+        # 统一图标/样式
+        box.setIcon(QMessageBox.Icon.Question)
+        try:
+            icon_path = self._get_resource_path('assets/icon.ico')
+            if icon_path and icon_path.exists():
+                from PyQt6.QtGui import QIcon
+                box.setWindowIcon(QIcon(str(icon_path)))
+        except Exception:
+            pass
+        # 样式
+        box.setStyleSheet("""
+            QMessageBox {
+                background-color: #F8F9FA;
+                color: #2C3E50;
+                border: 1px solid #BDC3C7;
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            QMessageBox QLabel {
+                color: #2C3E50;
+                font-size: 14px;
+                padding: 10px;
+            }
+            QMessageBox QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover { background-color: #2980B9; }
+            QMessageBox QPushButton:pressed { background-color: #21618C; }
+        """)
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        # 中文化按钮
+        yes_btn = box.button(QMessageBox.StandardButton.Yes)
+        no_btn = box.button(QMessageBox.StandardButton.No)
+        if yes_btn:
+            yes_btn.setText("确定")
+        if no_btn:
+            no_btn.setText("取消")
+        return box.exec()
         
     def create_quick_start_tab(self):
         """创建快速入门标签页"""
