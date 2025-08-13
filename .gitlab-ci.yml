@@ -65,10 +65,9 @@ upload:
     - WINDOWS_FILE=$(ls -1 dist/*.exe | head -1)
     - 'test -f "$WINDOWS_FILE" || { echo "未找到exe文件"; exit 1; }'
     - VERSION=${CI_COMMIT_TAG#v}
-    - SAFE_FILENAME="图像分类工具_v${VERSION}.exe"
-    - ENCODED_SAFE_FILENAME=$(python -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$SAFE_FILENAME")
-    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/${VERSION}/${ENCODED_SAFE_FILENAME}"'
-    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/${ENCODED_SAFE_FILENAME}"'
+    - SAFE_FILENAME="ImageClassifier_v${VERSION}.exe"
+    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/${VERSION}/${SAFE_FILENAME}"'
+    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/${SAFE_FILENAME}"'
     # 计算 sha256
     - 'sha256sum "$WINDOWS_FILE" | awk "{print \$1}" > dist/${SAFE_FILENAME}.sha256'
     - SHA256=$(cat dist/${SAFE_FILENAME}.sha256)
@@ -79,7 +78,8 @@ upload:
       {
         "version": "${VERSION}",
         "date": "${CI_COMMIT_TIMESTAMP%%T*}",
-        "url": "${PACKAGE_REGISTRY_URL}/${VERSION}/${ENCODED_SAFE_FILENAME}",
+        "url": "${PACKAGE_REGISTRY_URL}/${VERSION}/${SAFE_FILENAME}",
+        "display_name": "图像分类工具_v${VERSION}.exe",
         "sha256": "${SHA256}",
         "size_bytes": ${SIZE_BYTES},
         "notes": "CI 自动生成"
@@ -90,7 +90,6 @@ upload:
     - echo "✓ 版本 $VERSION 上传成功，并已生成 manifest.json"
     - echo "RELEASE_VERSION=${VERSION}" >> release.env
     - echo "RELEASE_FILENAME=${SAFE_FILENAME}" >> release.env
-    - echo "RELEASE_FILENAME_ENCODED=${ENCODED_SAFE_FILENAME}" >> release.env
   artifacts:
     reports:
       dotenv: release.env
@@ -115,8 +114,8 @@ release:
       ## 🚀 图像分类工具 $CI_COMMIT_TAG 发布
       
       ### 📥 下载链接
-      - **Windows 版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME_ENCODED)
-      - **最新版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/latest/$RELEASE_FILENAME_ENCODED)
+      - **Windows 版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME)
+      - **最新版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/latest/$RELEASE_FILENAME)
       
       ### 📋 系统要求
       - **操作系统**: Windows 7 及以上版本
@@ -136,7 +135,7 @@ release:
     assets:
       links:
         - name: 'Windows 版本'
-          url: "$PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME_ENCODED"
+          url: "$PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME"
           link_type: 'package'
 
 # 测试任务（可选）

@@ -638,7 +638,13 @@ class TabbedHelpDialog(QDialog):
                 except Exception as e:
                     QMessageBox.critical(self, '更新失败', f'无法启动更新程序: {e}')
                     return
-                QMessageBox.information(self, '更新', '更新程序已启动，应用将退出并自动完成更新。')
+                # 尝试关闭主窗口并处理事件，给批处理释放句柄的时间
+                try:
+                    if self.parent():
+                        self.parent().close()
+                except Exception:
+                    pass
+                QApplication.processEvents()
                 QApplication.quit()
             else:
                 QMessageBox.information(self, '更新已准备', '已保存更新包，稍后您可在帮助中手动执行更新。')
