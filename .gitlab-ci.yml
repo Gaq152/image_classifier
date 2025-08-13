@@ -41,11 +41,11 @@ windows_build:
   script:
     - mkdir -Force dist
     - pip install -r requirements.txt pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-    - if ($env:CI_COMMIT_TAG) { $version = $env:CI_COMMIT_TAG -replace '^v', ''; (Get-Content __init__.py) -replace '__version__ = "[^"]*"', "__version__ = `"$version`"" | Set-Content __init__.py }
+    - if ($env:CI_COMMIT_TAG) { $version = $env:CI_COMMIT_TAG -replace '^v', ''; (Get-Content _version_.py) -replace '__version__ = "[^"]*"', "__version__ = `"$version`"" | Set-Content _version_.py }
     - python build.py
     - $exe = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
     - if (-not $exe) { echo "构建失败"; exit 1 }
-    - if ($env:CI_COMMIT_TAG) { $v = $env:CI_COMMIT_TAG -replace '^v', ''; Rename-Item $exe.FullName "ImageClassifier_v$v.exe" -Force }
+    - if ($env:CI_COMMIT_TAG) { $v = $env:CI_COMMIT_TAG -replace '^v', ''; Rename-Item $exe.FullName "图像分类工具_v$v.exe" -Force }
     - echo "✓ 构建完成"
   
   artifacts:
@@ -65,9 +65,10 @@ upload:
     - WINDOWS_FILE=$(ls -1 dist/*.exe | head -1)
     - 'test -f "$WINDOWS_FILE" || { echo "未找到exe文件"; exit 1; }'
     - VERSION=${CI_COMMIT_TAG#v}
-    - SAFE_FILENAME="ImageClassifier_v${VERSION}.exe"
-    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/${VERSION}/${SAFE_FILENAME}"'
-    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/${SAFE_FILENAME}"'
+    - SAFE_FILENAME="图像分类工具_v${VERSION}.exe"
+    - ENCODED_SAFE_FILENAME=$(python -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$SAFE_FILENAME")
+    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/${VERSION}/${ENCODED_SAFE_FILENAME}"'
+    - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@$WINDOWS_FILE" "${PACKAGE_REGISTRY_URL}/latest/${ENCODED_SAFE_FILENAME}"'
     # 计算 sha256
     - 'sha256sum "$WINDOWS_FILE" | awk "{print \$1}" > dist/${SAFE_FILENAME}.sha256'
     - SHA256=$(cat dist/${SAFE_FILENAME}.sha256)
@@ -78,7 +79,7 @@ upload:
       {
         "version": "${VERSION}",
         "date": "${CI_COMMIT_TIMESTAMP%%T*}",
-        "url": "${PACKAGE_REGISTRY_URL}/${VERSION}/${SAFE_FILENAME}",
+        "url": "${PACKAGE_REGISTRY_URL}/${VERSION}/${ENCODED_SAFE_FILENAME}",
         "sha256": "${SHA256}",
         "size_bytes": ${SIZE_BYTES},
         "notes": "CI 自动生成"
@@ -89,6 +90,7 @@ upload:
     - echo "✓ 版本 $VERSION 上传成功，并已生成 manifest.json"
     - echo "RELEASE_VERSION=${VERSION}" >> release.env
     - echo "RELEASE_FILENAME=${SAFE_FILENAME}" >> release.env
+    - echo "RELEASE_FILENAME_ENCODED=${ENCODED_SAFE_FILENAME}" >> release.env
   artifacts:
     reports:
       dotenv: release.env
@@ -113,8 +115,8 @@ release:
       ## 🚀 图像分类工具 $CI_COMMIT_TAG 发布
       
       ### 📥 下载链接
-      - **Windows 版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME)
-      - **最新版本**: [ImageClassifier_latest.exe]($PACKAGE_REGISTRY_URL/latest/$RELEASE_FILENAME)
+      - **Windows 版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME_ENCODED)
+      - **最新版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/latest/$RELEASE_FILENAME_ENCODED)
       
       ### 📋 系统要求
       - **操作系统**: Windows 7 及以上版本
@@ -134,7 +136,7 @@ release:
     assets:
       links:
         - name: 'Windows 版本'
-          url: "$PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME"
+          url: "$PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME_ENCODED"
           link_type: 'package'
 
 # 测试任务（可选）
