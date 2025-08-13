@@ -29,13 +29,13 @@ class Config:
             'Ctrl+Left', 'Ctrl+Right', 'Ctrl+Up', 'Ctrl+Down',
             'Alt+Left', 'Alt+Right', 'Alt+Up', 'Alt+Down',
             # 图像控制快捷键
-            'Ctrl+=', 'Ctrl+-', 'Ctrl+0', 'F',
+            'Ctrl+=', 'Ctrl+-', 'Ctrl+0', 'Ctrl+F',
             # 系统功能键
             'F5', 'Escape', 'Tab', 'Shift+Tab',
             # 常用系统快捷键
             'Ctrl+C', 'Ctrl+V', 'Ctrl+X', 'Ctrl+Z', 'Ctrl+Y',
             'Ctrl+A', 'Ctrl+S', 'Ctrl+O', 'Ctrl+N', 'Ctrl+Q',
-            'Alt+F4', 'Ctrl+W', 'Ctrl+T', 'Ctrl+R', 'Ctrl+F',
+            'Alt+F4', 'Ctrl+W', 'Ctrl+T', 'Ctrl+R',
         }
         self.reserved_categories = {'remove'}  # 保留的类别名称
         
@@ -45,9 +45,40 @@ class Config:
     def is_shortcut_available(self, shortcut):
         """检查快捷键是否可用"""
         with self._lock:
-            if shortcut in self.reserved_shortcuts:
+            # 标准化快捷键格式，单字母快捷键转为小写进行比较
+            normalized_shortcut = self._normalize_shortcut(shortcut)
+            
+            # 检查是否为保留快捷键
+            if normalized_shortcut in self.reserved_shortcuts:
                 return False
-            return shortcut not in self.category_shortcuts.values()
+            
+            # 检查是否与现有类别快捷键冲突（大小写不敏感）
+            for existing_shortcut in self.category_shortcuts.values():
+                if self._normalize_shortcut(existing_shortcut) == normalized_shortcut:
+                    return False
+            
+            return True
+    
+    def _normalize_shortcut(self, shortcut):
+        """标准化快捷键格式，用于一致性比较"""
+        if not shortcut:
+            return shortcut
+            
+        # 分割组合键
+        parts = shortcut.split('+')
+        if len(parts) == 1:
+            # 单字母快捷键，转为小写
+            if len(shortcut) == 1 and shortcut.isalpha():
+                return shortcut.lower()
+            else:
+                return shortcut
+        else:
+            # 组合键，只将最后一部分（实际按键）标准化
+            modifiers = parts[:-1]
+            key_part = parts[-1]
+            if len(key_part) == 1 and key_part.isalpha():
+                key_part = key_part.lower()
+            return '+'.join(modifiers + [key_part])
         
     def get_default_shortcut(self, index):
         """获取默认快捷键"""
