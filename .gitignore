@@ -1,3 +1,7 @@
+# claude 文档
+.claude
+claude.md
+
 # Python缓存文件
 __pycache__/
 *.pyc

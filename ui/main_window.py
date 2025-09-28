@@ -2113,9 +2113,14 @@ class ImageClassifier(QMainWindow):
                     # 无论内存状态如何，都检查目标文件是否存在
                     self._execute_file_operation_with_check(current_path, category_name, is_remove=False)
         else:
-            # 单分类模式 - 原有逻辑
+            # 单分类模式 - 支持撤销分类
+            # 检查是否要撤销分类（再次点击同一类别）
+            if old_category and old_category == category_name:
+                # 撤销分类：移除分类记录，将文件移回原目录
+                self._undo_classification(current_path, old_category)
+                return
             # 如果是重新分类，需要从旧目录移动到新目录
-            if old_category and old_category != category_name:
+            elif old_category and old_category != category_name:
                 if isinstance(old_category, list):
                     # 从多分类模式切换回单分类模式的情况
                     self.logger.info(f"从多分类切换回单分类: {Path(current_path).name} 设置为 {category_name}")
@@ -2259,19 +2264,28 @@ class ImageClassifier(QMainWindow):
             self.logger.debug(f"更新单个图片状态失败: {e}")
     
     def move_to_remove(self):
-        """移动图片到remove文件夹 - 支持从分类目录移除"""
+        """移动图片到remove文件夹 - 支持从分类目录移除和撤销删除"""
         if not self.image_files or self.current_index < 0:
             return
-            
+
         current_path = str(self.image_files[self.current_index])
+
+        # 检查是否要撤销删除（图片已在remove状态）
+        if current_path in self.removed_images:
+            # 撤销删除：从remove目录恢复图片
+            self._undo_removal(current_path)
+            return
+
         old_category = self.classified_images.get(current_path)
-        
+
+        # 删除前状态不再保存，撤销删除统一恢复到未分类状态
+
         # 记录为已移除
         self.removed_images.add(current_path)
-        
+
         # 记录此次操作为移除，清空选中类别保持状态
         self.last_operation_category = None
-        
+
         # 从分类记录中移除
         if current_path in self.classified_images:
             del self.classified_images[current_path]
@@ -2308,7 +2322,115 @@ class ImageClassifier(QMainWindow):
             self.update_category_selection_for_current_image(current_path)
         
         self.logger.info(f"图片已移除: {Path(current_path).name}")
-    
+
+    def _undo_classification(self, image_path, category):
+        """撤销分类：将图片从分类目录移回原目录，清除分类记录"""
+        try:
+            source_file = Path(image_path)
+            file_name = source_file.name
+            parent_dir = self.current_dir.parent
+
+            # 确定源文件位置（分类目录中）
+            category_dir = parent_dir / category
+            category_file = category_dir / file_name
+
+            # 确定目标位置（原目录）
+            original_file = self.current_dir / file_name
+
+            # 如果原目录中已存在同名文件，添加编号
+            if original_file.exists():
+                counter = 1
+                name_stem = source_file.stem
+                suffix = source_file.suffix
+                while original_file.exists():
+                    new_name = f"{name_stem}_{counter}{suffix}"
+                    original_file = self.current_dir / new_name
+                    counter += 1
+
+            # 根据操作模式执行不同的撤销逻辑
+            if self.is_copy_mode:
+                # 复制模式：删除分类目录中的副本
+                if category_file.exists():
+                    category_file.unlink()
+                    self.logger.info(f"撤销分类(复制模式): 删除副本 {category_file}")
+                else:
+                    self.logger.warning(f"撤销分类时未找到要删除的副本: {category_file}")
+            else:
+                # 移动模式：将文件从分类目录移回原目录
+                if category_file.exists():
+                    category_file.rename(original_file)
+                    self.logger.info(f"撤销分类(移动模式): {category_file} -> {original_file}")
+                else:
+                    self.logger.warning(f"撤销分类时未找到要移动的文件: {category_file}")
+
+            # 清除分类记录
+            if image_path in self.classified_images:
+                del self.classified_images[image_path]
+
+            # 更新UI和状态
+            self.save_state()
+            self._update_single_image_status(self.current_index, image_path)
+            QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
+
+            # 单分类模式下，保持在当前图片，不自动跳转
+            if not self.is_multi_category:
+                self.refresh_category_buttons_style()
+                self.update_category_selection_for_current_image(image_path)
+
+            self.logger.info(f"分类已撤销: {file_name} 从 {category}")
+
+        except Exception as e:
+            self.logger.error(f"撤销分类失败: {e}")
+
+    def _undo_removal(self, image_path):
+        """撤销删除：从remove目录恢复图片到原目录（未分类状态）"""
+        try:
+            source_file = Path(image_path)
+            file_name = source_file.name
+            parent_dir = self.current_dir.parent
+
+            # 确定源文件位置（remove目录中）
+            remove_dir = parent_dir / 'remove'
+            remove_file = remove_dir / file_name
+
+            # 统一恢复到原目录（未分类状态）
+            original_file = self.current_dir / file_name
+
+            # 如果原目录中已存在同名文件，添加编号
+            if original_file.exists():
+                counter = 1
+                name_stem = source_file.stem
+                suffix = source_file.suffix
+                while original_file.exists():
+                    new_name = f"{name_stem}_{counter}{suffix}"
+                    original_file = self.current_dir / new_name
+                    counter += 1
+
+            # 移动文件
+            if remove_file.exists():
+                remove_file.rename(original_file)
+                self.logger.info(f"撤销删除: {file_name} 恢复到原目录（未分类状态）")
+            else:
+                self.logger.warning(f"撤销删除时未找到要恢复的文件: {remove_file}")
+
+            # 清除删除记录
+            self.removed_images.discard(image_path)
+
+            # 更新UI和状态
+            self.save_state()
+            self._update_single_image_status(self.current_index, image_path)
+            QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
+
+            # 保持在当前图片，刷新UI显示状态
+            if not self.is_multi_category:
+                self.refresh_category_buttons_style()
+                self.update_category_selection_for_current_image(image_path)
+
+            self.logger.info(f"删除已撤销: {file_name}")
+
+        except Exception as e:
+            self.logger.error(f"撤销删除失败: {e}")
+
     def _move_from_category_to_remove(self, image_path, old_category):
         """从分类目录移动图片到remove目录"""
         try:

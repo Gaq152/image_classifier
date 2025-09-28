@@ -408,11 +408,14 @@ class CategoryButton(QPushButton):
                                 already_classified = self.category_name in current_category
                             else:
                                 already_classified = current_category == self.category_name
-                                
-                            if already_classified:
-                                main_window.logger.info(f"图片已经分类到 {self.category_name}，避免重复处理")
-                                event.accept()
-                                return
+
+                            # 多分类模式下，已分类的图片再次点击会触发撤销，所以需要继续执行
+                            # 单分类模式下，也需要支持撤销，所以也要继续执行
+                            # 删除原有的"避免重复处理"逻辑，让 move_to_category 方法处理撤销逻辑
+                            # if already_classified:
+                            #     main_window.logger.info(f"图片已经分类到 {self.category_name}，避免重复处理")
+                            #     event.accept()
+                            #     return
                     
                     # 如果未分类或分类到其他类别，则进行分类操作
                     main_window.move_to_category(self.category_name)
