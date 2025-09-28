@@ -77,6 +77,7 @@ upload:
     - |
       UPDATE_NOTES=$(python3 -c "
       import sys
+      import json
       sys.path.append('.')
       from _version_ import VERSION_HISTORY
 
@@ -89,14 +90,22 @@ upload:
               # 使用版本标题和前3个亮点作为更新说明
               title = version_info.get('title', '版本更新')
               highlights = version_info.get('highlights', [])
-              notes = f'{title}\\n'
+
+              # 组合更新说明，使用空格分隔而非换行，避免JSON控制字符问题
+              notes_parts = [title]
               for i, highlight in enumerate(highlights[:3]):
-                  notes += f'• {highlight}\\n'
+                  # 清理emoji和格式字符，只保留核心描述
+                  clean_highlight = highlight.replace('🔐 ', '').replace('🔧 ', '').replace('🛡️ ', '').replace('💻 ', '').replace('✨ ', '').replace('🔄 ', '').replace('⌨️ ', '').replace('🎯 ', '')
+                  notes_parts.append(f'• {clean_highlight}')
               if len(highlights) > 3:
-                  notes += '• ...等更多功能改进'
+                  notes_parts.append('• 等更多功能改进')
+
+              # 使用分号分隔，避免换行符
+              notes = '; '.join(notes_parts)
               break
 
-      print(notes)
+      # 确保输出是有效的JSON字符串
+      print(json.dumps(notes, ensure_ascii=False)[1:-1])  # 去掉外层引号
       ")
     - |
       cat > dist/manifest.json <<MANI
