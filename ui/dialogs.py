@@ -651,7 +651,7 @@ class TabbedHelpDialog(QDialog):
             # 询问是否立即重启更新
             reply = self._ask_yes_no(
                 '更新下载完成',
-                '更新包已准备就绪，是否立即重启并完成更新？\n\n选择“否”将暂不重启，下次启动会继续提示。'
+                '更新包已准备就绪，是否立即重启并完成更新？\n\n选择“取消”将暂不重启，下次启动会继续提示。'
             )
             if reply == QMessageBox.StandardButton.Yes:
                 # 启动批处理并退出
