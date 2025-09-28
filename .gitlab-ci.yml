@@ -73,6 +73,31 @@ upload:
     - SHA256=$(cat dist/${SAFE_FILENAME}.sha256)
     # 生成 manifest.json
     - SIZE_BYTES=$(stat -c %s "$WINDOWS_FILE")
+    # 从_version_.py提取版本更新说明
+    - |
+      UPDATE_NOTES=$(python3 -c "
+      import sys
+      sys.path.append('.')
+      from _version_ import VERSION_HISTORY
+
+      # 查找当前版本的更新说明
+      current_version = '${VERSION}'
+      notes = 'CI 自动生成'
+
+      for version_info in VERSION_HISTORY:
+          if version_info['version'] == current_version:
+              # 使用版本标题和前3个亮点作为更新说明
+              title = version_info.get('title', '版本更新')
+              highlights = version_info.get('highlights', [])
+              notes = f'{title}\\n'
+              for i, highlight in enumerate(highlights[:3]):
+                  notes += f'• {highlight}\\n'
+              if len(highlights) > 3:
+                  notes += '• ...等更多功能改进'
+              break
+
+      print(notes)
+      ")
     - |
       cat > dist/manifest.json <<MANI
       {
@@ -82,7 +107,7 @@ upload:
         "display_name": "图像分类工具_v${VERSION}.exe",
         "sha256": "${SHA256}",
         "size_bytes": ${SIZE_BYTES},
-        "notes": "CI 自动生成"
+        "notes": "${UPDATE_NOTES}"
       }
       MANI
     - 'curl --fail -X PUT --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --data-binary "@dist/manifest.json" "${PACKAGE_REGISTRY_URL}/${VERSION}/manifest.json"'
