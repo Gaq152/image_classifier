@@ -1269,14 +1269,42 @@ class StatisticsPanel(QWidget):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.initUI()
+
+        # 立即调用一次统计更新，确保进度条初始样式正确
+        self.update_statistics(0, 0, 0)
+
+    def _apply_progress_style(self, chunk_color="stop: 0 #28A745, stop: 1 #20C997"):
+        """统一的进度条样式应用方法，确保圆角始终生效"""
+        style = f"""
+            QProgressBar {{
+                border: 1px solid #6C757D;
+                border-radius: 10px;
+                background-color: #E9ECEF;
+                text-align: center;
+                font-weight: bold;
+                font-size: 12px;
+                height: 24px;
+                margin: 2px 0px;
+            }}
+            QProgressBar::chunk {{
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    {chunk_color});
+                border-radius: 8px;
+                margin: 0px;
+                border: none;
+            }}
+        """
+        self.progress_bar.setStyleSheet(style)
         
     def initUI(self):
-        """初始化简洁的UI"""
+        """初始化简洁的UI - 2x2网格布局"""
         try:
+            from PyQt6.QtWidgets import QGridLayout
+
             layout = QVBoxLayout(self)
             layout.setContentsMargins(8, 6, 8, 6)
             layout.setSpacing(4)
-            
+
             # 简化的标题
             title_label = QLabel("📊 统计")
             title_label.setStyleSheet("""
@@ -1290,74 +1318,54 @@ class StatisticsPanel(QWidget):
                 }
             """)
             layout.addWidget(title_label)
-            
-            # 紧凑的统计标签
+
+            # 创建2x2网格布局的统计信息
+            stats_grid = QGridLayout()
+            stats_grid.setContentsMargins(0, 0, 0, 0)
+            stats_grid.setSpacing(3)
+
+            # 创建统计标签
             self.total_label = QLabel("📁 总计: 0")
             self.classified_label = QLabel("✅ 已分类: 0")
             self.removed_label = QLabel("🗑️ 已移出: 0")
             self.remaining_label = QLabel("⏳ 待处理: 0")
-            
-            # 简化的标签样式
+
+            # 紧凑的标签样式
             label_style = """
                 QLabel {
-                    padding: 3px 6px;
+                    padding: 4px 6px;
                     margin: 1px;
-                    font-size: 12px;
+                    font-size: 11px;
                     border-radius: 3px;
                     background-color: #F8F9FA;
                 }
             """
-            
+
             for label in [self.total_label, self.classified_label, self.removed_label, self.remaining_label]:
                 label.setStyleSheet(label_style)
-                layout.addWidget(label)
-            
-            # 简化的进度条
-            progress_title = QLabel("🚀 进度")
-            progress_title.setStyleSheet("""
-                QLabel {
-                    font-size: 12px;
-                    font-weight: bold;
-                    color: #495057;
-                    padding: 2px 4px;
-                }
-            """)
-            layout.addWidget(progress_title)
-            
+
+            # 按2x2网格排列统计信息
+            stats_grid.addWidget(self.total_label, 0, 0)        # 第1行第1列
+            stats_grid.addWidget(self.classified_label, 0, 1)   # 第1行第2列
+            stats_grid.addWidget(self.removed_label, 1, 0)      # 第2行第1列
+            stats_grid.addWidget(self.remaining_label, 1, 1)    # 第2行第2列
+
+            layout.addLayout(stats_grid)
+
+            # 单一进度条（去掉重复的进度标题和标签）
             self.progress_bar = QProgressBar()
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
-            self.progress_bar.setMaximumHeight(16)
-            self.progress_bar.setStyleSheet("""
-                QProgressBar {
-                    border: 1px solid #6C757D;
-                    border-radius: 6px;
-                    background-color: #E9ECEF;
-                    text-align: center;
-                    font-size: 10px;
-                    height: 16px;
-                }
-                QProgressBar::chunk {
-                    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                        stop: 0 #28A745, stop: 1 #20C997);
-                    border-radius: 5px;
-                    margin: 1px;
-                }
-            """)
+            self.progress_bar.setMinimumHeight(24)
+            self.progress_bar.setMaximumHeight(24)
+            # 使用统一的样式方法设置进度条样式
+            self._apply_progress_style()
+
+            # 立即调用初始化统计更新，确保样式应用
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat("0%")
             layout.addWidget(self.progress_bar)
-            
-            # 简化的进度标签
-            self.progress_label = QLabel("0% 已处理")
-            self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.progress_label.setStyleSheet("""
-                QLabel {
-                    font-size: 10px;
-                    color: #6C757D;
-                    padding: 1px;
-                }
-            """)
-            layout.addWidget(self.progress_label)
-            
+
         except Exception as e:
             self.logger.error(f"初始化统计面板UI失败: {e}")
         
@@ -1382,8 +1390,6 @@ class StatisticsPanel(QWidget):
                 self.progress_bar.setValue(progress_percentage)
                 self.progress_bar.setFormat(f"{progress_percentage}%")
                 
-                # 更新进度标签
-                self.progress_label.setText(f"{progress_percentage}% 已处理 ({processed}/{total})")
                 
                 # 根据进度调整颜色
                 if progress_percentage >= 100:
@@ -1394,28 +1400,14 @@ class StatisticsPanel(QWidget):
                     chunk_color = "stop: 0 #FFC107, stop: 1 #FFD700"  # 黄色 - 进行中
                 else:
                     chunk_color = "stop: 0 #DC3545, stop: 1 #FF6B6B"  # 红色 - 刚开始
-                
-                self.progress_bar.setStyleSheet(f"""
-                    QProgressBar {{
-                        border: 2px solid #6C757D;
-                        border-radius: 8px;
-                        background-color: #E9ECEF;
-                        text-align: center;
-                        font-weight: bold;
-                        font-size: 11px;
-                        height: 20px;
-                    }}
-                    QProgressBar::chunk {{
-                        background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                            {chunk_color});
-                        border-radius: 6px;
-                        margin: 1px;
-                    }}
-                """)
+
+                # 使用统一的样式方法
+                self._apply_progress_style(chunk_color)
             else:
                 self.progress_bar.setValue(0)
                 self.progress_bar.setFormat("0%")
-                self.progress_label.setText("0% 已处理")
+                # 使用统一的样式方法，确保即使在total=0时也应用圆角样式
+                self._apply_progress_style("stop: 0 #DC3545, stop: 1 #FF6B6B")
                 
         except Exception as e:
             self.logger.error(f"更新统计信息失败: {e}")

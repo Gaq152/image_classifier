@@ -34,6 +34,34 @@ from ..core.file_manager import FileOperationManager
 from ..utils.performance import performance_monitor
 
 
+class ToolbarButtonStyles:
+    """工具栏按钮统一样式管理"""
+
+    # 现代正方形圆角按钮样式模板
+    MODERN_SQUARE_STYLE = """
+        QPushButton#{object_name} {{
+            background-color: #f5f5f5;
+            color: #424242;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: normal;
+            text-align: center;
+        }}
+        QPushButton#{object_name}:hover {{
+            background-color: #e0e0e0;
+        }}
+        QPushButton#{object_name}:pressed {{
+            background-color: #d0d0d0;
+        }}
+    """
+
+    @staticmethod
+    def get_square_button_style(object_name: str) -> str:
+        """获取正方形圆角按钮样式"""
+        return ToolbarButtonStyles.MODERN_SQUARE_STYLE.format(object_name=object_name)
+
+
 class ImageClassifier(QMainWindow):
     """主图像分类器窗口"""
     
@@ -290,20 +318,60 @@ class ImageClassifier(QMainWindow):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(6, 6, 6, 6)
         
-        # 简化的标题 - 固定高度，不参与拉伸
+        # 图片预览标题行 - 包含标题和移除按钮
+        title_container = QWidget()
+        title_container.setStyleSheet("""
+            QWidget {
+                border-bottom: 1px solid #DEE2E6;
+                max-height: 28px;
+                min-height: 28px;
+            }
+        """)
+        title_layout = QHBoxLayout(title_container)
+        title_layout.setContentsMargins(6, 4, 6, 4)
+        title_layout.setSpacing(8)
+
+        # 图片预览标题
         title_label = QLabel("🖼️ 图片预览")
         title_label.setStyleSheet("""
             QLabel {
                 font-size: 14px;
                 font-weight: bold;
                 color: #495057;
-                padding: 4px 6px;
-                border-bottom: 1px solid #DEE2E6;
-                max-height: 28px;
-                min-height: 28px;
+                border: none;
             }
         """)
-        left_layout.addWidget(title_label, 0)  # 不拉伸
+        title_layout.addWidget(title_label)
+
+        # 添加弹性空间，推送移除按钮到右侧
+        title_layout.addStretch()
+
+        # 移除按钮 - 现代化工具栏图标样式（红色）
+        self.delete_button = self.create_toolbar_button('🗑', 'remove_button',
+                                                       '移除当前图片到移除目录',
+                                                       self.move_to_remove,
+                                                       size=(24, 24))
+        # 重写样式为红色主题 - 正方形圆角设计
+        self.delete_button.setStyleSheet("""
+            QPushButton#remove_button {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: normal;
+                text-align: center;
+            }
+            QPushButton#remove_button:hover {
+                background-color: #e53935;
+            }
+            QPushButton#remove_button:pressed {
+                background-color: #d32f2f;
+            }
+        """)
+        title_layout.addWidget(self.delete_button)
+
+        left_layout.addWidget(title_container, 0)  # 不拉伸
         
         # 图片显示区域 - 主要拉伸区域
         scroll_area = QScrollArea()
@@ -350,66 +418,92 @@ class ImageClassifier(QMainWindow):
         self.statistics_panel = StatisticsPanel()
         right_layout.addWidget(self.statistics_panel, 0)  # 不拉伸
         
-        # 删除按钮（放在底部）- 固定高度
-        self.delete_button = QPushButton("🗑️ 删除图片 (Del)")
-        self.delete_button.setObjectName("deleteButton")  # 设置对象名以应用特殊样式
-        self.delete_button.clicked.connect(self.move_to_remove)
-        # 确保删除按钮保持原有的红色样式
-        self.delete_button.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545 !important;
-                color: white !important;
-                border: none !important;
-                border-radius: 4px !important;
-                padding: 12px 16px !important;
-                font-size: 14px !important;
-                font-weight: bold !important;
-                margin: 8px 0px !important;
-                max-height: 50px !important;
-                min-height: 50px !important;
-            }
-            QPushButton:hover {
-                background-color: #c82333 !important;
-            }
-            QPushButton:pressed {
-                background-color: #bd2130 !important;
-            }
-        """)
-        self.delete_button.setToolTip('删除当前图片到删除目录 (Del键)')
-        right_layout.addWidget(self.delete_button, 0)  # 不拉伸
-        
-        # 版本信息 - 固定高度
-        version_label = QLabel(f"版本 {self.version}")
-        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        version_label.setStyleSheet("""
+
+        # 提示文本 - 固定高度，添加灯泡图标
+        tips_label = QLabel('💡 ↑↓选择类别 | Enter确认 | 双击快速分类 | 滚轮缩放')
+        tips_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tips_label.setStyleSheet("""
             QLabel {
-                color: #666;
-                padding: 4px;
-                max-height: 20px;
-                min-height: 20px;
+                color: #555;
+                font-size: 11px;
+                padding: 4px 8px;
+                background-color: #FFF8E1;
+                border: 1px solid #FFD54F;
+                border-radius: 4px;
+                margin: 2px 0px;
+                max-height: 24px;
+                min-height: 24px;
+                font-weight: 500;
             }
         """)
-        right_layout.addWidget(version_label, 0)  # 不拉伸
+        right_layout.addWidget(tips_label, 0)  # 不拉伸
+
         
         parent.addWidget(right_widget)
     
     def create_image_list_area(self, layout):
         """创建简洁的图片列表区域"""
-        # 图片列表标题 - 固定高度
+        # 图片列表标题行 - 包含标题和文件夹图标按钮
+        list_title_container = QWidget()
+        list_title_container.setStyleSheet("""
+            QWidget {
+                border-bottom: 2px solid #0D6EFD;
+                margin-bottom: 4px;
+                max-height: 28px;
+                min-height: 28px;
+            }
+        """)
+        list_title_layout = QHBoxLayout(list_title_container)
+        list_title_layout.setContentsMargins(6, 0, 6, 4)  # 底部留4px给蓝色边框
+        list_title_layout.setSpacing(8)
+        list_title_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # 顶部对齐，避免遮挡底边框
+
+        # 图片列表标题
         list_label = QLabel("📂 图片列表")
         list_label.setStyleSheet("""
             QLabel {
                 font-size: 13px;
                 font-weight: bold;
                 color: #0D6EFD;
-                padding: 4px 6px;
-                border-bottom: 2px solid #0D6EFD;
-                margin-bottom: 4px;
-                max-height: 24px;
-                min-height: 24px;
+                border: none;
+                background-color: transparent;
+                padding: 0px;
+                margin: 0px;
             }
         """)
-        layout.addWidget(list_label, 0)  # 不拉伸
+        list_title_layout.addWidget(list_label)
+
+        # 添加弹性空间，推送文件夹按钮到右侧
+        list_title_layout.addStretch()
+
+        # 文件夹图标按钮 - 打开目录功能
+        folder_button = self.create_toolbar_button('📁', 'folder_button',
+                                                  '选择包含图片的目录',
+                                                  self.open_directory,
+                                                  size=(18, 18))
+        # 重写样式为透明背景蓝色图标，确保不遮挡蓝色边框
+        folder_button.setStyleSheet("""
+            QPushButton#folder_button {
+                background-color: transparent;
+                color: #0D6EFD;
+                border: none;
+                border-radius: 3px;
+                font-size: 11px;
+                font-weight: normal;
+                text-align: center;
+                margin: 0px;
+                padding: 0px;
+            }
+            QPushButton#folder_button:hover {
+                background-color: rgba(245, 245, 245, 180);
+            }
+            QPushButton#folder_button:pressed {
+                background-color: rgba(224, 224, 224, 180);
+            }
+        """)
+        list_title_layout.addWidget(folder_button)
+
+        layout.addWidget(list_title_container, 0)  # 不拉伸
         
         # 图片列表容器 - 可随窗口拉伸
         from PyQt6.QtWidgets import QListWidget
@@ -485,21 +579,67 @@ class ImageClassifier(QMainWindow):
     
     def create_category_area(self, layout):
         """创建简洁的类别按钮区域"""
-        # 类别标题 - 固定高度
+        # 分类类别标题行 - 包含标题和添加按钮
+        category_title_container = QWidget()
+        category_title_container.setStyleSheet("""
+            QWidget {
+                border-bottom: 2px solid #FF9800;
+                margin-bottom: 4px;
+                max-height: 28px;
+                min-height: 28px;
+            }
+        """)
+        category_title_layout = QHBoxLayout(category_title_container)
+        category_title_layout.setContentsMargins(6, 0, 6, 4)  # 底部留4px给橙色边框
+        category_title_layout.setSpacing(8)
+        category_title_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # 顶部对齐，避免遮挡底边框
+
+        # 分类类别标题
         category_label = QLabel("🏷️ 分类类别")
         category_label.setStyleSheet("""
             QLabel {
                 font-size: 13px;
                 font-weight: bold;
                 color: #E65100;
-                padding: 4px 6px;
-                border-bottom: 2px solid #FF9800;
-                margin-bottom: 4px;
-                max-height: 24px;
-                min-height: 24px;
+                border: none;
+                background-color: transparent;
+                padding: 0px;
+                margin: 0px;
             }
         """)
-        layout.addWidget(category_label, 0)  # 不拉伸
+        category_title_layout.addWidget(category_label)
+
+        # 添加弹性空间，推送添加按钮到右侧
+        category_title_layout.addStretch()
+
+        # 添加类别图标按钮 - "+"字符
+        add_button = self.create_toolbar_button('+', 'add_category_button',
+                                               '批量添加分类类别',
+                                               self.add_category,
+                                               size=(18, 18))
+        # 重写样式为透明背景橙色图标，与分类类别标题保持一致
+        add_button.setStyleSheet("""
+            QPushButton#add_category_button {
+                background-color: transparent;
+                color: #E65100;
+                border: none;
+                border-radius: 3px;
+                font-size: 14px;
+                font-weight: bold;
+                text-align: center;
+                margin: 0px;
+                padding: 0px;
+            }
+            QPushButton#add_category_button:hover {
+                background-color: rgba(245, 245, 245, 180);
+            }
+            QPushButton#add_category_button:pressed {
+                background-color: rgba(224, 224, 224, 180);
+            }
+        """)
+        category_title_layout.addWidget(add_button)
+
+        layout.addWidget(category_title_container, 0)  # 不拉伸
         
         # 类别按钮滚动区域 - 可随窗口拉伸
         self.category_scroll = QScrollArea()
@@ -562,7 +702,36 @@ class ImageClassifier(QMainWindow):
         
         self.category_scroll.setWidget(self.category_widget)
         layout.addWidget(self.category_scroll, 1)  # 设置拉伸权重1
-    
+
+    def create_toolbar_button(self, text: str, object_name: str, tooltip: str,
+                             click_handler=None, size=(40, 40)) -> QPushButton:
+        """创建标准化的工具栏按钮
+
+        Args:
+            text: 按钮显示文本/图标
+            object_name: 按钮对象名称（用于样式）
+            tooltip: 提示文本
+            click_handler: 点击事件处理函数（可选）
+            size: 按钮尺寸，默认(40, 40)
+
+        Returns:
+            QPushButton: 配置好的按钮实例
+        """
+        button = QPushButton()
+        button.setText(text)
+        button.setObjectName(object_name)
+        button.setToolTip(tooltip)
+        button.setFixedSize(*size)
+
+        # 应用统一样式
+        button.setStyleSheet(ToolbarButtonStyles.get_square_button_style(object_name))
+
+        # 绑定点击事件
+        if click_handler:
+            button.clicked.connect(click_handler)
+
+        return button
+
     def create_toolbar(self):
         """创建工具栏"""
         toolbar = QToolBar()
@@ -577,49 +746,51 @@ class ImageClassifier(QMainWindow):
                 padding: 8px;
                 margin: 2px;
             }
-            /* QAction 按钮样式 */
+            /* QAction 按钮样式 - 现代化蓝色主题 */
             QToolBar QToolButton {
-                background-color: #3498DB;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                           stop:0 #42A5F5, stop:1 #2196F3);
                 color: white;
-                border: 1px solid #2980B9;
-                border-radius: 6px;
-                padding: 6px 12px;
-                margin: 2px;
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-                min-height: 34px;
-                max-height: 34px;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                margin: 4px 2px;
+                font-size: 14px;
+                font-weight: 500;
+                min-width: 90px;
+                min-height: 30px;
+                max-height: 30px;
             }
             QToolBar QToolButton:hover {
-                background-color: #2980B9;
-                border-color: #21618C;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                           stop:0 #1E88E5, stop:1 #1976D2);
             }
             QToolBar QToolButton:pressed {
-                background-color: #21618C;
-                border-color: #1B4F72;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                           stop:0 #1565C0, stop:1 #0D47A1);
             }
-            /* 普通QPushButton样式 - 不影响模式按钮 */
-            QToolBar QPushButton:not([objectName="mode_button"]) {
-                background-color: #3498DB;
+            /* 普通QPushButton样式 - 不影响模式按钮，与QToolButton保持一致 */
+            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]) {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                           stop:0 #42A5F5, stop:1 #2196F3);
                 color: white;
-                border: 1px solid #2980B9;
-                border-radius: 6px;
-                padding: 6px 12px;
-                margin: 2px;
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-                min-height: 34px;
-                max-height: 34px;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                margin: 4px 2px;
+                font-size: 14px;
+                font-weight: 500;
+                min-width: 90px;
+                min-height: 30px;
+                max-height: 30px;
             }
-            QToolBar QPushButton:not([objectName="mode_button"]):hover {
-                background-color: #2980B9;
-                border-color: #21618C;
+            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                           stop:0 #1E88E5, stop:1 #1976D2);
             }
-            QToolBar QPushButton:not([objectName="mode_button"]):pressed {
-                background-color: #21618C;
-                border-color: #1B4F72;
+            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                           stop:0 #1565C0, stop:1 #0D47A1);
             }
         """)
         self.addToolBar(toolbar)
@@ -629,92 +800,44 @@ class ImageClassifier(QMainWindow):
         open_action.triggered.connect(self.open_directory)
         open_action.setToolTip('选择包含图片的目录')
         toolbar.addAction(open_action)
-        
-        # 新增类别
-        add_category_action = QAction('➕ 新增类别', self)
+
+        # 添加类别
+        add_category_action = QAction('➕ 添加类别', self)
         add_category_action.triggered.connect(self.add_category)
         add_category_action.setToolTip('批量添加分类类别')
         toolbar.addAction(add_category_action)
-        
-        toolbar.addSeparator()
-        
-        # 模式选择
-        self.create_mode_button(toolbar)
-        
-        # 分类模式按钮（单分类/多分类）
-        self.create_category_mode_button(toolbar)
-        
-        toolbar.addSeparator()
-        
-        # 刷新按钮
-        refresh_action = QAction('🔄 刷新', self)
-        refresh_action.triggered.connect(self.refresh_categories)
-        refresh_action.setToolTip('刷新类别目录，同步外部变化 (F5)')
-        toolbar.addAction(refresh_action)
-        
-        # 帮助按钮
-        help_action = QAction('📖 帮助', self)
-        help_action.triggered.connect(self.show_help_dialog)
-        help_action.setToolTip('查看使用指南和快捷键')
-        toolbar.addAction(help_action)
-        
-        # 添加弹性空间
+
+        # 添加弹性空间 - 推送右侧按钮到最右边
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
-        
-        # 操作提示
-        tips_label = QLabel('提示: ↑↓选择类别 | Enter确认 | 双击快速分类 | 智能滑动窗口 | SMB/NAS优化 | 滚轮缩放')
-        tips_label.setStyleSheet("""
-            QLabel {
-                color: #666;
-                font-size: 11px;
-                padding: 4px 8px;
-                background-color: #fff;
-                border: 1px solid #ddd;
-                border-radius: 3px;
-            }
-        """)
-        toolbar.addWidget(tips_label)
-        
+
+        # 模式选择
+        self.create_mode_button(toolbar)
+
+        # 分类模式按钮（单分类/多分类）
+        self.create_category_mode_button(toolbar)
+
         toolbar.addSeparator()
+
+        # 刷新按钮 - 使用统一样式
+        refresh_button = self.create_toolbar_button('↻', 'refresh_button',
+                                                   '刷新类别目录，同步外部变化 (F5)',
+                                                   self.refresh_categories)
+        toolbar.addWidget(refresh_button)
+
+        # 帮助按钮 - 使用统一样式
+        help_button = self.create_toolbar_button('?', 'help_button',
+                                                '查看使用指南和快捷键',
+                                                self.show_help_dialog)
+        toolbar.addWidget(help_button)
     
     def create_mode_button(self, toolbar):
-        """创建简化的模式选择按钮 - 直接点击切换"""
-        # 创建一个简单的QPushButton，直接切换模式
-        self.mode_button = QPushButton()
-        self.mode_button.setText('📋 复制模式')
-        self.mode_button.setObjectName("mode_button")
-        self.mode_button.setToolTip('点击切换复制/移动模式')
-        
-        # 设置按钮尺寸 - 与其他按钮保持一致的尺寸
-        self.mode_button.setFixedSize(110, 34)
-        
-        # 点击事件：直接切换模式
-        self.mode_button.clicked.connect(lambda: self.set_mode(not self.is_copy_mode))
-        
-        # 设置与其他按钮一致的样式
-        self.mode_button.setStyleSheet("""
-            QPushButton#mode_button {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 13px;
-                font-weight: bold;
-                text-align: center;
-                min-width: 90px;
-                min-height: 34px;
-                max-height: 34px;
-            }
-            QPushButton#mode_button:hover { 
-                background-color: #2980B9; 
-            }
-            QPushButton#mode_button:pressed { 
-                background-color: #21618C; 
-            }
-        """)
+        """创建图标化的模式选择按钮 - 直接点击切换"""
+        # 使用统一样式创建按钮
+        self.mode_button = self.create_toolbar_button('⧉', 'mode_button',
+                                                     '复制模式 - 点击切换到移动模式',
+                                                     lambda: self.set_mode(not self.is_copy_mode))
 
         # 添加到工具栏
         toolbar.addWidget(self.mode_button)
@@ -725,6 +848,18 @@ class ImageClassifier(QMainWindow):
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("准备就绪")
+
+        # 在状态栏右侧添加版本信息
+        from .._version_ import __version__
+        version_label = QLabel(f"版本 {__version__}")
+        version_label.setStyleSheet("""
+            QLabel {
+                color: #666;
+                padding: 2px 8px;
+                font-size: 11px;
+            }
+        """)
+        self.statusBar.addPermanentWidget(version_label)
     
     @performance_monitor
     def setup_shortcuts(self):
@@ -1631,12 +1766,23 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"加载状态失败: {e}")
     
     def _update_category_mode_button_state(self):
-        """更新分类模式按钮状态"""
+        """更新分类模式按钮状态 - 统一方法"""
+        self.update_category_mode_button()
+
+    def update_category_mode_button(self):
+        """统一的分类模式按钮状态更新方法"""
         try:
             if hasattr(self, 'category_mode_button') and self.category_mode_button:
-                mode_text = "🔀 多分类模式" if self.is_multi_category else "🔂 单分类模式"
-                self.category_mode_button.setText(mode_text)
-                self.logger.debug(f"分类模式按钮状态已更新: {mode_text}")
+                # 更新按钮图标和提示
+                if self.is_multi_category:
+                    self.category_mode_button.setText('⋮')  # Unicode多点符号表示多分类
+                    self.category_mode_button.setToolTip('多分类模式 - 点击切换到单分类模式')
+                else:
+                    self.category_mode_button.setText('①')  # Unicode数字符号表示单分类
+                    self.category_mode_button.setToolTip('单分类模式 - 点击切换到多分类模式')
+
+                mode_desc = "多分类" if self.is_multi_category else "单分类"
+                self.logger.debug(f"分类模式按钮状态已更新: {mode_desc}")
             else:
                 self.logger.warning("分类模式按钮不存在，无法更新状态")
         except Exception as e:
@@ -3137,48 +3283,22 @@ class ImageClassifier(QMainWindow):
         
         self.is_copy_mode = is_copy
         
-        # 更新按钮文本
-        mode_text = "📋 复制模式" if is_copy else "✂️ 移动模式"
-        self.mode_button.setText(mode_text)
+        # 更新按钮图标和提示
+        if is_copy:
+            self.mode_button.setText('⧉')  # 重叠方块表示复制
+            self.mode_button.setToolTip('复制模式 - 点击切换到移动模式')
+        else:
+            self.mode_button.setText('✂')  # 剪刀表示移动
+            self.mode_button.setToolTip('移动模式 - 点击切换到复制模式')
         
         self.logger.info(f"操作模式已切换为: {'复制' if is_copy else '移动'}")
     
     def create_category_mode_button(self, toolbar):
-        """创建分类模式切换按钮 - 单分类/多分类"""
-        # 创建按钮
-        self.category_mode_button = QPushButton()
-        self.category_mode_button.setText('🔂 单分类模式')
-        self.category_mode_button.setObjectName("category_mode_button")
-        self.category_mode_button.setToolTip('点击切换单分类/多分类模式')
-        
-        # 设置按钮尺寸 - 与其他按钮保持一致的尺寸
-        self.category_mode_button.setFixedSize(110, 34)
-        
-        # 点击事件：切换模式
-        self.category_mode_button.clicked.connect(self.toggle_category_mode)
-        
-        # 设置与其他按钮一致的样式
-        self.category_mode_button.setStyleSheet("""
-            QPushButton#category_mode_button {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 13px;
-                font-weight: bold;
-                text-align: center;
-                min-width: 90px;
-                min-height: 34px;
-                max-height: 34px;
-            }
-            QPushButton#category_mode_button:hover { 
-                background-color: #2980B9; 
-            }
-            QPushButton#category_mode_button:pressed { 
-                background-color: #21618C; 
-            }
-        """)
+        """创建图标化的分类模式切换按钮 - 单分类/多分类"""
+        # 使用统一样式创建按钮
+        self.category_mode_button = self.create_toolbar_button('①', 'category_mode_button',
+                                                              '单分类模式 - 点击切换到多分类模式',
+                                                              self.toggle_category_mode)
 
         # 添加到工具栏
         toolbar.addWidget(self.category_mode_button)
@@ -3195,18 +3315,17 @@ class ImageClassifier(QMainWindow):
             return
         
         self.is_multi_category = not self.is_multi_category
-        
-        # 更新按钮文本
-        mode_text = "🔀 多分类模式" if self.is_multi_category else "🔂 单分类模式"
-        self.category_mode_button.setText(mode_text)
-        
+
+        # 使用统一的按钮状态更新方法
+        self.update_category_mode_button()
+
         # 显示提示
         mode_desc = "多分类模式（一张图片可以同时属于多个类别）" if self.is_multi_category else "单分类模式（一张图片只能属于一个类别）"
         self.statusBar.showMessage(f"已切换为{mode_desc}")
-        
+
         # 保存分类模式状态
         self.save_state()
-        
+
         self.logger.info(f"分类模式已切换为: {'多分类' if self.is_multi_category else '单分类'}")
 
     def fit_to_window(self):

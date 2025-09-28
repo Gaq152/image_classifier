@@ -1553,6 +1553,17 @@ class ProgressDialog(QDialog):
             QProgressBar {
                 text-align: center;
                 min-height: 20px;
+                border: 1px solid #6C757D;
+                border-radius: 10px;
+                background-color: #E9ECEF;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #28A745, stop: 1 #20C997);
+                border-radius: 8px;
+                margin: 1px;
             }
             QPushButton {
                 padding: 6px 20px;
