@@ -40,12 +40,47 @@ def clean_build_dirs():
         if os.path.exists(dir_name):
             print(f"清理目录: {dir_name}")
             shutil.rmtree(dir_name)
-    
+
     # 清理.spec文件
     spec_files = list(Path('.').glob('*.spec'))
     for spec_file in spec_files:
         print(f"删除spec文件: {spec_file}")
         spec_file.unlink()
+
+
+def clean_build_artifacts():
+    """构建完成后清理构建产物，只保留最终的exe文件"""
+    print("\n开始清理构建产物...")
+
+    # 清理build目录
+    if os.path.exists('build'):
+        print("清理build目录...")
+        shutil.rmtree('build')
+
+    # 清理.spec文件
+    spec_files = list(Path('.').glob('*.spec'))
+    for spec_file in spec_files:
+        print(f"删除spec文件: {spec_file}")
+        spec_file.unlink()
+
+    # 清理__pycache__目录
+    pycache_dirs = list(Path('.').rglob('__pycache__'))
+    for pycache_dir in pycache_dirs:
+        if pycache_dir.exists():
+            print(f"清理缓存目录: {pycache_dir}")
+            shutil.rmtree(pycache_dir)
+
+    # 显示保留的文件
+    dist_dir = Path('dist')
+    if dist_dir.exists():
+        exe_files = list(dist_dir.glob('*.exe'))
+        if exe_files:
+            print(f"✓ 保留最终产物: {len(exe_files)} 个exe文件")
+            for exe_file in exe_files:
+                size_mb = exe_file.stat().st_size / (1024 * 1024)
+                print(f"  - {exe_file.name} ({size_mb:.1f} MB)")
+
+    print("✓ 构建产物清理完成")
 
 
 def check_dependencies():
@@ -219,12 +254,16 @@ def main():
     if not build_executable():
         print("✗ 构建失败")
         return 1
-    
+
+    # 构建完成后清理构建产物
+    clean_build_artifacts()
+
     print("\n" + "=" * 60)
     print("✅ 优化构建完成!")
     download_urls = get_download_urls()
     print(f"📁 可执行文件: dist/{download_urls['exe_name_chinese']}")
     print("✨ 包含完整功能，去除冗余依赖")
+    print("🧹 构建产物已清理，仅保留最终exe文件")
     print("=" * 60)
     
     return 0

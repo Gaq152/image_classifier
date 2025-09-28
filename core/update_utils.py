@@ -169,7 +169,8 @@ def build_update_batch(target_exe: Path, new_file: Path, old_pid: int | None = N
         "timeout /t 3 /nobreak >nul",
         f'start "" "{target}"',
         "echo Update done.",
-        "del /f /q %~f0",
+        ":: 延迟删除自己并关闭窗口",
+        '(goto) 2>nul & del /f /q "%~f0" & exit',
     ]
     return "\r\n".join(lines) + "\r\n"
 
@@ -239,6 +240,8 @@ def ensure_persistent_updater(target_exe: Path) -> Path:
         "timeout /t 3 /nobreak >nul\r\n"
         "start \"\" /D \"%TARGET_DIR%\" \"%FINAL%\"\r\n"
         "echo Update done.\r\n"
+        "REM 延迟删除自己并关闭窗口\r\n"
+        "(goto) 2>nul & del /f /q \"%~f0\" & exit\r\n"
     )
 
     batch_path.write_text(content, encoding="utf-8")
