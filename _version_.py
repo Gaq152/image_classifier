@@ -12,7 +12,7 @@ from typing import Dict, List, Tuple
 # ================================
 
 # 主版本号 - 这是唯一需要手动修改的地方
-__version__ = "6.1.0"
+__version__ = "6.1.1"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
@@ -24,6 +24,24 @@ RELEASE_NAME = "图像分类工具"
 # ================================
 
 VERSION_HISTORY = [
+    {
+        "version": "6.1.1",
+        "date": "2025-09-28",
+        "title": "自动更新认证修复",
+        "highlights": [
+            "🔐 修复自动更新GitLab认证问题：更新为永久部署令牌",
+            "🔧 优化Bearer认证处理：支持GitLab Deploy Token认证机制",
+            "🛡️ 解决HTTP 401错误：替换过期的访问令牌为长期有效的部署令牌",
+            "💻 改进PowerShell脚本：统一Bearer认证头处理逻辑"
+        ],
+        "details": [
+            "修复：更新过期的GitLab访问令牌为永久部署令牌",
+            "修复：GitLab Deploy Token需要使用Bearer认证而非PRIVATE-TOKEN",
+            "改进：PowerShell脚本中的认证头处理逻辑",
+            "优化：update_utils.py中的token认证机制",
+            "解决：6.0.0版本自动更新时的HTTP 401认证失败问题"
+        ]
+    },
     {
         "version": "6.1.0",
         "date": "2025-09-28",

@@ -24,7 +24,7 @@ from typing import Callable, Dict, Optional
 from urllib.error import HTTPError, URLError
 
 # 可选：在企业内网环境下内置只读访问令牌，默认为空
-BUILTIN_UPDATE_TOKEN = "qBo4xpZnkcphq_uT-cXA"
+BUILTIN_UPDATE_TOKEN = "Bearer gldt-GFPBbdC1zTZrrsGtVg6S"
 
 def resolve_token(preferred: Optional[str] = None) -> Optional[str]:
     if preferred:
@@ -216,7 +216,7 @@ def ensure_persistent_updater(target_exe: Path) -> Path:
         "for %%F in (\"%UPDATE_DIR%\*%EXE_NAME:~0,-4%*.exe\") do set NEW_FILE=%%~fF\r\n"
         "if not \"%NEW_FILE%\"==\"\" goto do_update\r\n"
         "REM 2) 本地无包则联机下载 latest/manifest.json 到 UPDATE_DIR\r\n"
-        "powershell -NoProfile -Command \"$t=$env:IMAGE_CLASSIFIER_UPDATE_TOKEN; $url='%MANIFEST_URL%'; $h=@{}; if($t){$h[''PRIVATE-TOKEN'']=$t}; $m=(Invoke-WebRequest -UseBasicParsing -Headers $h -Uri $url).Content | ConvertFrom-Json; $d='%UPDATE_DIR%'; if(-not (Test-Path $d)){New-Item -ItemType Directory -Path $d|Out-Null}; $name= if($m.display_name){$m.display_name}else{[System.IO.Path]::GetFileName($m.url)}; $dest=Join-Path $d $name; Invoke-WebRequest -UseBasicParsing -Headers $h -Uri $m.url -OutFile $dest; $sha=$m.sha256; $hash=(Get-FileHash -Algorithm SHA256 $dest).Hash; if($hash -ne $sha){Write-Error 'HASH_MISMATCH'; exit 5}; Write-Output $dest\" > \"%UPDATE_DIR%download_path.tmp\"\r\n"
+        "powershell -NoProfile -Command \"$t=$env:IMAGE_CLASSIFIER_UPDATE_TOKEN; $url='%MANIFEST_URL%'; $h=@{}; if($t){if($t.StartsWith('Bearer ')){$h['Authorization']=$t}else{$h['Authorization']='Bearer '+$t}}; $m=(Invoke-WebRequest -UseBasicParsing -Headers $h -Uri $url).Content | ConvertFrom-Json; $d='%UPDATE_DIR%'; if(-not (Test-Path $d)){New-Item -ItemType Directory -Path $d|Out-Null}; $name= if($m.display_name){$m.display_name}else{[System.IO.Path]::GetFileName($m.url)}; $dest=Join-Path $d $name; Invoke-WebRequest -UseBasicParsing -Headers $h -Uri $m.url -OutFile $dest; $sha=$m.sha256; $hash=(Get-FileHash -Algorithm SHA256 $dest).Hash; if($hash -ne $sha){Write-Error 'HASH_MISMATCH'; exit 5}; Write-Output $dest\" > \"%UPDATE_DIR%download_path.tmp\"\r\n"
         "set /p NEW_FILE=<\"%UPDATE_DIR%download_path.tmp\"\r\n"
         "del /f /q \"%UPDATE_DIR%download_path.tmp\" >nul 2>&1\r\n"
         ":do_update\r\n"
