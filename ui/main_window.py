@@ -33,35 +33,7 @@ from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..core.file_manager import FileOperationManager
 from ..utils.performance import performance_monitor
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
-
-
-class ToolbarButtonStyles:
-    """工具栏按钮统一样式管理"""
-
-    # 现代正方形圆角按钮样式模板
-    MODERN_SQUARE_STYLE = """
-        QPushButton#{object_name} {{
-            background-color: #f5f5f5;
-            color: #424242;
-            border: none;
-            border-radius: 8px;
-            font-size: 18px;
-            font-weight: normal;
-            text-align: center;
-        }}
-        QPushButton#{object_name}:hover {{
-            background-color: #e0e0e0;
-        }}
-        QPushButton#{object_name}:pressed {{
-            background-color: #d0d0d0;
-        }}
-    """
-
-    @staticmethod
-    def get_square_button_style(object_name: str) -> str:
-        """获取正方形圆角按钮样式"""
-        return ToolbarButtonStyles.MODERN_SQUARE_STYLE.format(object_name=object_name)
-
+from .components.styles import ButtonStyles, DialogStyles
 
 class ImageClassifier(QMainWindow):
     """主图像分类器窗口"""
@@ -729,8 +701,8 @@ class ImageClassifier(QMainWindow):
         button.setToolTip(tooltip)
         button.setFixedSize(*size)
 
-        # 应用统一样式
-        button.setStyleSheet(ToolbarButtonStyles.get_square_button_style(object_name))
+        # 应用统一样式 - 使用新的样式系统
+        button.setStyleSheet(ButtonStyles.get_square_button_style(object_name))
 
         # 绑定点击事件
         if click_handler:
@@ -2524,7 +2496,7 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"撤销分类失败: {e}")
 
     def _undo_removal(self, image_path):
-        """撤销删除：从remove目录恢复图片到原目录（未分类状态）"""
+        """撤销删除：根据工作模式恢复图片"""
         try:
             source_file = Path(image_path)
             file_name = source_file.name
@@ -2534,25 +2506,32 @@ class ImageClassifier(QMainWindow):
             remove_dir = parent_dir / 'remove'
             remove_file = remove_dir / file_name
 
-            # 统一恢复到原目录（未分类状态）
-            original_file = self.current_dir / file_name
-
-            # 如果原目录中已存在同名文件，添加编号
-            if original_file.exists():
-                counter = 1
-                name_stem = source_file.stem
-                suffix = source_file.suffix
-                while original_file.exists():
-                    new_name = f"{name_stem}_{counter}{suffix}"
-                    original_file = self.current_dir / new_name
-                    counter += 1
-
-            # 移动文件
-            if remove_file.exists():
-                remove_file.rename(original_file)
-                self.logger.info(f"撤销删除: {file_name} 恢复到原目录（未分类状态）")
-            else:
+            if not remove_file.exists():
                 self.logger.warning(f"撤销删除时未找到要恢复的文件: {remove_file}")
+                return
+
+            # 根据工作模式决定操作方式
+            if self.is_copy_mode:
+                # 复制模式：直接删除remove目录中的文件（因为原文件仍在源目录）
+                remove_file.unlink()
+                self.logger.info(f"撤销删除（复制模式）: {file_name} 从remove目录删除")
+            else:
+                # 移动模式：从remove目录移动回原目录（未分类状态）
+                original_file = self.current_dir / file_name
+
+                # 如果原目录中已存在同名文件，添加编号
+                if original_file.exists():
+                    counter = 1
+                    name_stem = source_file.stem
+                    suffix = source_file.suffix
+                    while original_file.exists():
+                        new_name = f"{name_stem}_{counter}{suffix}"
+                        original_file = self.current_dir / new_name
+                        counter += 1
+
+                # 移动文件回原目录
+                remove_file.rename(original_file)
+                self.logger.info(f"撤销删除（移动模式）: {file_name} 恢复到原目录（未分类状态）")
 
             # 清除删除记录
             self.removed_images.discard(image_path)
@@ -3458,10 +3437,6 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"显示图像时出错: {e}")
     
-    def scale_pixmap(self, pixmap):
-        """缩放图像以适应显示区域（已废弃，由EnhancedImageLabel处理）"""
-        # 这个方法现在由EnhancedImageLabel的set_image方法处理
-        return pixmap
     
     def update_image_list_thumbnail(self, image_path, thumbnail_data):
         """更新图片列表中的缩略图"""
@@ -3984,11 +3959,12 @@ class ImageClassifier(QMainWindow):
 
     def _create_styled_message_box(self, icon_type, title, text, buttons=None):
         """创建具有统一样式和中文按钮的消息框"""
+
         msgBox = QMessageBox(self)
         msgBox.setIcon(icon_type)
         msgBox.setWindowTitle(title)
         msgBox.setText(text)
-        
+
         # 设置程序图标
         try:
             icon_path = self._get_resource_path('assets/icon.ico')
@@ -3996,45 +3972,31 @@ class ImageClassifier(QMainWindow):
                 msgBox.setWindowIcon(QIcon(str(icon_path)))
         except Exception:
             pass
-        
-        # 设置美化样式
-        msgBox.setStyleSheet("""
-            QMessageBox {
+
+        # 使用新的样式系统
+        message_box_style = f"""
+            QMessageBox {{
                 background-color: #F8F9FA;
                 color: #2C3E50;
                 border: 1px solid #BDC3C7;
                 border-radius: 8px;
                 font-size: 14px;
-            }
-            QMessageBox QLabel {
+            }}
+            QMessageBox QLabel {{
                 color: #2C3E50;
                 font-size: 14px;
                 padding: 10px;
-            }
-            QMessageBox QPushButton {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-            }
-            QMessageBox QPushButton:hover {
-                background-color: #2980B9;
-            }
-            QMessageBox QPushButton:pressed {
-                background-color: #21618C;
-            }
-            QMessageBox QPushButton:default {
+            }}
+            {ButtonStyles.get_primary_button_style()}
+            QPushButton:default {{
                 background-color: #27AE60;
-            }
-            QMessageBox QPushButton:default:hover {
+            }}
+            QPushButton:default:hover {{
                 background-color: #229954;
-            }
-        """)
-        
+            }}
+        """
+        msgBox.setStyleSheet(message_box_style)
+
         # 设置中文按钮
         if buttons is None:
             msgBox.setStandardButtons(QMessageBox.StandardButton.Ok)
@@ -4054,12 +4016,9 @@ class ImageClassifier(QMainWindow):
                 msgBox.button(QMessageBox.StandardButton.Apply).setText("应用")
             if msgBox.button(QMessageBox.StandardButton.Close):
                 msgBox.button(QMessageBox.StandardButton.Close).setText("关闭")
-                
+
         return msgBox
     
-    # 旧的消息框方法已移除，现在使用Toast通知系统
-    # show_info_message, show_warning_message, show_error_message 已废弃
-    # 使用 show_info_toast, show_warning_toast, show_error_toast 替代
     
     def show_question_message(self, title, text):
         """显示询问消息框"""
