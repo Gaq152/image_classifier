@@ -14,6 +14,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QPen, QBrush, QColor, QIcon, QFont
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..utils.exceptions import FileOperationError
 from .components.toast import toast_warning, toast_error, toast_floating
+from .components.styles import apply_category_button_style, apply_enhanced_image_label_style, WidgetStyles, DialogStyles, ButtonStyles
 
 
 class CategoryButton(QPushButton):
@@ -51,80 +52,8 @@ class CategoryButton(QPushButton):
         # 更新文本
         self.update_text()
         
-        # 设置简洁美观的样式 - 减少占用空间
-        self.setStyleSheet("""
-            QPushButton {
-                font-size: 13px;
-                padding: 6px 8px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                background-color: #ffffff;
-                text-align: left;
-                margin: 1px 0;
-                font-weight: 500;
-                min-height: 20px;
-            }
-            QPushButton:hover {
-                border-color: #aaa;
-                background-color: #f0f0f0;
-            }
-            /* 键盘导航或鼠标选中状态 - 蓝色边框 */
-            QPushButton:checked {
-                border: 2px solid #2196F3;
-                background-color: #E3F2FD;
-                color: #1565C0;
-                font-weight: bold;
-            }
-            /* 已分类状态 - 绿色背景（多分类模式下已选中的类别）*/
-            QPushButton[classified="true"] {
-                border: 1px solid #4CAF50;
-                background-color: #E8F5E8;
-                color: #2E7D32;
-                font-weight: bold;
-            }
-            /* 已分类且当前选中状态 - 蓝色边框，绿色背景 */
-            QPushButton[classified="true"]:checked {
-                border: 2px solid #2196F3;
-                background-color: #C8E6C9;
-                color: #1B5E20;
-                font-weight: bold;
-            }
-            /* 多分类状态 - 绿色背景（用于多分类模式下已分类的类别）*/
-            QPushButton[multi_classified="true"] {
-                border: 1px solid #4CAF50;
-                background-color: #E8F5E8;
-                color: #2E7D32;
-                font-weight: bold;
-            }
-            /* 多分类且当前选中状态 - 蓝色边框，绿色背景 */
-            QPushButton[multi_classified="true"]:checked {
-                border: 2px solid #2196F3;
-                background-color: #C8E6C9;
-                color: #1B5E20;
-                font-weight: bold;
-            }
-            /* 已移除状态 - 红色背景 */
-            QPushButton[removed="true"] {
-                border: 1px solid #F44336;
-                background-color: #FFEBEE;
-                color: #C62828;
-                font-weight: bold;
-            }
-            /* 已移除且选中状态 */
-            QPushButton[removed="true"]:checked {
-                border: 2px solid #2196F3;
-                background-color: #FFCDD2;
-                color: #B71C1C;
-                font-weight: bold;
-            }
-            QLabel {
-                background: transparent;
-                border: none;
-                font-size: 13px;
-                font-weight: inherit;
-                color: inherit;
-            }
-        """)
+        # 使用统一的样式系统
+        apply_category_button_style(self)
             
     def update_text(self):
         """更新按钮文本"""
@@ -212,52 +141,8 @@ class CategoryButton(QPushButton):
             dialog.setModal(True)
             dialog.setFixedSize(350, 150)
             
-            # 设置对话框样式
-            dialog.setStyleSheet("""
-                QDialog {
-                    background-color: #F8F9FA;
-                    border: 1px solid #BDC3C7;
-                    border-radius: 8px;
-                }
-                QLabel {
-                    color: #2C3E50;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                QLineEdit {
-                    background-color: #FFFFFF;
-                    border: 2px solid #BDC3C7;
-                    border-radius: 6px;
-                    padding: 8px 12px;
-                    font-size: 13px;
-                    color: #2C3E50;
-                }
-                QLineEdit:focus {
-                    border-color: #3498DB;
-                }
-                QPushButton {
-                    background-color: #3498DB;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                    font-weight: bold;
-                    min-width: 80px;
-                }
-                QPushButton:hover {
-                    background-color: #2980B9;
-                }
-                QPushButton:pressed {
-                    background-color: #21618C;
-                }
-                QPushButton#cancelButton {
-                    background-color: #95A5A6;
-                }
-                QPushButton#cancelButton:hover {
-                    background-color: #7F8C8D;
-                }
-            """)
+            # 使用统一的样式系统
+            dialog.setStyleSheet(WidgetStyles.get_custom_rename_dialog_style())
             
             layout = QVBoxLayout(dialog)
             layout.setSpacing(15)
@@ -353,34 +238,19 @@ class CategoryButton(QPushButton):
             # 设置默认按钮为"否"
             msg_box.setDefaultButton(no_button)
             
-            # 设置样式
-            msg_box.setStyleSheet("""
-                QMessageBox {
+            # 使用统一的样式系统
+            message_box_style = f"""
+                QMessageBox {{
                     background-color: #F8F9FA;
                     color: #2C3E50;
-                }
-                QMessageBox QLabel {
+                }}
+                QMessageBox QLabel {{
                     color: #2C3E50;
                     font-size: 14px;
-                }
-                QPushButton {
-                    background-color: #3498DB;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                    font-weight: bold;
-                    min-width: 60px;
-                    margin: 2px;
-                }
-                QPushButton:hover {
-                    background-color: #2980B9;
-                }
-                QPushButton:pressed {
-                    background-color: #21618C;
-                }
-            """)
+                }}
+                {ButtonStyles.get_primary_button_style()}
+            """
+            msg_box.setStyleSheet(message_box_style)
             
             # 显示对话框并处理结果
             msg_box.exec()
@@ -543,7 +413,7 @@ class EnhancedImageLabel(QLabel):
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(300, 200)
-        self.setStyleSheet("border: 1px solid #ccc; background-color: #f8f8f8;")
+        apply_enhanced_image_label_style(self)
         
         self.original_pixmap = None
         self.scale_factor = 1.0
