@@ -308,8 +308,9 @@ class ImageClassifier(QMainWindow):
     def create_left_panel(self, parent):
         """创建简洁的左侧图片显示面板"""
         left_widget = QWidget()
+        left_widget.setObjectName("left_panel")  # 设置对象名用于精确样式选择
         left_widget.setStyleSheet("""
-            QWidget {
+            QWidget#left_panel {
                 background-color: #FFFFFF;
                 border: 1px solid #DEE2E6;
                 border-radius: 6px;
@@ -320,8 +321,9 @@ class ImageClassifier(QMainWindow):
         
         # 图片预览标题行 - 包含标题和移除按钮
         title_container = QWidget()
+        title_container.setObjectName("title_container")
         title_container.setStyleSheet("""
-            QWidget {
+            QWidget#title_container {
                 border-bottom: 1px solid #DEE2E6;
                 max-height: 28px;
                 min-height: 28px;
@@ -395,10 +397,11 @@ class ImageClassifier(QMainWindow):
     def create_right_panel(self, parent):
         """创建简洁的右侧控制面板"""
         right_widget = QWidget()
+        right_widget.setObjectName("right_panel")  # 设置对象名用于精确样式选择
         right_widget.setMaximumWidth(380)
         right_widget.setMinimumWidth(300)
         right_widget.setStyleSheet("""
-            QWidget {
+            QWidget#right_panel {
                 background-color: #FFFFFF;
                 border: 1px solid #DEE2E6;
                 border-radius: 6px;
@@ -445,8 +448,9 @@ class ImageClassifier(QMainWindow):
         """创建简洁的图片列表区域"""
         # 图片列表标题行 - 包含标题和文件夹图标按钮
         list_title_container = QWidget()
+        list_title_container.setObjectName("list_title_container")
         list_title_container.setStyleSheet("""
-            QWidget {
+            QWidget#list_title_container {
                 border-bottom: 2px solid #0D6EFD;
                 margin-bottom: 4px;
                 max-height: 28px;
@@ -581,8 +585,9 @@ class ImageClassifier(QMainWindow):
         """创建简洁的类别按钮区域"""
         # 分类类别标题行 - 包含标题和添加按钮
         category_title_container = QWidget()
+        category_title_container.setObjectName("category_title_container")
         category_title_container.setStyleSheet("""
-            QWidget {
+            QWidget#category_title_container {
                 border-bottom: 2px solid #FF9800;
                 margin-bottom: 4px;
                 max-height: 28px;
@@ -736,6 +741,7 @@ class ImageClassifier(QMainWindow):
         """创建工具栏"""
         toolbar = QToolBar()
         toolbar.setMovable(False)
+        toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)  # 禁用右键菜单
         # 设置工具栏的基础样式
         toolbar.setStyleSheet("""
             QToolBar {
