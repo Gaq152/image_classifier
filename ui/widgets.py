@@ -13,6 +13,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QPen, QBrush, QColor, QIcon, QFont
 
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..utils.exceptions import FileOperationError
+from .components.toast import toast_warning, toast_error, toast_floating
 
 
 class CategoryButton(QPushButton):
@@ -190,8 +191,14 @@ class CategoryButton(QPushButton):
             menu.exec(self.mapToGlobal(pos))
             
         except Exception as e:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "错误", f"显示菜单失败: {e}")
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'show_error_toast'):
+                main_window = main_window.parent()
+            if main_window:
+                main_window.show_error_toast(f"显示菜单失败: {e}")
+            else:
+                toast_error(self, f"显示菜单失败: {e}")
 
     def rename_category(self):
         """重命名类别"""
@@ -293,8 +300,14 @@ class CategoryButton(QPushButton):
                         main_window.rename_category(self.category_name, new_name)
                     
         except Exception as e:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "错误", f"重命名失败: {e}")
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'show_error_toast'):
+                main_window = main_window.parent()
+            if main_window:
+                main_window.show_error_toast(f"重命名失败: {e}")
+            else:
+                toast_error(self, f"重命名失败: {e}")
 
     def change_shortcut(self):
         """修改快捷键"""
@@ -309,8 +322,14 @@ class CategoryButton(QPushButton):
                     self.update_text()
                     
         except Exception as e:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "错误", f"修改快捷键失败: {e}")
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'show_error_toast'):
+                main_window = main_window.parent()
+            if main_window:
+                main_window.show_error_toast(f"修改快捷键失败: {e}")
+            else:
+                toast_error(self, f"修改快捷键失败: {e}")
 
     def delete_category(self):
         """删除类别"""
@@ -373,8 +392,14 @@ class CategoryButton(QPushButton):
                     main_window.delete_category(self.category_name)
                     
         except Exception as e:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "错误", f"删除类别失败: {e}")
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'show_error_toast'):
+                main_window = main_window.parent()
+            if main_window:
+                main_window.show_error_toast(f"删除类别失败: {e}")
+            else:
+                toast_error(self, f"删除类别失败: {e}")
 
     def mousePressEvent(self, event):
         """处理鼠标按下事件"""
@@ -642,7 +667,7 @@ class EnhancedImageLabel(QLabel):
         """放大"""
         if self.scale_factor >= self.max_scale:
             self.logger.info("已达到最大缩放倍数，停止放大防止卡顿")
-            self.show_floating_message("📈 已达到最大缩放倍数 (3.0x)", 3000)
+            toast_floating(self, "📈 已达到最大缩放倍数 (3.0x)", 3000)
             return
             
         self._fit_to_window_mode = False  # 手动缩放时退出适应窗口模式
@@ -655,7 +680,7 @@ class EnhancedImageLabel(QLabel):
     def zoom_out(self):
         """缩小"""
         if self.scale_factor <= self.min_scale:
-            self.show_floating_message("📉 已达到最小缩放倍数 (0.1x)", 3000)
+            toast_floating(self, "📉 已达到最小缩放倍数 (0.1x)", 3000)
             return
             
         self._fit_to_window_mode = False  # 手动缩放时退出适应窗口模式
@@ -681,7 +706,7 @@ class EnhancedImageLabel(QLabel):
             # 限制缩放范围，防止过度放大导致卡顿
             if new_scale > self.max_scale:
                 self.logger.info(f"缩放倍数 {new_scale:.1f} 超过限制 {self.max_scale}，已限制")
-                self.show_floating_message("📈 已达到最大缩放倍数 (3.0x)", 3000)
+                toast_floating(self, "📈 已达到最大缩放倍数 (3.0x)", 3000)
                 new_scale = self.max_scale
                 
             self.scale_factor = max(self.min_scale, min(new_scale, self.max_scale))
@@ -751,7 +776,7 @@ class EnhancedImageLabel(QLabel):
                         QTimer.singleShot(50, self.update_info_panel)
                 else:
                     # 已达到最大缩放，显示提示
-                    self.show_floating_message("📈 已达到最大缩放倍数 (3.0x)", 3000)
+                    toast_floating(self, "📈 已达到最大缩放倍数 (3.0x)", 3000)
             else:
                 # 向下滚动 - 缩小
                 if self.scale_factor > self.min_scale:
@@ -763,7 +788,7 @@ class EnhancedImageLabel(QLabel):
                         QTimer.singleShot(50, self.update_info_panel)
                 else:
                     # 已达到最小缩放，显示提示
-                    self.show_floating_message("📉 已达到最小缩放倍数 (0.1x)", 3000)
+                    toast_floating(self, "📉 已达到最小缩放倍数 (0.1x)", 3000)
                 
         except Exception as e:
             self.logger.error(f"滚轮事件处理失败: {e}")
@@ -837,10 +862,9 @@ class EnhancedImageLabel(QLabel):
             # 延迟调整，避免频繁刷新
             QTimer.singleShot(50, self.fit_to_window)
         
-        # 重新定位信息按钮、面板和悬浮消息
+        # 重新定位信息按钮和面板
         QTimer.singleShot(10, self.position_info_button)
         QTimer.singleShot(10, self.position_info_panel)
-        QTimer.singleShot(10, self._reposition_floating_message)
             
     def show_image_info_panel(self):
         """显示图片信息面板"""
@@ -1090,79 +1114,6 @@ class EnhancedImageLabel(QLabel):
         except:
             return f"{size_bytes} B"
     
-    def show_floating_message(self, message, duration=3000):
-        """显示半透明悬浮提示消息"""
-        try:
-            from PyQt6.QtWidgets import QLabel
-            from PyQt6.QtCore import QTimer, Qt
-            from PyQt6.QtGui import QFont
-            
-            # 如果已有消息框，先隐藏
-            if hasattr(self, 'floating_message') and self.floating_message:
-                self.floating_message.hide()
-                self.floating_message.deleteLater()
-            
-            # 创建悬浮消息标签
-            self.floating_message = QLabel(message, self)
-            self.floating_message.setStyleSheet("""
-                QLabel {
-                    background-color: rgba(0, 0, 0, 200);
-                    color: white;
-                    border-radius: 8px;
-                    padding: 12px 20px;
-                    font-size: 14px;
-                    font-weight: bold;
-                    border: 1px solid rgba(255, 255, 255, 100);
-                }
-            """)
-            
-            # 设置字体
-            font = QFont()
-            font.setPointSize(12)
-            font.setBold(True)
-            self.floating_message.setFont(font)
-            
-            # 调整大小并居中显示在顶部
-            self.floating_message.adjustSize()
-            x = (self.width() - self.floating_message.width()) // 2
-            y = 20  # 距离顶部20像素
-            self.floating_message.move(x, y)
-            
-            # 显示消息
-            self.floating_message.show()
-            self.floating_message.raise_()  # 确保在最顶层
-            
-            # 设置定时器自动隐藏
-            if hasattr(self, 'floating_timer'):
-                self.floating_timer.stop()
-            
-            self.floating_timer = QTimer()
-            self.floating_timer.setSingleShot(True)
-            self.floating_timer.timeout.connect(self._hide_floating_message)
-            self.floating_timer.start(duration)
-            
-        except Exception as e:
-            self.logger.error(f"显示悬浮消息失败: {e}")
-    
-    def _hide_floating_message(self):
-        """隐藏悬浮消息"""
-        try:
-            if hasattr(self, 'floating_message') and self.floating_message:
-                self.floating_message.hide()
-                self.floating_message.deleteLater()
-                self.floating_message = None
-        except Exception as e:
-            self.logger.debug(f"隐藏悬浮消息失败: {e}")
-    
-    def _reposition_floating_message(self):
-        """重新定位悬浮消息"""
-        try:
-            if hasattr(self, 'floating_message') and self.floating_message and self.floating_message.isVisible():
-                x = (self.width() - self.floating_message.width()) // 2
-                y = 20  # 距离顶部20像素
-                self.floating_message.move(x, y)
-        except Exception as e:
-            self.logger.debug(f"重新定位悬浮消息失败: {e}")
     
     def create_path_info_widget(self):
         """创建路径信息组件（带复制按钮）"""
@@ -1253,13 +1204,13 @@ class EnhancedImageLabel(QLabel):
                     clipboard = QApplication.clipboard()
                     clipboard.setText(path_text)
                     # 显示复制成功提示
-                    self.show_floating_message("📋 路径已复制到剪贴板", 2000)
+                    toast_floating(self, "📋 路径已复制到剪贴板", 2000)
                 else:
-                    self.show_floating_message("❌ 没有路径可复制", 2000)
+                    toast_floating(self, "❌ 没有路径可复制", 2000)
             
         except Exception as e:
             self.logger.error(f"复制路径到剪贴板失败: {e}")
-            self.show_floating_message("❌ 复制失败", 2000)
+            toast_floating(self, "❌ 复制失败", 2000)
 
 
 class StatisticsPanel(QWidget):
