@@ -32,6 +32,7 @@ from ..utils.exceptions import ImageClassifierError, FileOperationError
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..core.file_manager import FileOperationManager
 from ..utils.performance import performance_monitor
+from .components.toast import toast_info, toast_success, toast_warning, toast_error
 
 
 class ToolbarButtonStyles:
@@ -1068,9 +1069,7 @@ class ImageClassifier(QMainWindow):
             # 记录窗口大小变化
             if hasattr(self, 'logger'):
                 self.logger.debug(f"窗口大小改变: {event.size().width()}x{event.size().height()}")
-            
-            # 不需要特殊处理，EnhancedImageLabel会自动处理图像缩放
-            
+               
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"窗口大小改变处理失败: {e}")
@@ -1089,23 +1088,13 @@ class ImageClassifier(QMainWindow):
             
             if is_network_path:
                 # 网络路径提醒
-                self.show_info_message('SMB/NAS路径检测', 
-                    f'检测到SMB/NAS网络路径：\n{self.current_dir}\n\n'
-                    f'🚀 已启用SMB专项优化：\n'
-                    f'• 本地缓存：自动缓存图片到本地\n'
-                    f'• 分块读取：大文件采用分块策略减少网络延迟\n'
-                    f'• 智能预加载：减少网络文件预加载量\n'
-                    f'• 连接优化：复用SMB连接，减少建连开销\n'
-                    f'• 渐进式显示：先显示缩略图，后加载完整图片\n\n'
-                    f'⚠️ 使用建议：\n'
-                    f'• 确保网络连接稳定\n'
-                    f'• 首次加载会建立本地缓存，后续访问将显著加速\n'
-                    f'• 支持格式：JPG、JPEG、PNG、BMP\n'
-                    f'• 本地缓存最大5GB，会自动清理')
-                    
+                toast_info(self,'🚀 SMB/NAS路径已启用专项优化')
+
                 self.logger.info(f"用户选择网络路径: {self.current_dir}")
             else:
                 self.logger.info(f"用户选择本地路径: {self.current_dir}")
+                # 显示本地目录打开成功通知
+                toast_success(self,f"已打开目录：{self.current_dir.name}")
             
             # 设置配置文件路径为图片目录的父目录
             self.config.set_base_dir(str(self.current_dir.parent))
@@ -2106,7 +2095,7 @@ class ImageClassifier(QMainWindow):
             self.show_current_image()
         else:
             # 已经是第一张，显示提示
-            self.show_info_message("提示", "已经是第一张图片了！")
+            toast_info(self,"已经是第一张图片了！")
     
     def next_image(self):
         """下一张图片"""
@@ -2115,7 +2104,7 @@ class ImageClassifier(QMainWindow):
             self.show_current_image()
         else:
             # 已经是最后一张，显示提示
-            self.show_info_message("提示", "已经是最后一张图片了！")
+            toast_info(self,"已经是最后一张图片了！")
     
     def prev_category(self):
         """选择上一个类别 - 参考原始实现"""
@@ -2999,15 +2988,17 @@ class ImageClassifier(QMainWindow):
                 # 显示同步结果（只有在有变化时才显示）
                 if sync_results['changes_detected']:
                     self._show_sync_results(sync_results)
+                    toast_success(self,"目录状态已刷新并同步")
                 else:
                     # 即使没有检测到变化，也要显示刷新完成的信息
                     self.statusBar.showMessage("🔄 目录状态已刷新")
-                    
+                    toast_success(self,"目录状态已刷新")
+
                 self.logger.info("目录状态刷新完成")
                 
             except Exception as e:
                 self.logger.error(f"刷新目录状态失败: {e}")
-                self.show_error_message("错误", f"刷新失败: {str(e)}")
+                toast_error(self,f"刷新失败: {str(e)}")
     
     def _check_and_fix_shortcuts(self):
         """检查并修复快捷键状态 - 增强版检测，解决按键失效的关键方法"""
@@ -3267,11 +3258,7 @@ class ImageClassifier(QMainWindow):
                 messages.append(f"❌ 清理了 {count} 个无效分类记录")
             
             if messages:
-                self.show_info_message(
-                "目录同步完成", 
-                "文件状态已同步更新：\n\n" + "\n".join(messages) + 
-                "\n\n分类状态和UI已更新。"
-            )        
+                toast_success(self,"目录同步完成，分类状态已更新")        
         except Exception as e:
             self.logger.error(f"显示同步结果失败: {e}")
     
@@ -3279,24 +3266,24 @@ class ImageClassifier(QMainWindow):
         """设置操作模式"""
         # 如果要切换到移动模式，但当前是多分类模式，拒绝切换
         if not is_copy and self.is_multi_category:
-            self._create_styled_message_box(
-                QMessageBox.Icon.Warning,
-                "模式切换",
-                "移动模式不支持多分类功能。\n请先切换为单分类模式，然后再切换到移动模式。"
-            ).exec()
+            toast_warning(self,"移动模式不支持多分类功能，请先切换为单分类模式")
             # 拒绝切换，保持原来的复制模式
             return
         
         self.is_copy_mode = is_copy
-        
+
         # 更新按钮图标和提示
         if is_copy:
             self.mode_button.setText('⧉')  # 重叠方块表示复制
             self.mode_button.setToolTip('复制模式 - 点击切换到移动模式')
+            # 显示模式切换Toast
+            toast_info(self,"已切换到复制模式")
         else:
             self.mode_button.setText('✂')  # 剪刀表示移动
             self.mode_button.setToolTip('移动模式 - 点击切换到复制模式')
-        
+            # 显示模式切换Toast
+            toast_info(self,"已切换到移动模式")
+
         self.logger.info(f"操作模式已切换为: {'复制' if is_copy else '移动'}")
     
     def create_category_mode_button(self, toolbar):
@@ -3313,11 +3300,7 @@ class ImageClassifier(QMainWindow):
         """切换单分类/多分类模式"""
         # 移动模式不支持多分类
         if not self.is_copy_mode and not self.is_multi_category:
-            self._create_styled_message_box(
-                QMessageBox.Icon.Warning,
-                "模式限制",
-                "移动模式不支持多分类功能。\n请先切换到复制模式。"
-            ).exec()
+            toast_warning(self,"移动模式不支持多分类功能，请先切换到复制模式")
             return
         
         self.is_multi_category = not self.is_multi_category
@@ -3325,9 +3308,11 @@ class ImageClassifier(QMainWindow):
         # 使用统一的按钮状态更新方法
         self.update_category_mode_button()
 
-        # 显示提示
-        mode_desc = "多分类模式（一张图片可以同时属于多个类别）" if self.is_multi_category else "单分类模式（一张图片只能属于一个类别）"
-        self.statusBar.showMessage(f"已切换为{mode_desc}")
+        # 显示Toast通知
+        if self.is_multi_category:
+            toast_info(self, "已切换到多分类模式")
+        else:
+            toast_info(self, "已切换到单分类模式")
 
         # 保存分类模式状态
         self.save_state()
@@ -3342,11 +3327,22 @@ class ImageClassifier(QMainWindow):
     def add_category(self):
         """添加新类别"""
         if not self.current_dir:
-            self.show_warning_message('警告', '请先选择图片目录')
+            toast_warning(self,'请先选择图片目录')
             return
-            
+
+        # 记录添加前的类别数量
+        original_count = len(self.categories)
+
         dialog = AddCategoriesDialog(self.categories, self)
-        dialog.exec()
+        if dialog.exec():
+            # 检查是否有新类别添加
+            new_count = len(self.categories)
+            if new_count > original_count:
+                added_count = new_count - original_count
+                if added_count == 1:
+                    toast_success(self,"已添加 1 个新类别")
+                else:
+                    toast_success(self,f"已添加 {added_count} 个新类别")
     
     # ===== 图像加载器回调方法 =====
     
@@ -3783,18 +3779,18 @@ class ImageClassifier(QMainWindow):
         """重命名类别"""
         try:
             if not self.current_dir:
-                self.show_warning_message("错误", "当前目录未设置")
+                toast_error(self,"当前目录未设置")
                 return
                 
             old_path = self.current_dir.parent / old_name
             new_path = self.current_dir.parent / new_name
             
             if not old_path.exists():
-                self.show_warning_message("错误", f"类别目录不存在: {old_name}")
+                toast_error(self,f"类别目录不存在: {old_name}")
                 return
                 
             if new_path.exists():
-                self.show_warning_message("错误", f"目标类别已存在: {new_name}")
+                toast_error(self,f"目标类别已存在: {new_name}")
                 return
             
             # 重命名目录
@@ -3821,24 +3817,24 @@ class ImageClassifier(QMainWindow):
             # 重新加载类别
             self.load_categories()
             
-            self.show_info_message("成功", f"类别已重命名: {old_name} → {new_name}")
+            toast_success(self,f"类别已重命名: {old_name} → {new_name}")
             self.logger.info(f"类别重命名成功: {old_name} → {new_name}")
             
         except Exception as e:
             self.logger.error(f"重命名类别失败: {e}")
-            self.show_error_message("错误", f"重命名失败: {str(e)}")
+            toast_error(self,f"重命名失败: {str(e)}")
     
     def delete_category(self, category_name):
         """删除类别 - 带二次确认"""
         try:
             if not self.current_dir:
-                self.show_warning_message("错误", "当前目录未设置")
+                toast_error(self,"当前目录未设置")
                 return
                 
             category_path = self.current_dir.parent / category_name
             
             if not category_path.exists():
-                self.show_warning_message("错误", f"类别目录不存在: {category_name}")
+                toast_error(self,f"类别目录不存在: {category_name}")
                 return
             
             # 统计目录中的图片数量
@@ -3930,7 +3926,7 @@ class ImageClassifier(QMainWindow):
             
             # 根据图片数量显示不同的成功信息
             if image_count > 0:
-                self.show_info_message("成功", f"类别已删除: {category_name}\n删除了 {image_count} 张图片文件")
+                toast_success(self,f"类别已删除: {category_name} (删除了 {image_count} 张图片文件)")
                 self.logger.info(f"类别删除成功: {category_name}，删除了 {image_count} 张图片")
             else:
                 # 空目录删除成功，不需要弹窗，只记录日志
@@ -3938,7 +3934,7 @@ class ImageClassifier(QMainWindow):
             
         except Exception as e:
             self.logger.error(f"删除类别失败: {e}")
-            self.show_error_message("错误", f"删除失败: {str(e)}")
+            toast_error(self,f"删除失败: {str(e)}")
     
     def save_state(self):
         """异步保存当前状态到图片同级目录"""
@@ -4061,33 +4057,20 @@ class ImageClassifier(QMainWindow):
                 
         return msgBox
     
-    def show_info_message(self, title, text):
-        """显示信息消息框"""
-        msgBox = self._create_styled_message_box(QMessageBox.Icon.Information, title, text)
-        return msgBox.exec()
-    
-    def show_warning_message(self, title, text):
-        """显示警告消息框"""
-        msgBox = self._create_styled_message_box(QMessageBox.Icon.Warning, title, text)
-        return msgBox.exec()
-    
-    def show_error_message(self, title, text):
-        """显示错误消息框"""
-        msgBox = self._create_styled_message_box(QMessageBox.Icon.Critical, title, text)
-        return msgBox.exec()
+    # 旧的消息框方法已移除，现在使用Toast通知系统
+    # show_info_message, show_warning_message, show_error_message 已废弃
+    # 使用 show_info_toast, show_warning_toast, show_error_toast 替代
     
     def show_question_message(self, title, text):
         """显示询问消息框"""
         msgBox = self._create_styled_message_box(
-            QMessageBox.Icon.Question, 
-            title, 
+            QMessageBox.Icon.Question,
+            title,
             text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         msgBox.setDefaultButton(QMessageBox.StandardButton.No)
         return msgBox.exec()
-    
-
 
     def refresh_category_buttons_style(self):
         """强制刷新所有类别按钮的样式"""

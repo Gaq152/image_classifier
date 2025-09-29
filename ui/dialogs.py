@@ -20,6 +20,7 @@ from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..utils.exceptions import FileOperationError
 from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
+from .components.toast import toast_info, toast_success, toast_warning, toast_error
 
 
 class CategoryShortcutDialog(QDialog):
@@ -97,15 +98,15 @@ class CategoryShortcutDialog(QDialog):
                 # 详细检查冲突原因
                 normalized_shortcut = self.config._normalize_shortcut(shortcut)
                 
+                # 获取主窗口用于显示Toast
+                main_window = self.parent()
+                while main_window and not hasattr(main_window, 'current_index'):
+                    main_window = main_window.parent()
+                toast_parent = main_window if main_window else self
+
                 # 检查是否为保留快捷键
                 if normalized_shortcut in self.config.reserved_shortcuts:
-                    QMessageBox.warning(self, '快捷键冲突', 
-                        f'快捷键 "{shortcut}" 是系统保留快捷键，不能使用。\n\n'
-                        f'系统保留快捷键包括：\n'
-                        f'• 导航键：← → ↑ ↓ Enter Delete\n'
-                        f'• 图像控制：Ctrl+0 Ctrl+= Ctrl+- Ctrl+F\n'
-                        f'• 系统功能：F5 Escape 等\n'
-                        f'• 常用快捷键：Ctrl+C Ctrl+V 等')
+                    toast_warning(toast_parent, f'快捷键 "{shortcut}" 是系统保留快捷键，不能使用')
                 else:
                     # 找出使用该快捷键的类别（大小写不敏感）
                     conflict_category = None
@@ -115,18 +116,15 @@ class CategoryShortcutDialog(QDialog):
                             conflict_category = cat
                             conflict_key = key
                             break
-                    
+
                     if conflict_category:
                         case_note = ""
                         if conflict_key != shortcut:
                             case_note = f"\n\n注意：该快捷键已以 \"{conflict_key}\" 的形式被使用。\n字母快捷键不区分大小写。"
-                        
-                        QMessageBox.warning(self, '快捷键冲突', 
-                            f'快捷键 "{shortcut}" 已被类别 "{conflict_category}" 使用。{case_note}\n'
-                            f'请选择其他快捷键。')
+
+                        toast_warning(toast_parent, f'快捷键 "{shortcut}" 已被类别 "{conflict_category}" 使用，请选择其他快捷键')
                     else:
-                        QMessageBox.warning(self, '快捷键冲突', 
-                            f'快捷键 "{shortcut}" 已被占用，请选择其他快捷键。')
+                        toast_warning(toast_parent, f'快捷键 "{shortcut}" 已被占用，请选择其他快捷键')
                 return
                 
             # 统一存储格式：单字母快捷键存储为小写
@@ -142,9 +140,23 @@ class CategoryShortcutDialog(QDialog):
             
             self.edit.setText(shortcut)  # 显示用户输入的原始格式
             self.config.category_shortcuts[self.category] = stored_shortcut  # 存储标准化格式
-            
+
         except Exception as e:
             self.logger.error(f"处理快捷键事件失败: {e}")
+
+    def accept(self):
+        """确认按钮点击时的处理"""
+        shortcut = self.edit.text().strip()
+        if shortcut:
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'current_index'):
+                main_window = main_window.parent()
+            toast_parent = main_window if main_window else self
+            toast_success(toast_parent, f'类别 "{self.category}" 快捷键已设置为 "{shortcut}"')
+
+        # 调用父类的accept方法
+        super().accept()
 
 
 class AddCategoriesDialog(QDialog):
@@ -259,7 +271,7 @@ class AddCategoriesDialog(QDialog):
                         continue
                         
                     if chinese_name in self.existing_categories:
-                        errors.append(f'类别 "{chinese_name}" 已存在')
+                        toast_warning(self, f'类别 "{chinese_name}" 已存在，将跳过')
                         continue
                         
                     try:
@@ -283,11 +295,11 @@ class AddCategoriesDialog(QDialog):
             # 如果有错误但也有成功添加的类别
             if errors and added:
                 error_msg = '\n'.join(errors)
-                QMessageBox.warning(self, '警告', f'部分类别添加失败:\n{error_msg}')
+                toast_warning(self, f'部分类别添加失败: {error_msg}')
             # 如果只有错误没有成功添加的类别
             elif errors and not added:
                 error_msg = '\n'.join(errors)
-                QMessageBox.critical(self, '错误', f'添加类别失败:\n{error_msg}')
+                toast_error(self, f'添加类别失败: {error_msg}')
                 return False
                 
             if added:
@@ -303,7 +315,7 @@ class AddCategoriesDialog(QDialog):
                 
         except Exception as e:
             self.logger.error(f"添加类别失败: {e}")
-            QMessageBox.critical(self, '错误', f'添加类别失败: {str(e)}')
+            toast_error(self, f'添加类别失败: {str(e)}')
             return False
 
     def add_and_continue(self):
@@ -556,8 +568,11 @@ class TabbedHelpDialog(QDialog):
             from .._version_ import compare_version, __version__
             if not new_ver or compare_version(new_ver, __version__) <= 0:
                 if not suppress_if_latest:
-                    QMessageBox.information(self, '检查更新', '当前已是最新版本。')
+                    toast_info(self, '当前已是最新版本')
                 return
+
+            # 发现新版本，显示Toast通知
+            toast_warning(self, f'发现新版本 v{new_ver}')
 
             size_mb = f"{size_bytes/1024/1024:.1f} MB" if size_bytes else "未知"
             msg = f"发现新版本: v{new_ver}\n大小: {size_mb}\n\n更新说明:\n{notes or '无'}\n\n是否立即下载并更新？"
@@ -621,7 +636,7 @@ class TabbedHelpDialog(QDialog):
                 self.logger.debug("更新校验：开始")
                 actual = sha256_file(dest)
                 if actual.lower() != sha256.lower():
-                    QMessageBox.critical(self, '更新失败', f'文件校验失败，期望SHA256: {sha256}\n实际: {actual}')
+                    toast_error(self, f'更新失败: 文件校验失败')
                     self.logger.error(f"更新校验：失败 expected={sha256} actual={actual}")
                     try:
                         dest.unlink(missing_ok=True)
@@ -661,7 +676,7 @@ class TabbedHelpDialog(QDialog):
                     subprocess.Popen(["cmd", "/c", "start", "", str(batch_path), str(dest)], shell=False)
                     self.logger.info("更新安装：已启动安装脚本")
                 except Exception as e:
-                    QMessageBox.critical(self, '更新失败', f'无法启动更新程序: {e}')
+                    toast_error(self, f'更新失败: 无法启动更新程序')
                     self.logger.error(f"更新安装：启动脚本失败 {e}")
                     return
                 # 尝试关闭主窗口并处理事件，给批处理释放句柄的时间
@@ -679,10 +694,10 @@ class TabbedHelpDialog(QDialog):
                     QApplication.quit()
             else:
                 self.logger.info("更新已准备：用户选择稍后安装")
-                QMessageBox.information(self, '更新已准备', '已保存更新包，稍后您可在帮助中手动执行更新。')
+                toast_info(self, '已保存更新包，稍后可在帮助中手动执行更新')
         except Exception as e:
             self.logger.error(f"检查/更新失败: {e}")
-            QMessageBox.critical(self, '检查更新失败', str(e))
+            toast_error(self, f'检查更新失败: {str(e)}')
         
     def clear_smb_cache(self):
         """清理SMB缓存"""
@@ -691,12 +706,12 @@ class TabbedHelpDialog(QDialog):
             if cache_dir.exists():
                 import shutil
                 shutil.rmtree(cache_dir)
-                self._show_styled_message('信息', '清理完成', 'SMB缓存已清理完成')
+                toast_success(self, 'SMB缓存已清理完成')
             else:
-                self._show_styled_message('信息', '无需清理', '未发现SMB缓存文件')
+                toast_info(self, '未发现SMB缓存文件')
         except Exception as e:
             self.logger.error(f"清理SMB缓存失败: {e}")
-            self._show_styled_message('警告', '清理失败', f'清理SMB缓存失败: {e}')
+            toast_error(self, f'清理SMB缓存失败: {e}')
     
     def _show_styled_message(self, msg_type, title, text):
         """显示样式化的消息框"""
