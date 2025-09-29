@@ -33,7 +33,8 @@ from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..core.file_manager import FileOperationManager
 from ..utils.performance import performance_monitor
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
-from .components.styles import ButtonStyles, DialogStyles
+from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
+from .managers import FileStateManager
 
 class ImageClassifier(QMainWindow):
     """主图像分类器窗口"""
@@ -137,7 +138,8 @@ class ImageClassifier(QMainWindow):
             
             # 文件操作管理器
             self.file_manager = FileOperationManager()
-            
+
+
             # 线程池（用于文件操作）
             self.thread_pool = ThreadPoolExecutor(max_workers=4)
             
@@ -198,6 +200,12 @@ class ImageClassifier(QMainWindow):
         import threading
         self.ui_update_lock = threading.Lock()
         self.pending_ui_updates = set()
+
+        # 文件状态管理器（延迟初始化）
+        self.file_state_manager = None
+
+        # 快捷键管理器
+        self.shortcut_manager = None
         self.ui_update_timer = QTimer()
         self.ui_update_timer.setSingleShot(True)
         self.ui_update_timer.timeout.connect(self.perform_batch_ui_update)
@@ -228,21 +236,8 @@ class ImageClassifier(QMainWindow):
             except Exception as e:
                 self.logger.warning(f"加载程序图标失败: {e}")
             
-            # 设置简洁的主窗口样式
-            self.setStyleSheet("""
-                QMainWindow {
-                    background-color: #F8F9FA;
-                }
-                QSplitter::handle {
-                    background-color: #BDC3C7;
-                    border: 1px solid #95A5A6;
-                    width: 4px;
-                    border-radius: 2px;
-                }
-                QSplitter::handle:hover {
-                    background-color: #3498DB;
-                }
-            """)
+            # 应用主窗口样式
+            self.setStyleSheet(MainWindowStyles.get_main_window_style())
             
             # 创建中央控件
             central_widget = QWidget()
@@ -715,63 +710,8 @@ class ImageClassifier(QMainWindow):
         toolbar = QToolBar()
         toolbar.setMovable(False)
         toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)  # 禁用右键菜单
-        # 设置工具栏的基础样式
-        toolbar.setStyleSheet("""
-            QToolBar {
-                background-color: #F8F9FA;
-                border: 1px solid #E1E8ED;
-                border-radius: 6px;
-                spacing: 8px;
-                padding: 8px;
-                margin: 2px;
-            }
-            /* QAction 按钮样式 - 现代化蓝色主题 */
-            QToolBar QToolButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #42A5F5, stop:1 #2196F3);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                margin: 4px 2px;
-                font-size: 14px;
-                font-weight: 500;
-                min-width: 90px;
-                min-height: 30px;
-                max-height: 30px;
-            }
-            QToolBar QToolButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1E88E5, stop:1 #1976D2);
-            }
-            QToolBar QToolButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1565C0, stop:1 #0D47A1);
-            }
-            /* 普通QPushButton样式 - 不影响模式按钮，与QToolButton保持一致 */
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]) {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #42A5F5, stop:1 #2196F3);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                margin: 4px 2px;
-                font-size: 14px;
-                font-weight: 500;
-                min-width: 90px;
-                min-height: 30px;
-                max-height: 30px;
-            }
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):hover {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1E88E5, stop:1 #1976D2);
-            }
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):pressed {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1565C0, stop:1 #0D47A1);
-            }
-        """)
+        # 应用工具栏样式
+        toolbar.setStyleSheet(ToolbarStyles.get_main_toolbar_style())
         self.addToolBar(toolbar)
         
         # 打开目录
@@ -845,7 +785,7 @@ class ImageClassifier(QMainWindow):
         """设置快捷键 - 改进版本，增加错误处理和状态检查"""
         try:
             self.logger.debug("开始设置快捷键...")
-            
+
             # 清除现有的快捷键，但保留系统默认的
             existing_actions = self.actions()
             for action in existing_actions[:]:  # 使用副本避免迭代时修改列表
@@ -854,7 +794,7 @@ class ImageClassifier(QMainWindow):
                     action.deleteLater()  # 确保清理资源
                 except Exception as e:
                     self.logger.warning(f"清除快捷键失败: {e}")
-                    
+
             # 设置基本导航快捷键
             shortcuts = {
                 Qt.Key.Key_Left: self.prev_image,
@@ -865,7 +805,7 @@ class ImageClassifier(QMainWindow):
                 Qt.Key.Key_Delete: self.move_to_remove,
                 Qt.Key.Key_F5: self.refresh_categories,
             }
-            
+
             # 设置组合快捷键（用于图像控制）
             combo_shortcuts = {
                 'Ctrl+F': lambda: self.image_label.fit_to_window() if hasattr(self, 'image_label') else None,
@@ -873,7 +813,7 @@ class ImageClassifier(QMainWindow):
                 'Ctrl+-': lambda: self.image_label.zoom_out() if hasattr(self, 'image_label') else None,
                 'Ctrl+0': lambda: self.image_label.reset_zoom() if hasattr(self, 'image_label') else None,
             }
-            
+
             # 创建基本快捷键
             success_count = 0
             for key, func in shortcuts.items():
@@ -886,7 +826,7 @@ class ImageClassifier(QMainWindow):
                     success_count += 1
                 except Exception as e:
                     self.logger.error(f"创建基本快捷键失败 {key}: {e}")
-                    
+
             # 创建组合快捷键
             for key_combo, func in combo_shortcuts.items():
                 try:
@@ -897,7 +837,7 @@ class ImageClassifier(QMainWindow):
                     success_count += 1
                 except Exception as e:
                     self.logger.error(f"创建组合快捷键失败 {key_combo}: {e}")
-                    
+
             # 设置类别快捷键
             if hasattr(self, 'config') and self.config and hasattr(self, 'categories'):
                 for category_name, key in self.config.category_shortcuts.items():
@@ -910,21 +850,21 @@ class ImageClassifier(QMainWindow):
                             success_count += 1
                     except Exception as e:
                         self.logger.error(f"创建类别快捷键失败 {category_name}->{key}: {e}")
-            
+
             self.logger.debug(f"快捷键设置完成，成功创建 {success_count} 个快捷键")
-            
+
         except Exception as e:
             self.logger.error(f"设置快捷键时发生严重错误: {e}")
             # 尝试恢复基本功能
             self._setup_minimal_shortcuts()
-    
+
     def _safe_execute_shortcut(self, func):
         """安全执行快捷键函数"""
         try:
             if not self._shortcuts_active:
                 self.logger.debug("快捷键被禁用，跳过执行")
                 return
-                
+
             if func:
                 # INFO级别记录QAction快捷键触发（简化记录）
                 func_name = getattr(func, '__name__', 'lambda')
@@ -934,7 +874,7 @@ class ImageClassifier(QMainWindow):
                 func()
         except Exception as e:
             self.logger.error(f"执行快捷键函数失败: {e}")
-    
+
     def _setup_minimal_shortcuts(self):
         """设置最小化快捷键集合（紧急恢复用）"""
         try:
@@ -944,7 +884,7 @@ class ImageClassifier(QMainWindow):
                 Qt.Key.Key_Right: self.next_image,
                 Qt.Key.Key_F5: self.refresh_categories,
             }
-            
+
             for key, func in minimal_shortcuts.items():
                 try:
                     action = QAction(self)
@@ -953,15 +893,48 @@ class ImageClassifier(QMainWindow):
                     self.addAction(action)
                 except Exception as e:
                     self.logger.error(f"最小化快捷键设置失败 {key}: {e}")
-                    
+
         except Exception as e:
             self.logger.error(f"最小化快捷键设置严重失败: {e}")
-    
+
     def quick_classify_by_name(self, category):
         """通过类别名称快速分类"""
         if self.current_dir and category in self.categories:
             self.move_to_category(category)
-    
+
+    def _is_defined_shortcut(self, key: int, modifiers) -> bool:
+        """检查是否为已定义的快捷键"""
+        try:
+            # 基本快捷键列表
+            basic_shortcuts = {
+                Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
+                Qt.Key.Key_Return, Qt.Key.Key_Delete, Qt.Key.Key_F5
+            }
+
+            # 检查基本快捷键
+            if key in basic_shortcuts:
+                return True
+
+            # 检查类别快捷键
+            if hasattr(self, 'config') and self.config and hasattr(self, 'categories'):
+                for category_name, shortcut_key in self.config.category_shortcuts.items():
+                    if shortcut_key and category_name in self.categories:
+                        try:
+                            sequence = QKeySequence(shortcut_key)
+                            if len(sequence) > 0:
+                                key_combination = sequence[0]
+                                if (key_combination.key() == key and
+                                    key_combination.keyboardModifiers() == modifiers):
+                                    return True
+                        except Exception:
+                            continue
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"检查快捷键定义失败: {e}")
+            return False
+
     def _is_network_path(self, path):
         """检查是否为网络路径"""
         path_str = str(path)
@@ -1297,8 +1270,6 @@ class ImageClassifier(QMainWindow):
         
         self.logger.info("🚀 程序UI已完全启用，用户可立即使用")
 
-    
-    
     def _delayed_load_state(self):
         """延迟加载状态文件，避免阻塞UI"""
         try:
@@ -1755,8 +1726,6 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"更新分类模式按钮状态失败: {e}")
     
-
-    
     def init_category_counts(self):
         """初始化类别计数"""
         self.category_counts.clear()
@@ -1951,8 +1920,7 @@ class ImageClassifier(QMainWindow):
         
         # 强制刷新按钮样式
         self.refresh_category_buttons_style()
-    
-    
+      
     def update_window_title(self, image_path):
         """更新窗口标题 - 顶部显示目录名+进度"""
         try:
@@ -2980,240 +2948,63 @@ class ImageClassifier(QMainWindow):
                 toast_error(self,f"刷新失败: {str(e)}")
     
     def _check_and_fix_shortcuts(self):
-        """检查并修复快捷键状态 - 增强版检测，解决按键失效的关键方法"""
-        try:
-            self.logger.debug("开始快捷键健康检查...")
-            
-            # 检查当前快捷键数量和有效性
-            current_actions = self.actions()
-            current_count = len(current_actions)
-            expected_minimum = 8  # 预期最少应该有8个基本快捷键
-            
-            # 检查快捷键有效性
-            valid_shortcuts = 0
-            core_shortcuts_found = {
-                'Left': False, 'Right': False, 'F5': False, 'Delete': False
-            }
-            
-            for action in current_actions:
-                try:
-                    shortcut = action.shortcut()
-                    if not shortcut.isEmpty():
-                        valid_shortcuts += 1
-                        # 检查核心快捷键是否存在
-                        key_sequence = shortcut.toString()
-                        if 'Left' in key_sequence:
-                            core_shortcuts_found['Left'] = True
-                        elif 'Right' in key_sequence:
-                            core_shortcuts_found['Right'] = True
-                        elif 'F5' in key_sequence:
-                            core_shortcuts_found['F5'] = True
-                        elif 'Del' in key_sequence:
-                            core_shortcuts_found['Delete'] = True
-                except Exception as e:
-                    self.logger.debug(f"检查快捷键时遇到异常: {e}")
-            
-            # 检查是否需要重建快捷键
-            need_rebuild = False
-            rebuild_reason = []
-            
-            if current_count < expected_minimum:
-                need_rebuild = True
-                rebuild_reason.append(f"快捷键数量不足: {current_count} < {expected_minimum}")
-            
-            if valid_shortcuts < expected_minimum:
-                need_rebuild = True
-                rebuild_reason.append(f"有效快捷键不足: {valid_shortcuts} < {expected_minimum}")
-            
-            missing_core = [k for k, v in core_shortcuts_found.items() if not v]
-            if missing_core:
-                need_rebuild = True
-                rebuild_reason.append(f"缺少核心快捷键: {missing_core}")
-            
-            if not self._shortcuts_active and self.isActiveWindow():
-                need_rebuild = True
-                rebuild_reason.append("快捷键被禁用但窗口处于激活状态")
-            
-            # 执行重建
-            if need_rebuild:
-                self.logger.warning(f"检测到快捷键问题，需要重建: {'; '.join(rebuild_reason)}")
-                self.setup_shortcuts()
-                
-                # 重新验证
-                new_count = len(self.actions())
-                if new_count >= expected_minimum:
-                    self.logger.info(f"快捷键重建成功: {current_count} -> {new_count}")
-                else:
-                    self.logger.error(f"快捷键重建后仍然不足: {new_count}")
-            
-            # 确保快捷键状态正确
-            if self.isActiveWindow():
-                self._shortcuts_active = True
-                self.setFocus()
-                self.logger.debug("窗口焦点和快捷键状态已恢复")
-            
-            self.logger.debug(f"快捷键健康检查完成 - 当前: {len(self.actions())} 个快捷键，有效: {valid_shortcuts} 个")
-            
-        except Exception as e:
-            self.logger.error(f"快捷键健康检查失败: {e}")
-            # 作为最后手段，重新设置快捷键
-            try:
-                self.logger.warning("执行紧急快捷键修复...")
-                self.setup_shortcuts()
-                self._shortcuts_active = True
-            except Exception as setup_error:
-                self.logger.error(f"紧急修复快捷键也失败: {setup_error}")
-                # 最后的备选方案
-                self._setup_minimal_shortcuts()
+        """检查并修复快捷键"""
+        if self.shortcut_manager:
+            self.shortcut_manager.check_and_fix_shortcuts()
     
     def _periodic_shortcut_check(self):
-        """定期检查快捷键状态（每30秒执行一次）"""
-        try:
-            current_actions = len(self.actions())
-            expected_minimum = 8  # 至少应有的基本快捷键数量
-            
-            if current_actions < expected_minimum:
-                self.logger.warning(f"定期检查发现快捷键丢失: {current_actions} < {expected_minimum}")
-                self._check_and_fix_shortcuts()
-            elif not self._shortcuts_active and self.isActiveWindow():
-                # 如果窗口是激活的但快捷键被禁用，重新激活
-                self._shortcuts_active = True
-                self.logger.debug("定期检查：重新激活快捷键状态")
-                
-        except Exception as e:
-            self.logger.error(f"定期快捷键检查失败: {e}")
+        """定期快捷键检查"""
+        if self.shortcut_manager:
+            self.shortcut_manager.periodic_shortcut_check()
     
+    def _ensure_file_state_manager(self):
+        """确保FileStateManager实例是最新的"""
+        if (self.current_dir is None or
+            self.file_state_manager is None or
+            self.file_state_manager.current_dir != self.current_dir):
+
+            if self.current_dir is not None:
+                self.file_state_manager = FileStateManager(
+                    current_dir=self.current_dir,
+                    categories=list(self.categories),
+                    classified_images=self.classified_images,
+                    removed_images=self.removed_images
+                )
+
     def _sync_file_states(self):
         """同步文件状态与实际目录"""
-        sync_results = {
-            'changes_detected': False,
-            'removed_files': [],
-            'moved_files': [],
-            'new_classifications': [],
-            'invalid_classifications': []
-        }
-        
+        # 确保FileStateManager实例是最新的
+        self._ensure_file_state_manager()
+
+        if self.file_state_manager is None:
+            self.logger.warning("FileStateManager未初始化，跳过文件状态同步")
+            return {
+                'changes_detected': False,
+                'removed_files': [],
+                'moved_files': [],
+                'new_classifications': [],
+                'invalid_classifications': []
+            }
+
         try:
-            parent_dir = self.current_dir.parent
-            
-            # 检查已分类图片的状态
-            invalid_classifications = []
-            for img_path, category in list(self.classified_images.items()):
-                img_file = Path(img_path)
-                
-                # 处理多分类模式（category可能是列表）
-                if isinstance(category, list):
-                    # 多分类模式：检查每个类别
-                    categories_to_remove = []
-                    for cat in category:
-                        category_dir = parent_dir / cat
-                        expected_file = category_dir / img_file.name
-                        
-                        # 检查文件是否还在预期的分类目录中
-                        if not expected_file.exists():
-                            categories_to_remove.append(cat)
-                            sync_results['moved_files'].append({
-                                'file': img_file.name,
-                                'from': cat,
-                                'to': '已移动或删除'
-                            })
-                    
-                    # 移除不存在的类别
-                    if categories_to_remove:
-                        for cat in categories_to_remove:
-                            category.remove(cat)
-                        
-                        # 如果所有类别都被移除，则移除整个分类记录
-                        if not category:
-                            invalid_classifications.append(img_path)
-                else:
-                    # 单分类模式
-                    category_dir = parent_dir / category
-                    expected_file = category_dir / img_file.name
-                    
-                    # 检查文件是否还在预期的分类目录中
-                    if not expected_file.exists():
-                        # 检查文件是否回到了原目录
-                        original_file = self.current_dir / img_file.name
-                        if original_file.exists():
-                            # 文件被移回原目录
-                            invalid_classifications.append(img_path)
-                            sync_results['moved_files'].append({
-                                'file': img_file.name,
-                                'from': category,
-                                'to': '原目录'
-                            })
-                        else:
-                            # 文件被删除或移动到其他地方
-                            invalid_classifications.append(img_path)
-                            sync_results['removed_files'].append({
-                                'file': img_file.name,
-                                'category': category
-                            })
-            
-            # 移除无效的分类记录
-            for img_path in invalid_classifications:
-                del self.classified_images[img_path]
-                sync_results['invalid_classifications'].append(img_path)
-            
-            # 检查分类目录中是否有新图片
-            for category in self.categories:
-                category_dir = parent_dir / category
-                if category_dir.exists():
-                    for file_path in category_dir.iterdir():
-                        if (file_path.is_file() and 
-                            file_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff']):
-                            
-                            # 查找对应的原图片路径
-                            original_path = str(self.current_dir / file_path.name)
-                            
-                            # 如果这个文件没有分类记录，添加记录
-                            if original_path not in self.classified_images:
-                                self.classified_images[original_path] = category
-                                sync_results['new_classifications'].append({
-                                    'file': file_path.name,
-                                    'category': category
-                                })
-            
-            # 更新已移除图片状态
-            removed_files = []
-            for img_path in list(self.removed_images):
-                img_file = Path(img_path)
-                remove_dir = parent_dir / 'remove'
-                expected_file = remove_dir / img_file.name
-                
-                # 检查文件是否还在remove目录中
-                if not expected_file.exists():
-                    # 检查文件是否回到了原目录
-                    original_file = self.current_dir / img_file.name
-                    if original_file.exists():
-                        removed_files.append(img_path)
-                        sync_results['moved_files'].append({
-                            'file': img_file.name,
-                            'from': 'remove',
-                            'to': '原目录'
-                        })
-            
-            # 移除无效的删除记录
-            for img_path in removed_files:
-                self.removed_images.discard(img_path)
-            
-            # 检查是否有变化
-            sync_results['changes_detected'] = (
-                len(sync_results['removed_files']) > 0 or
-                len(sync_results['moved_files']) > 0 or
-                len(sync_results['new_classifications']) > 0 or
-                len(sync_results['invalid_classifications']) > 0
-            )
-            
+            # 使用FileStateManager进行状态同步
+            sync_results = self.file_state_manager.sync_file_states()
+
             # 如果有变化，保存状态
             if sync_results['changes_detected']:
                 self.save_state()
-                
+
+            return sync_results
+
         except Exception as e:
             self.logger.error(f"同步文件状态失败: {e}")
-            
-        return sync_results
+            return {
+                'changes_detected': False,
+                'removed_files': [],
+                'moved_files': [],
+                'new_classifications': [],
+                'invalid_classifications': []
+            }
     
     def _show_sync_results(self, sync_results):
         """显示同步结果"""
@@ -3437,7 +3228,6 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"显示图像时出错: {e}")
     
-    
     def update_image_list_thumbnail(self, image_path, thumbnail_data):
         """更新图片列表中的缩略图"""
         try:
@@ -3555,58 +3345,6 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.debug(f"检查待安装更新失败: {e}")
     
-    def _is_defined_shortcut(self, key, modifiers):
-        """检查按键是否是已定义的快捷键"""
-        try:
-            from PyQt6.QtGui import QKeySequence
-            
-            # 检查基本快捷键
-            basic_shortcuts = {
-                Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
-                Qt.Key.Key_Return, Qt.Key.Key_Delete, Qt.Key.Key_F5
-            }
-            
-            if key in basic_shortcuts and not modifiers:
-                return True
-            
-            # 检查组合快捷键
-            key_text = chr(key) if 32 <= key <= 126 else f"Key_{key}"
-            modifier_text = []
-            if modifiers & Qt.KeyboardModifier.ControlModifier:
-                modifier_text.append("Ctrl")
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                modifier_text.append("Shift") 
-            if modifiers & Qt.KeyboardModifier.AltModifier:
-                modifier_text.append("Alt")
-            
-            if modifier_text:
-                combo_key = "+".join(modifier_text) + "+" + key_text
-                combo_shortcuts = {'Ctrl+F', 'Ctrl+=', 'Ctrl+-', 'Ctrl+0'}
-                if combo_key in combo_shortcuts:
-                    return True
-            
-            # 检查类别快捷键
-            if hasattr(self, 'config') and self.config and hasattr(self, 'categories'):
-                for category_name, shortcut_key in self.config.category_shortcuts.items():
-                    if shortcut_key and category_name in self.categories:
-                        try:
-                            # 构建当前按键组合
-                            current_key = key_text if not modifier_text else "+".join(modifier_text) + "+" + key_text
-                            # 使用标准化比较，处理大小写不敏感
-                            if hasattr(self.config, '_normalize_shortcut'):
-                                if self.config._normalize_shortcut(shortcut_key) == self.config._normalize_shortcut(current_key):
-                                    return True
-                            else:
-                                # 后备方案：简单的小写比较
-                                if shortcut_key.lower() == current_key.lower():
-                                    return True
-                        except Exception:
-                            continue
-            
-            return False
-        except Exception:
-            return False
-
     def keyPressEvent(self, event):
         """处理键盘事件 - 优化按键处理和日志记录"""
         try:
@@ -3647,7 +3385,7 @@ class ImageClassifier(QMainWindow):
                     self.logger.debug(f"修饰键: {full_key} (code: {key})")
                 else:
                     self.logger.debug(f"按键: {full_key} (code: {key}) - 快捷键状态: {'激活' if self._shortcuts_active else '禁用'}")
-                
+
                 # INFO级别：只记录已定义的快捷键
                 if self._is_defined_shortcut(key, modifiers):
                     self.logger.info(f"快捷键触发: {full_key}")
@@ -3658,38 +3396,8 @@ class ImageClassifier(QMainWindow):
                 super().keyPressEvent(event)
                 return
             
-            # 只处理导航键，其他按键让QAction系统处理
-            navigation_handled = False
-            
-            # 上下键选择类别（仅在没有修饰键时）
-            if key == Qt.Key.Key_Up and not modifiers:
-                self.logger.debug("检测到上箭头键，选择上一个类别")
-                self.select_previous_category()
-                event.accept()
-                navigation_handled = True
-            elif key == Qt.Key.Key_Down and not modifiers:
-                self.logger.debug("检测到下箭头键，选择下一个类别")
-                self.select_next_category()
-                event.accept()
-                navigation_handled = True
-            elif (key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter) and not modifiers:
-                self.logger.debug("检测到回车键，确认选择类别")
-                # Enter键确认选择当前高亮的类别
-                if (hasattr(self, 'current_category_index') and 
-                    self.current_category_index >= 0 and 
-                    self.current_category_index < len(self.category_buttons)):
-                    button = self.category_buttons[self.current_category_index]
-                    category = button.category_name
-                    self.logger.info(f"通过回车键确认分类到: {category}")
-                    self.move_to_category(category)
-                    event.accept()
-                    navigation_handled = True
-                else:
-                    self.logger.debug(f"无法确认类别: current_category_index={getattr(self, 'current_category_index', 'None')}, 类别按钮数量={len(self.category_buttons) if hasattr(self, 'category_buttons') else 0}")
-            
-            # 如果没有处理导航键，传递给父类让QAction系统处理
-            if not navigation_handled:
-                super().keyPressEvent(event)
+            # 直接传递给父类让QAction系统处理所有快捷键
+            super().keyPressEvent(event)
             
         except Exception as e:
             self.logger.error(f"键盘事件处理失败: {e}")
@@ -4018,8 +3726,7 @@ class ImageClassifier(QMainWindow):
                 msgBox.button(QMessageBox.StandardButton.Close).setText("关闭")
 
         return msgBox
-    
-    
+      
     def show_question_message(self, title, text):
         """显示询问消息框"""
         msgBox = self._create_styled_message_box(
