@@ -6,6 +6,7 @@
 """
 
 from .theme import default_theme
+from .button_styles import ButtonStyles
 
 
 class DialogStyles:
@@ -239,7 +240,6 @@ class DialogStyles:
     @staticmethod
     def get_complete_dialog_style() -> str:
         """完整对话框样式 - 包含所有常用控件"""
-        from .button_styles import ButtonStyles
         return f"""
             {DialogStyles.get_base_dialog_style()}
             {DialogStyles.get_form_dialog_style()}
@@ -274,7 +274,6 @@ def apply_dialog_style(dialog, style_type: str = "complete"):
 
 def apply_tabbed_help_dialog_style(dialog):
     """应用带标签页帮助对话框的完整样式"""
-    from .button_styles import ButtonStyles
     style = f"""
         {DialogStyles.get_tabbed_dialog_style()}
         {ButtonStyles.get_primary_button_style()}

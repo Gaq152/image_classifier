@@ -5,7 +5,7 @@ UI模块
 """
 
 from .main_window import ImageClassifier
-from .widgets import CategoryButton, ImageListItem, EnhancedImageLabel, StatisticsPanel
+from .components.widgets import CategoryButton, ImageListItem, EnhancedImageLabel, StatisticsPanel
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog, 
                      TabbedHelpDialog, ProgressDialog)
 

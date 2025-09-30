@@ -7,24 +7,31 @@
 import logging
 import time
 import psutil
-import os
-import cv2
+import sys
+import json
+import threading
 import functools
+import shutil
+import hashlib
+import traceback
+import subprocess
 from pathlib import Path
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor
-
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-                            QSplitter, QLabel, QScrollArea, QStatusBar, QToolBar, 
-                            QMenu, QToolButton, QSizePolicy, QFileDialog, 
-                            QMessageBox, QApplication, QProgressDialog, QListWidget,
-                            QButtonGroup, QPushButton, QAbstractItemView, QFrame)
+                            QSplitter, QLabel, QScrollArea, QStatusBar, QToolBar 
+                            , QSizePolicy, QFileDialog, 
+                            QMessageBox, QApplication, QListWidget,
+                            QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
-from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon
-
-from .widgets import (CategoryButton, ImageListItem, EnhancedImageLabel, 
-                     StatisticsPanel)
+from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage
+from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
+                                StatisticsPanel)
+from .components.toast import toast_info, toast_success, toast_warning, toast_error
+from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog, 
                      TabbedHelpDialog, ProgressDialog)
+from .managers import FileStateManager
 from ..core.config import Config
 from ..core.scanner import FileScannerThread
 from ..core.image_loader import HighPerformanceImageLoader
@@ -32,9 +39,8 @@ from ..utils.exceptions import ImageClassifierError, FileOperationError
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..core.file_manager import FileOperationManager
 from ..utils.performance import performance_monitor
-from .components.toast import toast_info, toast_success, toast_warning, toast_error
-from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
-from .managers import FileStateManager
+from .._version_ import __version__
+
 
 class ImageClassifier(QMainWindow):
     """主图像分类器窗口"""
@@ -45,7 +51,7 @@ class ImageClassifier(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        from .._version_ import __version__
+
         self.version = __version__
         self.logger = logging.getLogger(__name__)
         
@@ -82,7 +88,6 @@ class ImageClassifier(QMainWindow):
     def _get_resource_path(self, relative_path):
         """获取资源文件路径，兼容开发环境和打包环境"""
         try:
-            import sys
             # PyInstaller 打包后的临时目录
             if hasattr(sys, '_MEIPASS'):
                 base_path = Path(sys._MEIPASS)
@@ -197,7 +202,6 @@ class ImageClassifier(QMainWindow):
         }
         
         # UI更新优化
-        import threading
         self.ui_update_lock = threading.Lock()
         self.pending_ui_updates = set()
 
@@ -478,7 +482,6 @@ class ImageClassifier(QMainWindow):
         layout.addWidget(list_title_container, 0)  # 不拉伸
         
         # 图片列表容器 - 可随窗口拉伸
-        from PyQt6.QtWidgets import QListWidget
         self.image_list = QListWidget()
         self.image_list.setMinimumHeight(120)  # 设置最小高度
         # 移除最大高度限制，让它能够拉伸
@@ -769,7 +772,6 @@ class ImageClassifier(QMainWindow):
         self.statusBar.showMessage("准备就绪")
 
         # 在状态栏右侧添加版本信息
-        from .._version_ import __version__
         version_label = QLabel(f"版本 {__version__}")
         version_label.setStyleSheet("""
             QLabel {
@@ -1664,7 +1666,6 @@ class ImageClassifier(QMainWindow):
             state_file = parent_dir / 'classification_state.json'
             
             if state_file.exists():
-                import json
                 with open(state_file, 'r', encoding='utf-8') as f:
                     state = json.load(f)
                     
@@ -1805,7 +1806,6 @@ class ImageClassifier(QMainWindow):
                 # 安全检查缓存数据类型
                 if cached_pixmap is not None:
                     # 检查是否为QPixmap类型
-                    from PyQt6.QtGui import QPixmap
                     if isinstance(cached_pixmap, QPixmap) and not cached_pixmap.isNull():
                         self.image_label.set_image(cached_pixmap)
                         self.statusBar.showMessage(f"📷 {Path(img_path).name}")
@@ -2304,7 +2304,6 @@ class ImageClassifier(QMainWindow):
             
             # 移动文件（总是移动，不管原模式）
             if old_file.exists():
-                import shutil
                 shutil.move(str(old_file), str(new_file))
                 self.logger.info(f"文件移动成功: {old_file} -> {new_file}")
             else:
@@ -2547,7 +2546,6 @@ class ImageClassifier(QMainWindow):
             
             # 移动文件
             if old_file.exists():
-                import shutil
                 shutil.move(str(old_file), str(remove_file))
                 self.logger.info(f"文件从分类目录移除: {old_file} -> {remove_file}")
             else:
@@ -2592,7 +2590,6 @@ class ImageClassifier(QMainWindow):
                     counter += 1
             
             # 执行移动操作（从remove目录移动到分类目录）
-            import shutil
             shutil.move(str(remove_file), str(target_file))
             
             self.logger.info(f"文件从remove目录恢复到分类目录: {file_name} -> {category_name}")
@@ -2641,7 +2638,6 @@ class ImageClassifier(QMainWindow):
             
             # 执行文件操作
             if self.is_copy_mode:
-                import shutil
                 shutil.copy2(source_file, target_file)
                 operation_type = "复制"
             else:
@@ -2708,7 +2704,6 @@ class ImageClassifier(QMainWindow):
     
     def _get_file_hash(self, file_path):
         """计算文件的MD5哈希值"""
-        import hashlib
         try:
             hash_md5 = hashlib.md5()
             with open(file_path, "rb") as f:
@@ -2898,7 +2893,6 @@ class ImageClassifier(QMainWindow):
             
             # 执行文件操作
             if self.is_copy_mode:
-                import shutil
                 shutil.copy2(source_file, target_file)
                 operation_type = "复制"
             else:
@@ -3145,7 +3139,6 @@ class ImageClassifier(QMainWindow):
                 
         except Exception as e:
             self.logger.error(f"显示图像时出错: {e}")
-            import traceback
             self.logger.error(traceback.format_exc())
     
     def on_thumbnail_loaded(self, image_path, thumbnail_data):
@@ -3172,10 +3165,7 @@ class ImageClassifier(QMainWindow):
     
     def convert_to_pixmap(self, image_data):
         """将图像数据转换为QPixmap"""
-        try:
-            from PyQt6.QtGui import QPixmap, QImage
-            import numpy as np
-            
+        try:         
             if isinstance(image_data, np.ndarray):
                 # numpy数组图像数据
                 height, width, channel = image_data.shape
@@ -3287,9 +3277,7 @@ class ImageClassifier(QMainWindow):
 
     def _is_in_input_mode(self):
         """检测是否处于输入模式（有输入控件获得焦点）"""
-        try:
-            from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox
-            
+        try:  
             focused_widget = self.focusWidget()
             if focused_widget:
                 # 检查是否是输入控件
@@ -3306,7 +3294,6 @@ class ImageClassifier(QMainWindow):
             if not hasattr(self, 'config') or not getattr(self.config, 'auto_update_enabled', True):
                 self.logger.debug("自动检查更新已关闭")
                 return
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(5000, self._auto_check_update_once)
         except Exception as e:
             self.logger.debug(f"调度自动检查更新失败: {e}")
@@ -3315,7 +3302,6 @@ class ImageClassifier(QMainWindow):
         """执行一次静默检查，有更新则弹窗提示"""
         try:
             self.logger.debug("自动检查更新：开始")
-            from .dialogs import TabbedHelpDialog
             dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
             # 复用对话框的检查逻辑，但不显示对话框：无更新时静默
             dlg._handle_check_update(suppress_if_latest=True)
@@ -3330,13 +3316,10 @@ class ImageClassifier(QMainWindow):
                 ver = info.get('version')
                 batch_path = info.get('batch_path')
                 if batch_path and Path(batch_path).exists():
-                    from PyQt6.QtWidgets import QMessageBox
                     if QMessageBox.question(self, '发现已下载更新', f'检测到待安装的更新 v{ver}，是否现在重启并完成更新？',
                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
                         try:
-                            import subprocess
                             subprocess.Popen(["cmd", "/c", "start", "", str(batch_path)], shell=False)
-                            from PyQt6.QtWidgets import QApplication
                             QApplication.quit()
                         except Exception as e:
                             self.logger.error(f"启动批处理失败: {e}")
@@ -3551,7 +3534,6 @@ class ImageClassifier(QMainWindow):
                     return
             
             # 删除目录及其内容
-            import shutil
             shutil.rmtree(category_path)
             
             # 从配置中移除
@@ -3648,7 +3630,6 @@ class ImageClassifier(QMainWindow):
     def _async_save_state(self, state_file, state_data):
         """异步执行状态保存"""
         try:
-            import json
             with open(state_file, 'w', encoding='utf-8') as f:
                 json.dump(state_data, f, ensure_ascii=False, indent=2)
                 
@@ -3658,7 +3639,6 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"异步保存状态失败: {e}")
             # 如果异步保存失败，尝试同步保存作为备份
             try:
-                import json
                 with open(state_file, 'w', encoding='utf-8') as f:
                     json.dump(state_data, f, ensure_ascii=False, indent=2)
                 self.logger.info(f"备份同步保存成功: {state_file}")
