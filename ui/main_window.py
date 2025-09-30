@@ -1714,10 +1714,10 @@ class ImageClassifier(QMainWindow):
             if hasattr(self, 'category_mode_button') and self.category_mode_button:
                 # 更新按钮图标和提示
                 if self.is_multi_category:
-                    self.category_mode_button.setText('⋮')  # Unicode多点符号表示多分类
+                    self.category_mode_button.setText('⇶')  # 多箭头表示多分类
                     self.category_mode_button.setToolTip('多分类模式 - 点击切换到单分类模式')
                 else:
-                    self.category_mode_button.setText('①')  # Unicode数字符号表示单分类
+                    self.category_mode_button.setText('→')  # 单箭头表示单分类
                     self.category_mode_button.setToolTip('单分类模式 - 点击切换到多分类模式')
 
                 mode_desc = "多分类" if self.is_multi_category else "单分类"
@@ -3447,7 +3447,7 @@ class ImageClassifier(QMainWindow):
     def create_category_mode_button(self, toolbar):
         """创建图标化的分类模式切换按钮 - 单分类/多分类"""
         # 使用统一样式创建按钮
-        self.category_mode_button = self.create_toolbar_button('①', 'category_mode_button',
+        self.category_mode_button = self.create_toolbar_button('→', 'category_mode_button',
                                                               '单分类模式 - 点击切换到多分类模式',
                                                               self.toggle_category_mode)
 

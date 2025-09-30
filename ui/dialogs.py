@@ -894,7 +894,7 @@ class TabbedHelpDialog(QDialog):
         <ul style="line-height: 2;">
         <li><b>🎹 使用快捷键</b>：按数字键 1-9 快速分类到对应类别</li>
         <li><b>🔄 文件模式切换</b>：点击工具栏的"复制模式"/"移动模式"按钮切换</li>
-        <li><b>🔀 多分类模式</b>：点击"🔂 单分类模式"按钮开启多分类，一图多标签</li>
+        <li><b>⇶ 多分类模式</b>：点击"→ 单分类模式"按钮开启多分类，一图多标签</li>
         <li><b>⏎ 回车确认</b>：选中类别后按 Enter 键快速分类</li>
         <li><b>🔄 自动同步</b>：程序会自动检测外部文件变化</li>
         <li><b>💾 状态保存</b>：工作状态会自动保存，重启后恢复</li>
@@ -906,7 +906,7 @@ class TabbedHelpDialog(QDialog):
         • 按 F5 键可以刷新文件列表同步外部变化<br>
         • 按 Ctrl+F 键可以让图片适应窗口大小<br>
         • 支持批量添加类别，用逗号分隔多个类别名<br>
-        • <b>🔀 多分类模式</b>：再次点击已分类的类别可取消分类<br>
+        • <b>⇶ 多分类模式</b>：再次点击已分类的类别可取消分类<br>
         • <b>蓝色按钮</b>：表示当前图片属于该类别（多分类模式下）</p>
         </div>
         '''
@@ -1004,9 +1004,9 @@ class TabbedHelpDialog(QDialog):
         <li><b>多分类模式</b>：同一张图片可分配到多个类别</li>
         </ul>
         
-        <h4>🔀 分类模式详解</h4>
+        <h4>⇶ 分类模式详解</h4>
         <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #4caf50;">
-        <h5 style="color: #2e7d32; margin: 0 0 10px 0;">🔂 单分类模式（默认）</h5>
+        <h5 style="color: #2e7d32; margin: 0 0 10px 0;">→ 单分类模式（默认）</h5>
         <ul style="margin: 5px 0; padding-left: 20px;">
         <li>一张图片只能属于一个类别</li>
         <li>重新分类会自动从旧类别移动到新类别</li>
@@ -1016,10 +1016,10 @@ class TabbedHelpDialog(QDialog):
         </div>
         
         <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #2196f3;">
-        <h5 style="color: #1565c0; margin: 0 0 10px 0;">🔀 多分类模式（新功能）</h5>
+        <h5 style="color: #1565c0; margin: 0 0 10px 0;">⇶ 多分类模式（新功能）</h5>
         <ul style="margin: 5px 0; padding-left: 20px;">
         <li><b>灵活分类</b>：一张图片可以同时属于多个类别</li>
-        <li><b>切换方式</b>：点击工具栏"🔂 单分类模式"按钮切换</li>
+        <li><b>切换方式</b>：点击工具栏"→ 单分类模式"按钮切换</li>
         <li><b>分类操作</b>：点击类别按钮添加分类，再次点击取消分类</li>
         <li><b>视觉反馈</b>：多分类的类别按钮显示蓝色背景</li>
         <li><b>应用场景</b>：标签化管理，如"风景+日落"、"人物+室内"等</li>
