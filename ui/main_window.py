@@ -1674,7 +1674,7 @@ class ImageClassifier(QMainWindow):
                 
                 # 恢复操作模式状态
                 saved_copy_mode = state.get('is_copy_mode', True)  # 默认为复制模式
-                self.set_mode(saved_copy_mode)
+                self._set_mode_direct(saved_copy_mode)  # 直接设置模式，不触发迁移逻辑
                 
                 # 恢复分类模式状态
                 saved_multi_category = state.get('is_multi_category', False)  # 默认为单分类模式
@@ -3026,14 +3026,114 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"显示同步结果失败: {e}")
     
+    def _is_migration_needed(self):
+        """检查是否需要迁移"""
+        return len(self.classified_images) > 0 or len(self.removed_images) > 0
+
+    def _show_migration_confirmation_dialog(self, target_mode):
+        """显示迁移确认对话框"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("模式切换迁移确认")
+        dialog.setModal(True)
+        dialog.setFixedSize(500, 400)
+
+        # 使用统一的样式系统
+        dialog.setStyleSheet(DialogStyles.get_form_dialog_style())
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 标题
+        title_label = QLabel(f"⚠️ 检测到分类记录，切换到{'复制' if target_mode else '移动'}模式需要数据迁移")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #E67E22;")
+        layout.addWidget(title_label)
+
+        # 说明文本
+        explanation = QTextEdit()
+        explanation.setReadOnly(True)
+        explanation.setMaximumHeight(200)
+
+        current_mode = "复制" if self.is_copy_mode else "移动"
+        target_mode_name = "复制" if target_mode else "移动"
+
+        explanation_text = f"""当前模式：{current_mode}模式
+目标模式：{target_mode_name}模式
+
+检测到的数据：
+• 已分类图片：{len(self.classified_images)} 张
+• 已移出图片：{len(self.removed_images)} 张
+
+迁移说明：
+"""
+
+        if target_mode:  # 切换到复制模式
+            explanation_text += """• 从移动模式切换到复制模式
+• 会将分类目录和移除目录中的文件复制回原目录
+• 原始目录将恢复所有图片（包括已分类和已移出的）
+• 分类记录会被保留，但文件会存在于多个位置"""
+        else:  # 切换到移动模式
+            explanation_text += """• 从复制模式切换到移动模式
+• 会删除原始目录中已分类和已移出的图片
+• 图片只保留在对应的分类目录中
+• 这是一个不可逆的操作，请谨慎选择"""
+
+        explanation.setPlainText(explanation_text)
+        layout.addWidget(explanation)
+
+        # 警告
+        warning_label = QLabel("⚠️ 此操作会修改文件系统，建议在操作前备份重要数据")
+        warning_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+        layout.addWidget(warning_label)
+
+        # 按钮
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        cancel_button = QPushButton("取消")
+        cancel_button.setObjectName("cancelButton")
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_button)
+
+        confirm_button = QPushButton(f"确认迁移到{target_mode_name}模式")
+        confirm_button.setObjectName("primaryButton")
+        confirm_button.clicked.connect(dialog.accept)
+        button_layout.addWidget(confirm_button)
+
+        layout.addLayout(button_layout)
+
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
     def set_mode(self, is_copy):
         """设置操作模式"""
-        # 如果要切换到移动模式，但当前是多分类模式，拒绝切换
+        # 如果要切换到移动模式，但当前是多分类模式，拒绝切换（最高优先级）
         if not is_copy and self.is_multi_category:
             toast_warning(self,"移动模式不支持多分类功能，请先切换为单分类模式")
             # 拒绝切换，保持原来的复制模式
             return
-        
+
+        # 检查是否需要迁移
+        if self.is_copy_mode != is_copy and self._is_migration_needed():
+            # 显示迁移确认对话框
+            if not self._show_migration_confirmation_dialog(is_copy):
+                # 用户取消迁移，保持原模式
+                return
+
+            # 用户确认迁移，执行迁移逻辑
+            try:
+                if is_copy:
+                    # 从移动模式迁移到复制模式
+                    self._migrate_move_to_copy()
+                else:
+                    # 从复制模式迁移到移动模式
+                    self._migrate_copy_to_move()
+            except Exception as e:
+                self.logger.error(f"模式迁移失败: {e}")
+                toast_error(self, f"模式迁移失败: {e}")
+                return
+
         self.is_copy_mode = is_copy
 
         # 更新按钮图标和提示
@@ -3049,7 +3149,298 @@ class ImageClassifier(QMainWindow):
             toast_info(self,"已切换到移动模式")
 
         self.logger.info(f"操作模式已切换为: {'复制' if is_copy else '移动'}")
-    
+
+    def _set_mode_direct(self, is_copy):
+        """直接设置操作模式，不触发迁移逻辑（用于状态恢复）"""
+        self.is_copy_mode = is_copy
+
+        # 更新按钮图标和提示
+        if is_copy:
+            self.mode_button.setText('⧉')  # 重叠方块表示复制
+            self.mode_button.setToolTip('复制模式 - 点击切换到移动模式')
+        else:
+            self.mode_button.setText('✂')  # 剪刀表示移动
+            self.mode_button.setToolTip('移动模式 - 点击切换到复制模式')
+
+        self.logger.info(f"操作模式已恢复为: {'复制' if is_copy else '移动'}")
+
+    def _migrate_copy_to_move(self):
+        """从复制模式迁移到移动模式"""
+        self.logger.info("开始从复制模式迁移到移动模式")
+
+        # 收集需要从原目录删除的文件
+        files_to_delete = []
+        for file_path in self.classified_images.keys():
+            if Path(file_path).exists():
+                files_to_delete.append(file_path)
+        for file_path in self.removed_images:
+            if Path(file_path).exists():
+                files_to_delete.append(file_path)
+
+        if not files_to_delete:
+            self.logger.info("没有需要删除的文件")
+            toast_info(self, "没有需要迁移的文件")
+            return
+
+        # 显示进度对话框
+        progress_dialog = ProgressDialog("模式迁移 - 复制到移动", self)
+        progress_dialog.update_main_text(f"正在迁移到移动模式，将删除原目录中的 {len(files_to_delete)} 个文件...")
+        progress_dialog.show()
+        QApplication.processEvents()
+
+        # 删除原目录中的文件（带错误处理和回滚）
+        deleted_files = []  # 记录已删除的文件，用于回滚
+        deleted_count = 0
+        total_files = len(files_to_delete)
+
+        try:
+            for i, file_path in enumerate(files_to_delete):
+                # 检查是否被取消
+                if progress_dialog.is_cancelled():
+                    progress_dialog.force_close()
+                    self.logger.info("用户取消了迁移操作")
+                    toast_warning(self, "迁移操作已取消")
+                    return
+
+                try:
+                    # 更新进度
+                    progress_dialog.update_progress(i + 1, total_files)
+                    progress_dialog.update_detail_text(f"正在删除: {Path(file_path).name}")
+                    QApplication.processEvents()
+
+                    # 在删除前验证对应分类文件存在
+                    file_path_obj = Path(file_path)
+                    if str(file_path) in self.classified_images:
+                        category = self.classified_images[str(file_path)]
+                        category_name = category[0] if isinstance(category, list) and category else category
+                        if category_name:
+                            parent_dir = self.current_dir.parent
+                            category_dir = parent_dir / normalize_folder_name(category_name)
+                            category_file = category_dir / file_path_obj.name
+                            if not category_file.exists():
+                                raise FileOperationError(f"分类目录中找不到对应文件: {category_file}")
+
+                    # 备份文件信息用于可能的回滚
+                    file_backup_info = {
+                        'path': file_path,
+                        'stat': file_path_obj.stat() if file_path_obj.exists() else None
+                    }
+
+                    # 删除原文件
+                    file_path_obj.unlink()
+                    deleted_files.append(file_backup_info)
+                    deleted_count += 1
+                    self.logger.debug(f"删除原文件: {file_path}")
+
+                except Exception as e:
+                    self.logger.error(f"删除文件失败 {file_path}: {e}")
+
+                    # 尝试回滚已删除的文件
+                    self._rollback_copy_to_move_migration(deleted_files)
+
+                    progress_dialog.force_close()
+                    raise FileOperationError(f"删除文件失败，已尝试回滚: {e}")
+
+            # 完成
+            progress_dialog.update_main_text("迁移完成")
+            progress_dialog.update_detail_text(f"已删除 {deleted_count} 个文件")
+            progress_dialog.update_progress(total_files, total_files)
+            QApplication.processEvents()
+
+            QTimer.singleShot(1000, progress_dialog.force_close)  # 1秒后关闭
+
+            self.logger.info(f"复制到移动模式迁移完成，删除了 {deleted_count} 个文件")
+            toast_success(self, f"迁移完成，已删除原目录中的 {deleted_count} 个文件")
+
+        except Exception as e:
+            self.logger.error(f"迁移过程中发生严重错误: {e}")
+            progress_dialog.force_close()
+            toast_error(self, f"迁移失败: {e}")
+            raise
+
+    def _rollback_copy_to_move_migration(self, deleted_files):
+        """回滚复制到移动模式的迁移操作"""
+        self.logger.warning("开始回滚复制到移动模式迁移操作")
+
+        rollback_count = 0
+        for file_info in deleted_files:
+            try:
+                file_path = file_info['path']
+
+                # 从分类目录或移除目录找回文件
+                source_file = None
+
+                # 先尝试从分类目录找回
+                if str(file_path) in self.classified_images:
+                    category = self.classified_images[str(file_path)]
+                    category_name = category[0] if isinstance(category, list) and category else category
+                    if category_name:
+                        parent_dir = self.current_dir.parent
+                        category_dir = parent_dir / normalize_folder_name(category_name)
+                        category_file = category_dir / Path(file_path).name
+                        if category_file.exists():
+                            source_file = category_file
+
+                # 再尝试从移除目录找回
+                if not source_file and str(file_path) in self.removed_images:
+                    parent_dir = self.current_dir.parent
+                    remove_dir = parent_dir / "remove"
+                    remove_file = remove_dir / Path(file_path).name
+                    if remove_file.exists():
+                        source_file = remove_file
+
+                # 恢复文件
+                if source_file:
+                    shutil.copy2(str(source_file), str(file_path))
+                    rollback_count += 1
+                    self.logger.debug(f"回滚恢复文件: {source_file} -> {file_path}")
+                else:
+                    self.logger.warning(f"无法找到回滚源文件: {file_path}")
+
+            except Exception as e:
+                self.logger.error(f"回滚文件失败 {file_info['path']}: {e}")
+
+        self.logger.info(f"回滚完成，恢复了 {rollback_count} 个文件")
+        if rollback_count > 0:
+            toast_info(self, f"已回滚恢复 {rollback_count} 个文件")
+
+    def _migrate_move_to_copy(self):
+        """从移动模式迁移到复制模式"""
+        self.logger.info("开始从移动模式迁移到复制模式")
+
+        # 收集需要复制的文件
+        files_to_copy = []
+
+        # 收集分类文件
+        parent_dir = self.current_dir.parent
+        for file_path, category in self.classified_images.items():
+            category_name = category[0] if isinstance(category, list) and category else category
+            if category_name:
+                category_dir = parent_dir / normalize_folder_name(category_name)
+                category_file = category_dir / Path(file_path).name
+                if category_file.exists() and not Path(file_path).exists():
+                    files_to_copy.append((category_file, Path(file_path), 'classified'))
+
+        # 收集移除文件
+        remove_dir = parent_dir / "remove"
+        if remove_dir.exists():
+            for file_path in self.removed_images:
+                remove_file = remove_dir / Path(file_path).name
+                if remove_file.exists() and not Path(file_path).exists():
+                    files_to_copy.append((remove_file, Path(file_path), 'removed'))
+
+        if not files_to_copy:
+            self.logger.info("没有需要复制的文件")
+            toast_info(self, "没有需要迁移的文件")
+            return
+
+        # 显示进度对话框
+        progress_dialog = ProgressDialog("模式迁移 - 移动到复制", self)
+        progress_dialog.update_main_text(f"正在迁移到复制模式，将复制 {len(files_to_copy)} 个文件回原目录...")
+        progress_dialog.show()
+        QApplication.processEvents()
+
+        # 复制文件（带错误处理和回滚）
+        copied_files = []  # 记录已复制的文件，用于回滚
+        copied_count = 0
+        total_files = len(files_to_copy)
+
+        try:
+            for i, (source_file, target_file, file_type) in enumerate(files_to_copy):
+                # 检查是否被取消
+                if progress_dialog.is_cancelled():
+                    progress_dialog.force_close()
+                    self.logger.info("用户取消了迁移操作")
+                    toast_warning(self, "迁移操作已取消")
+                    return
+
+                try:
+                    # 更新进度
+                    progress_dialog.update_progress(i + 1, total_files)
+                    file_type_name = '分类' if file_type == 'classified' else '移除'
+                    progress_dialog.update_detail_text(f"正在复制{file_type_name}文件: {target_file.name}")
+                    QApplication.processEvents()
+
+                    # 验证源文件存在
+                    if not source_file.exists():
+                        raise FileOperationError(f"源文件不存在: {source_file}")
+
+                    # 检查目标文件是否已存在（避免覆盖）
+                    if target_file.exists():
+                        self.logger.warning(f"目标文件已存在，跳过: {target_file}")
+                        continue
+
+                    # 确保目标目录存在
+                    target_file.parent.mkdir(parents=True, exist_ok=True)
+
+                    # 验证磁盘空间
+                    source_size = source_file.stat().st_size
+                    free_space = shutil.disk_usage(target_file.parent).free
+                    if source_size > free_space:
+                        raise FileOperationError(f"磁盘空间不足，需要 {source_size} 字节，可用 {free_space} 字节")
+
+                    # 复制文件
+                    shutil.copy2(str(source_file), str(target_file))
+
+                    # 验证复制是否成功
+                    if not target_file.exists():
+                        raise FileOperationError(f"文件复制后验证失败: {target_file}")
+
+                    # 验证文件大小
+                    if target_file.stat().st_size != source_file.stat().st_size:
+                        raise FileOperationError(f"文件大小不匹配: {source_file} vs {target_file}")
+
+                    copied_files.append(target_file)
+                    copied_count += 1
+                    self.logger.debug(f"复制文件: {source_file} -> {target_file}")
+
+                except Exception as e:
+                    self.logger.error(f"复制文件失败 {source_file} -> {target_file}: {e}")
+
+                    # 尝试回滚已复制的文件
+                    self._rollback_move_to_copy_migration(copied_files)
+
+                    progress_dialog.force_close()
+                    raise FileOperationError(f"复制文件失败，已尝试回滚: {e}")
+
+            # 完成
+            progress_dialog.update_main_text("迁移完成")
+            progress_dialog.update_detail_text(f"已复制 {copied_count} 个文件回原目录")
+            progress_dialog.update_progress(total_files, total_files)
+            QApplication.processEvents()
+
+            QTimer.singleShot(1000, progress_dialog.force_close)  # 1秒后关闭
+
+            self.logger.info(f"移动到复制模式迁移完成，复制了 {copied_count} 个文件")
+            toast_success(self, f"迁移完成，已复制 {copied_count} 个文件回原目录")
+
+        except Exception as e:
+            self.logger.error(f"迁移过程中发生严重错误: {e}")
+            progress_dialog.force_close()
+            toast_error(self, f"迁移失败: {e}")
+            raise
+
+    def _rollback_move_to_copy_migration(self, copied_files):
+        """回滚移动到复制模式的迁移操作"""
+        self.logger.warning("开始回滚移动到复制模式迁移操作")
+
+        rollback_count = 0
+        for target_file in copied_files:
+            try:
+                if target_file.exists():
+                    target_file.unlink()
+                    rollback_count += 1
+                    self.logger.debug(f"回滚删除文件: {target_file}")
+                else:
+                    self.logger.warning(f"回滚时文件不存在: {target_file}")
+
+            except Exception as e:
+                self.logger.error(f"回滚删除文件失败 {target_file}: {e}")
+
+        self.logger.info(f"回滚完成，删除了 {rollback_count} 个文件")
+        if rollback_count > 0:
+            toast_info(self, f"已回滚删除 {rollback_count} 个文件")
+
     def create_category_mode_button(self, toolbar):
         """创建图标化的分类模式切换按钮 - 单分类/多分类"""
         # 使用统一样式创建按钮
