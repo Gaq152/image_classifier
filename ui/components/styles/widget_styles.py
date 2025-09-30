@@ -6,6 +6,8 @@
 """
 
 from .theme import default_theme
+from .dialog_styles import DialogStyles
+from .button_styles import ButtonStyles
 
 
 class WidgetStyles:
@@ -337,8 +339,6 @@ class WidgetStyles:
     @staticmethod
     def get_custom_rename_dialog_style() -> str:
         """自定义重命名对话框样式"""
-        from .dialog_styles import DialogStyles
-        from .button_styles import ButtonStyles
         return f"""
             {DialogStyles.get_base_dialog_style()}
             {DialogStyles.get_form_dialog_style()}

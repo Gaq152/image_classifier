@@ -5,18 +5,21 @@
 """
 
 import logging
+import os
+import sys
+import subprocess
+import shutil
 from pathlib import Path
+from typing import Optional
+from urllib.parse import urlparse, unquote
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                             QPushButton, QTextEdit, QListWidget, QListWidgetItem, 
                             QMessageBox, QTabWidget, QProgressBar, QApplication, 
-                            QWidget, QTextBrowser)
+                            QWidget, QTextBrowser,QCheckBox)
 from PyQt6.QtCore import Qt, pyqtSignal
-from typing import Optional
-import os
-import sys
-from PyQt6.QtGui import QKeySequence
-
+from PyQt6.QtGui import QKeySequence,QIcon
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
+from .._version_ import compare_version, __version__
 from ..utils.exceptions import FileOperationError
 from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
@@ -358,8 +361,7 @@ class TabbedHelpDialog(QDialog):
     def _get_resource_path(self, relative_path):
         """获取资源文件路径，兼容开发环境和打包环境"""
         try:
-            import sys
-            from pathlib import Path
+
             # PyInstaller 打包后的临时目录
             if hasattr(sys, '_MEIPASS'):
                 base_path = Path(sys._MEIPASS)
@@ -462,7 +464,7 @@ class TabbedHelpDialog(QDialog):
             top_btn_bar = QHBoxLayout()
             check_btn = QPushButton('检查更新')
             # 使用带平滑动画的拨动开关（自绘QSS实现简单动画感）
-            from PyQt6.QtWidgets import QCheckBox
+
             auto_chk = QCheckBox('')
             auto_chk.setToolTip('启动时自动检查更新')
             auto_chk.setStyleSheet('''
@@ -565,7 +567,7 @@ class TabbedHelpDialog(QDialog):
             self.logger.info(f"检查更新：发现新版本 v{new_ver}")
             display_name = str(manifest.get('display_name', '')).strip()
 
-            from .._version_ import compare_version, __version__
+            
             if not new_ver or compare_version(new_ver, __version__) <= 0:
                 if not suppress_if_latest:
                     toast_info(self, '当前已是最新版本')
@@ -596,7 +598,6 @@ class TabbedHelpDialog(QDialog):
 
             # 优先使用 manifest.display_name（中文友好），否则从 URL 解码
             try:
-                from urllib.parse import urlparse, unquote
                 parsed = urlparse(url)
                 url_name = unquote(Path(parsed.path).name)
             except Exception:
@@ -671,7 +672,6 @@ class TabbedHelpDialog(QDialog):
             if reply == QMessageBox.StandardButton.Yes:
                 # 启动批处理并退出
                 try:
-                    import subprocess
                     # 将已下载的新包绝对路径作为参数传递给 update.bat
                     subprocess.Popen(["cmd", "/c", "start", "", str(batch_path), str(dest)], shell=False)
                     self.logger.info("更新安装：已启动安装脚本")
@@ -704,7 +704,7 @@ class TabbedHelpDialog(QDialog):
         try:
             cache_dir = Path.home() / '.image_classifier_cache'
             if cache_dir.exists():
-                import shutil
+
                 shutil.rmtree(cache_dir)
                 toast_success(self, 'SMB缓存已清理完成')
             else:
@@ -714,10 +714,7 @@ class TabbedHelpDialog(QDialog):
             toast_error(self, f'清理SMB缓存失败: {e}')
     
     def _show_styled_message(self, msg_type, title, text):
-        """显示样式化的消息框"""
-        from PyQt6.QtWidgets import QMessageBox
-        from PyQt6.QtGui import QIcon
-        
+        """显示样式化的消息框"""     
         msgBox = QMessageBox(self)
         if msg_type == '信息':
             msgBox.setIcon(QMessageBox.Icon.Information)
@@ -776,7 +773,6 @@ class TabbedHelpDialog(QDialog):
         msgBox.exec()
 
     def _ask_yes_no(self, title: str, text: str):
-        from PyQt6.QtWidgets import QMessageBox
         box = QMessageBox(self)
         box.setWindowTitle(title)
         box.setText(text)
@@ -785,7 +781,6 @@ class TabbedHelpDialog(QDialog):
         try:
             icon_path = self._get_resource_path('assets/icon.ico')
             if icon_path and icon_path.exists():
-                from PyQt6.QtGui import QIcon
                 box.setWindowIcon(QIcon(str(icon_path)))
         except Exception:
             pass
@@ -828,7 +823,6 @@ class TabbedHelpDialog(QDialog):
         
     def create_quick_start_tab(self):
         """创建快速入门标签页"""
-        from PyQt6.QtWidgets import QWidget, QTextBrowser
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -934,7 +928,6 @@ class TabbedHelpDialog(QDialog):
         
     def create_help_tab(self):
         """创建帮助标签页"""
-        from PyQt6.QtWidgets import QWidget, QTextBrowser
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -1116,7 +1109,6 @@ class TabbedHelpDialog(QDialog):
         
     def create_advanced_tab(self):
         """创建高级功能标签页"""
-        from PyQt6.QtWidgets import QWidget, QTextBrowser
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -1228,7 +1220,6 @@ class TabbedHelpDialog(QDialog):
         
     def create_faq_tab(self):
         """创建常见问题标签页"""
-        from PyQt6.QtWidgets import QWidget, QTextBrowser
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -1383,7 +1374,6 @@ class TabbedHelpDialog(QDialog):
         
     def create_about_tab(self):
         """创建关于标签页"""
-        from PyQt6.QtWidgets import QWidget, QTextBrowser
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -1490,7 +1480,7 @@ class TabbedHelpDialog(QDialog):
         
         <div style="background: linear-gradient(135deg, #e8f5e8 0%, #f0f4f8 100%); color: black; padding: 20px; border-radius: 10px; text-align: center; margin: 30px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border: 1px solid #ddd;">
         <h3 style="margin: 0 0 15px 0; color: black;">📝 版权信息</h3>
-        <p style="margin: 5px 0; color: #333;"><b>© 2025 图片分类工具开发团队</b></p>
+        <p style="margin: 5px 0; color: #333;"><b>© 2025 GDDI</b></p>
         <p style="margin: 5px 0; color: #333;">专注于提升图片管理效率的专业软件</p>
         <p style="margin: 15px 0 5px 0; color: #555; font-size: 14px;">
         本软件遵循 MIT 开源协议<br>

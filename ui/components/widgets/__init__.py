@@ -21,16 +21,20 @@ Note:
 # 预留导入位置
 # from .enhanced_button import EnhancedButton
 # from .status_label import StatusLabel
-# from .category_button import CategoryButton
-# from .image_label import EnhancedImageLabel
+from .category_button import CategoryButton
+from .image_list_item import ImageListItem
+from .enhanced_image_label import EnhancedImageLabel
+from .statistics_panel import StatisticsPanel
 
 # 定义公共接口
 __all__ = [
     # 预留组件导出
     # 'EnhancedButton',
     # 'StatusLabel',
-    # 'CategoryButton',
-    # 'EnhancedImageLabel',
+    'CategoryButton',
+    'ImageListItem',
+    'EnhancedImageLabel',
+    'StatisticsPanel',
 ]
 
 # 版本信息
