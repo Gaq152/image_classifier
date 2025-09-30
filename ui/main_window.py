@@ -3150,6 +3150,9 @@ class ImageClassifier(QMainWindow):
 
         self.logger.info(f"操作模式已切换为: {'复制' if is_copy else '移动'}")
 
+        # 立即同步保存状态到文件，确保模式状态与文件系统状态保持一致
+        self._save_state_sync()
+
     def _set_mode_direct(self, is_copy):
         """直接设置操作模式，不触发迁移逻辑（用于状态恢复）"""
         self.is_copy_mode = is_copy
@@ -4017,7 +4020,36 @@ class ImageClassifier(QMainWindow):
                 
         except Exception as e:
             self.logger.error(f"准备保存状态失败: {e}")
-    
+
+    def _save_state_sync(self):
+        """立即同步保存当前状态到图片同级目录（用于重要状态变化）"""
+        try:
+            if not self.current_dir:
+                return
+
+            # 准备状态数据
+            state_data = {
+                'classified_images': dict(self.classified_images),
+                'removed_images': list(self.removed_images),
+                'last_index': self.current_index,
+                'version': self.version,
+                'is_copy_mode': self.is_copy_mode,  # 保存操作模式状态
+                'is_multi_category': self.is_multi_category  # 保存分类模式状态
+            }
+
+            # 状态文件保存在图片目录的父目录（同级目录），而不是图片目录内
+            parent_dir = self.current_dir.parent
+            state_file = parent_dir / 'classification_state.json'
+
+            # 立即同步保存
+            with open(state_file, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, ensure_ascii=False, indent=2)
+
+            self.logger.info(f"模式状态已同步保存到: {state_file}")
+
+        except Exception as e:
+            self.logger.error(f"同步保存状态失败: {e}")
+
     def _async_save_state(self, state_file, state_data):
         """异步执行状态保存"""
         try:
