@@ -3691,9 +3691,37 @@ class ImageClassifier(QMainWindow):
             if not hasattr(self, 'config') or not getattr(self.config, 'auto_update_enabled', True):
                 self.logger.debug("自动检查更新已关闭")
                 return
+
+            # 启动后5秒首次检查
             QTimer.singleShot(5000, self._auto_check_update_once)
+
+            # 启动定期检查定时器（每6小时）
+            self._start_periodic_update_check()
         except Exception as e:
             self.logger.debug(f"调度自动检查更新失败: {e}")
+
+    def _start_periodic_update_check(self):
+        """启动定期检查更新定时器（每6小时检查一次）"""
+        try:
+            if not hasattr(self, 'config') or not getattr(self.config, 'auto_update_enabled', True):
+                return
+
+            # 创建定时器，每6小时（21600000毫秒）触发一次
+            self.periodic_update_timer = QTimer(self)
+            self.periodic_update_timer.timeout.connect(self._periodic_check_update)
+            self.periodic_update_timer.start(21600000)  # 6小时 = 6 * 60 * 60 * 1000ms
+
+            self.logger.info("定期检查更新已启动：每6小时检查一次")
+        except Exception as e:
+            self.logger.debug(f"启动定期检查更新定时器失败: {e}")
+
+    def _periodic_check_update(self):
+        """定期检查更新（每6小时触发）"""
+        try:
+            self.logger.info("定期检查更新：开始执行")
+            self._auto_check_update_once()
+        except Exception as e:
+            self.logger.debug(f"定期检查更新失败: {e}")
 
     def _auto_check_update_once(self):
         """执行一次静默检查，有更新则弹窗提示"""
