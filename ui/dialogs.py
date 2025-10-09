@@ -894,7 +894,7 @@ class TabbedHelpDialog(QDialog):
         <ul style="line-height: 2;">
         <li><b>🎹 使用快捷键</b>：按数字键 1-9 快速分类到对应类别</li>
         <li><b>🔄 文件模式切换</b>：点击工具栏的"复制模式"/"移动模式"按钮切换</li>
-        <li><b>🔀 多分类模式</b>：点击"🔂 单分类模式"按钮开启多分类，一图多标签</li>
+        <li><b>⇶ 多分类模式</b>：点击"→ 单分类模式"按钮开启多分类，一图多标签</li>
         <li><b>⏎ 回车确认</b>：选中类别后按 Enter 键快速分类</li>
         <li><b>🔄 自动同步</b>：程序会自动检测外部文件变化</li>
         <li><b>💾 状态保存</b>：工作状态会自动保存，重启后恢复</li>
@@ -906,7 +906,7 @@ class TabbedHelpDialog(QDialog):
         • 按 F5 键可以刷新文件列表同步外部变化<br>
         • 按 Ctrl+F 键可以让图片适应窗口大小<br>
         • 支持批量添加类别，用逗号分隔多个类别名<br>
-        • <b>🔀 多分类模式</b>：再次点击已分类的类别可取消分类<br>
+        • <b>⇶ 多分类模式</b>：再次点击已分类的类别可取消分类<br>
         • <b>蓝色按钮</b>：表示当前图片属于该类别（多分类模式下）</p>
         </div>
         '''
@@ -1004,9 +1004,9 @@ class TabbedHelpDialog(QDialog):
         <li><b>多分类模式</b>：同一张图片可分配到多个类别</li>
         </ul>
         
-        <h4>🔀 分类模式详解</h4>
+        <h4>⇶ 分类模式详解</h4>
         <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #4caf50;">
-        <h5 style="color: #2e7d32; margin: 0 0 10px 0;">🔂 单分类模式（默认）</h5>
+        <h5 style="color: #2e7d32; margin: 0 0 10px 0;">→ 单分类模式（默认）</h5>
         <ul style="margin: 5px 0; padding-left: 20px;">
         <li>一张图片只能属于一个类别</li>
         <li>重新分类会自动从旧类别移动到新类别</li>
@@ -1016,10 +1016,10 @@ class TabbedHelpDialog(QDialog):
         </div>
         
         <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #2196f3;">
-        <h5 style="color: #1565c0; margin: 0 0 10px 0;">🔀 多分类模式（新功能）</h5>
+        <h5 style="color: #1565c0; margin: 0 0 10px 0;">⇶ 多分类模式（新功能）</h5>
         <ul style="margin: 5px 0; padding-left: 20px;">
         <li><b>灵活分类</b>：一张图片可以同时属于多个类别</li>
-        <li><b>切换方式</b>：点击工具栏"🔂 单分类模式"按钮切换</li>
+        <li><b>切换方式</b>：点击工具栏"→ 单分类模式"按钮切换</li>
         <li><b>分类操作</b>：点击类别按钮添加分类，再次点击取消分类</li>
         <li><b>视觉反馈</b>：多分类的类别按钮显示蓝色背景</li>
         <li><b>应用场景</b>：标签化管理，如"风景+日落"、"人物+室内"等</li>
@@ -1630,5 +1630,239 @@ class ProgressDialog(QDialog):
         else:
             # 正常情况下需要等待操作完成
             event.accept()
+
+
+class ManageIgnoredCategoriesDialog(QDialog):
+    """管理被忽略的类别对话框"""
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.parent_window = parent
+        self.restore_count = 0
+
+        self.setWindowTitle("⊘ 管理忽略的类别")
+        self.setModal(True)
+        self.setMinimumSize(500, 400)
+
+        # 使用统一样式
+        from .components.styles import DialogStyles
+        self.setStyleSheet(DialogStyles.get_form_dialog_style())
+
+        self.init_ui()
+        self.load_ignored_list()
+
+    def init_ui(self):
+        """初始化UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 标题说明
+        title_label = QLabel("当前已忽略的类别目录：")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                font-weight: bold;
+                color: #2C3E50;
+            }
+        """)
+        layout.addWidget(title_label)
+
+        # 列表容器
+        self.list_widget = QListWidget()
+        self.list_widget.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #BDC3C7;
+                border-radius: 4px;
+                background-color: #FFFFFF;
+                font-size: 13px;
+            }
+            QListWidget::item {
+                border-bottom: 1px solid #ECF0F1;
+            }
+            QListWidget::item:hover {
+                background-color: #F8F9FA;
+            }
+        """)
+        layout.addWidget(self.list_widget)
+
+        # 底部说明
+        info_label = QLabel("💡 提示：被忽略的目录不会被删除，只是不显示在类别列表中")
+        info_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #7F8C8D;
+                padding: 5px;
+                background-color: #F8F9FA;
+                border-radius: 4px;
+            }
+        """)
+        layout.addWidget(info_label)
+
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        # 批量恢复按钮
+        batch_restore_btn = QPushButton("批量恢复选中")
+        batch_restore_btn.clicked.connect(self.batch_restore)
+        batch_restore_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 13px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+            QPushButton:pressed {
+                background-color: #E65100;
+            }
+        """)
+        button_layout.addWidget(batch_restore_btn)
+
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close_dialog)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95A5A6;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 13px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #7F8C8D;
+            }
+            QPushButton:pressed {
+                background-color: #5D6D7E;
+            }
+        """)
+        button_layout.addWidget(close_btn)
+
+        layout.addLayout(button_layout)
+
+    def load_ignored_list(self):
+        """加载并显示忽略列表"""
+        self.list_widget.clear()
+
+        if not self.config.ignored_categories:
+            # 空状态提示
+            empty_item = QListWidgetItem("暂无被忽略的类别")
+            empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            empty_item.setForeground(Qt.GlobalColor.gray)
+            empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.list_widget.addItem(empty_item)
+            return
+
+        # 添加忽略的类别
+        for category_name in sorted(self.config.ignored_categories):
+            self.create_list_item(category_name)
+
+    def create_list_item(self, category_name):
+        """创建列表项（类别名 + 恢复按钮）"""
+        # 创建容器widget
+        item_widget = QWidget()
+        item_widget.setFixedHeight(45)  # 设置固定高度，确保按钮完整显示
+        item_layout = QHBoxLayout(item_widget)
+        item_layout.setContentsMargins(10, 6, 10, 6)
+        item_layout.setSpacing(10)
+
+        # 复选框
+        checkbox = QCheckBox(f"📁 {category_name}")
+        checkbox.setStyleSheet("""
+            QCheckBox {
+                font-size: 13px;
+                color: #2C3E50;
+            }
+        """)
+        item_layout.addWidget(checkbox)
+
+        item_layout.addStretch()
+
+        # 恢复按钮
+        restore_btn = QPushButton("恢复")
+        restore_btn.setFixedSize(60, 32)
+        restore_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #45A049;
+            }
+            QPushButton:pressed {
+                background-color: #3D8B40;
+            }
+        """)
+        restore_btn.clicked.connect(lambda: self.restore_category(category_name))
+        item_layout.addWidget(restore_btn)
+
+        # 添加到列表
+        list_item = QListWidgetItem(self.list_widget)
+        from PyQt6.QtCore import QSize
+        list_item.setSizeHint(QSize(0, 45))  # 设置列表项高度与widget一致
+        list_item.setData(Qt.ItemDataRole.UserRole, category_name)  # 存储类别名
+        self.list_widget.addItem(list_item)
+        self.list_widget.setItemWidget(list_item, item_widget)
+
+    def restore_category(self, category_name):
+        """恢复单个类别"""
+        try:
+            if self.config.remove_ignored_category(category_name):
+                self.config.save_config()
+                self.restore_count += 1
+                toast_success(self, f"已恢复类别: {category_name}")
+
+                # 刷新列表
+                self.load_ignored_list()
+            else:
+                toast_warning(self, f"类别 '{category_name}' 未被忽略")
+        except Exception as e:
+            toast_error(self, f"恢复失败: {str(e)}")
+
+    def batch_restore(self):
+        """批量恢复选中的类别"""
+        restored = []
+
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            widget = self.list_widget.itemWidget(item)
+
+            if widget:
+                # 查找复选框
+                checkbox = widget.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    category_name = item.data(Qt.ItemDataRole.UserRole)
+                    if category_name and self.config.remove_ignored_category(category_name):
+                        restored.append(category_name)
+
+        if restored:
+            self.config.save_config()
+            self.restore_count += len(restored)
+            toast_success(self, f"已恢复 {len(restored)} 个类别")
+            self.load_ignored_list()
+        else:
+            toast_info(self, "请先选择要恢复的类别")
+
+    def close_dialog(self):
+        """关闭对话框"""
+        # 如果有恢复操作，通知主窗口刷新
+        if self.restore_count > 0 and self.parent_window:
+            if hasattr(self.parent_window, 'load_categories'):
+                self.parent_window.load_categories()
+
+        self.accept()
 
 
