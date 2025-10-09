@@ -19,6 +19,7 @@ class Config:
         self.config_file = Path(base_dir) / 'config.json' if base_dir else None
         self.category_order = []
         self.category_shortcuts = {}
+        self.ignored_categories = []  # 被忽略的类别目录列表
         self._lock = threading.Lock()
         
         # 系统保留的快捷键和类别
@@ -124,6 +125,7 @@ class Config:
                 with self._lock:
                     self.category_order = config_data.get('category_order', [])
                     self.category_shortcuts = config_data.get('category_shortcuts', {})
+                    self.ignored_categories = config_data.get('ignored_categories', [])  # 忽略列表
                     # 自动更新相关配置（默认值）
                     self.auto_update_enabled = bool(config_data.get('auto_update_enabled', True))
                     self.last_update_check_ts = int(config_data.get('last_update_check_ts', 0))
@@ -151,6 +153,7 @@ class Config:
             config = {
                 'category_order': self.category_order,
                 'category_shortcuts': self.category_shortcuts,
+                'ignored_categories': getattr(self, 'ignored_categories', []),  # 保存忽略列表
                 'auto_update_enabled': getattr(self, 'auto_update_enabled', True),
                 'last_update_check_ts': getattr(self, 'last_update_check_ts', 0),
                 'update_endpoint': getattr(self, 'update_endpoint', f"https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"),
@@ -187,8 +190,29 @@ class Config:
             if len(shortcut) == 1 and shortcut.isalpha():
                 return (1, shortcut, category)  # 字母快捷键次之
             return (2, shortcut, category)  # 组合键放最后
-            
+
         return sorted(categories, key=get_shortcut_weight)
+
+    def add_ignored_category(self, category_name):
+        """添加类别到忽略列表"""
+        with self._lock:
+            if category_name not in self.ignored_categories:
+                self.ignored_categories.append(category_name)
+                return True
+            return False
+
+    def remove_ignored_category(self, category_name):
+        """从忽略列表移除类别"""
+        with self._lock:
+            if category_name in self.ignored_categories:
+                self.ignored_categories.remove(category_name)
+                return True
+            return False
+
+    def is_category_ignored(self, category_name):
+        """检查类别是否被忽略"""
+        with self._lock:
+            return category_name in self.ignored_categories
 
 
 class ConfigurationManager:

@@ -107,6 +107,17 @@ class CategoryButton(QPushButton):
 
             menu.addSeparator()
 
+            # 忽略类别（如果不是移除按钮）
+            if not self.is_remove:
+                ignore_action = menu.addAction("⊘ 忽略该类别")
+                ignore_action.triggered.connect(self.ignore_category)
+
+            # 管理忽略类别
+            manage_ignored_action = menu.addAction("⚙️ 管理忽略类别")
+            manage_ignored_action.triggered.connect(self.manage_ignored_categories)
+
+            menu.addSeparator()
+
             # 删除类别（如果不是移除按钮）
             if not self.is_remove:
                 delete_action = menu.addAction("🗑️ 删除类别")
@@ -210,6 +221,75 @@ class CategoryButton(QPushButton):
                 main_window.show_error_toast(f"修改快捷键失败: {e}")
             else:
                 toast_error(self, f"修改快捷键失败: {e}")
+
+    def manage_ignored_categories(self):
+        """管理忽略的类别列表"""
+        try:
+            main_window = self.window()
+            if main_window and hasattr(main_window, 'show_manage_ignored_dialog'):
+                main_window.show_manage_ignored_dialog()
+        except Exception as e:
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'show_error_toast'):
+                main_window = main_window.parent()
+            if main_window:
+                main_window.show_error_toast(f"打开管理对话框失败: {e}")
+            else:
+                toast_error(self, f"打开管理对话框失败: {e}")
+
+    def ignore_category(self):
+        """忽略类别"""
+        try:
+            # 创建自定义消息框
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("⊘ 确认忽略")
+            msg_box.setText(f"确定要忽略类别 '{self.category_name}' 吗？")
+            msg_box.setInformativeText("注意：忽略后该目录将不再显示在类别列表中，但目录和文件不会被删除！")
+            msg_box.setIcon(QMessageBox.Icon.Question)
+
+            # 创建中文按钮
+            yes_button = QPushButton("是")
+            no_button = QPushButton("否")
+
+            msg_box.addButton(yes_button, QMessageBox.ButtonRole.YesRole)
+            msg_box.addButton(no_button, QMessageBox.ButtonRole.NoRole)
+
+            # 设置默认按钮为"否"
+            msg_box.setDefaultButton(no_button)
+
+            # 使用统一的样式系统
+            message_box_style = f"""
+                QMessageBox {{
+                    background-color: #F8F9FA;
+                    color: #2C3E50;
+                }}
+                QMessageBox QLabel {{
+                    color: #2C3E50;
+                    font-size: 14px;
+                }}
+                {ButtonStyles.get_primary_button_style()}
+            """
+            msg_box.setStyleSheet(message_box_style)
+
+            # 显示对话框并处理结果
+            msg_box.exec()
+            clicked_button = msg_box.clickedButton()
+
+            if clicked_button == yes_button:
+                main_window = self.window()
+                if main_window and hasattr(main_window, 'ignore_category'):
+                    main_window.ignore_category(self.category_name)
+
+        except Exception as e:
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'show_error_toast'):
+                main_window = main_window.parent()
+            if main_window:
+                main_window.show_error_toast(f"忽略类别失败: {e}")
+            else:
+                toast_error(self, f"忽略类别失败: {e}")
 
     def delete_category(self):
         """删除类别"""

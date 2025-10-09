@@ -1086,8 +1086,11 @@ class ImageClassifier(QMainWindow):
                 if item.is_dir():
                     is_reserved = item.name in self.config.reserved_categories
                     is_current_dir = item == self.current_dir
-                    
-                    if not is_reserved and not is_current_dir:
+                    is_ignored = self.config.is_category_ignored(item.name)
+
+                    if is_ignored:
+                        self.logger.info(f"⊘ 忽略类别目录: {item.name}")
+                    elif not is_reserved and not is_current_dir:
                         self.categories.add(item.name)
                         self.logger.info(f"✅ 发现类别目录: {item.name}")
             
@@ -1714,10 +1717,10 @@ class ImageClassifier(QMainWindow):
             if hasattr(self, 'category_mode_button') and self.category_mode_button:
                 # 更新按钮图标和提示
                 if self.is_multi_category:
-                    self.category_mode_button.setText('⋮')  # Unicode多点符号表示多分类
+                    self.category_mode_button.setText('⇶')  # 多箭头表示多分类
                     self.category_mode_button.setToolTip('多分类模式 - 点击切换到单分类模式')
                 else:
-                    self.category_mode_button.setText('①')  # Unicode数字符号表示单分类
+                    self.category_mode_button.setText('→')  # 单箭头表示单分类
                     self.category_mode_button.setToolTip('单分类模式 - 点击切换到多分类模式')
 
                 mode_desc = "多分类" if self.is_multi_category else "单分类"
@@ -3447,7 +3450,7 @@ class ImageClassifier(QMainWindow):
     def create_category_mode_button(self, toolbar):
         """创建图标化的分类模式切换按钮 - 单分类/多分类"""
         # 使用统一样式创建按钮
-        self.category_mode_button = self.create_toolbar_button('①', 'category_mode_button',
+        self.category_mode_button = self.create_toolbar_button('→', 'category_mode_button',
                                                               '单分类模式 - 点击切换到多分类模式',
                                                               self.toggle_category_mode)
 
@@ -3884,6 +3887,70 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"重命名类别失败: {e}")
             toast_error(self,f"重命名失败: {str(e)}")
     
+    def ignore_category(self, category_name):
+        """忽略类别 - 不删除目录，只是不显示"""
+        try:
+            if not self.current_dir:
+                toast_error(self, "当前目录未设置")
+                return
+
+            # 添加到忽略列表
+            if self.config.add_ignored_category(category_name):
+                # 从快捷键配置中移除该类别
+                if category_name in self.config.category_shortcuts:
+                    del self.config.category_shortcuts[category_name]
+
+                # 从分类状态中移除相关记录（可选）
+                # 注意：这里不删除实际文件，只是清理内存中的分类记录
+                to_remove = []
+                for img_path, category in self.classified_images.items():
+                    # 处理单分类模式
+                    if isinstance(category, str) and category == category_name:
+                        to_remove.append(img_path)
+                    # 处理多分类模式
+                    elif isinstance(category, list) and category_name in category:
+                        # 从列表中移除该类别
+                        category.remove(category_name)
+                        # 如果列表为空，则完全移除该记录
+                        if not category:
+                            to_remove.append(img_path)
+
+                # 清除分类记录
+                for img_path in to_remove:
+                    del self.classified_images[img_path]
+
+                # 保存配置和状态
+                self.config.save_config()
+                self.save_state()
+
+                # 重新加载类别
+                self.load_categories()
+
+                # 刷新UI
+                self.schedule_ui_update('category_buttons', 'category_counts', 'image_list', 'statistics')
+
+                # 显示成功提示
+                toast_success(self, f"类别已忽略: {category_name}")
+                self.logger.info(f"类别已忽略: {category_name}")
+            else:
+                toast_warning(self, f"类别 '{category_name}' 已经在忽略列表中")
+
+        except Exception as e:
+            self.logger.error(f"忽略类别失败: {e}", exc_info=True)
+            toast_error(self, f"忽略类别失败: {str(e)}")
+
+    def show_manage_ignored_dialog(self):
+        """显示管理忽略列表对话框"""
+        try:
+            from .dialogs import ManageIgnoredCategoriesDialog
+
+            dialog = ManageIgnoredCategoriesDialog(self.config, self)
+            dialog.exec()
+
+        except Exception as e:
+            self.logger.error(f"显示管理忽略对话框失败: {e}", exc_info=True)
+            toast_error(self, f"显示对话框失败: {str(e)}")
+
     def delete_category(self, category_name):
         """删除类别 - 带二次确认"""
         try:
