@@ -1214,10 +1214,14 @@ class ImageClassifier(QMainWindow):
         """开始智能加载目录下的图片"""
         if not self.current_dir:
             return
-            
+
         # 清理图片缓存
         self.image_loader.clear_cache()
-        
+
+        # 清空分类状态缓存（关键修复：重新加载目录时清除内存中的旧状态）
+        self.classified_images = {}
+        self.removed_images = set()
+
         # 重置状态
         self.all_image_files = []
         self.image_files = []
@@ -1226,10 +1230,10 @@ class ImageClassifier(QMainWindow):
         self.loading_in_progress = True
         self.initial_batch_loaded = False
         self.background_loading = False
-        
+
         # 显示加载提示
         self.statusBar.showMessage("🔍 正在后台扫描图片文件...")
-        
+
         # 启动智能文件扫描
         self.file_scanner.scan_directory(self.current_dir)
     
@@ -1279,10 +1283,13 @@ class ImageClassifier(QMainWindow):
         """延迟加载状态文件，避免阻塞UI"""
         try:
             self.load_state()
-            
+
             # 检查并修复当前列表中的重复文件
             self._remove_duplicates_from_current_list()
-            
+
+            # 移动模式下，补充已分类和已移除的图片到列表
+            self._supplement_moved_files_to_list()
+
             # 状态加载完成后，更新UI显示（不包括current_image，避免重复刷新）
             self.schedule_ui_update('image_list', 'statistics')
             self.logger.debug("状态文件异步加载完成")
@@ -1317,7 +1324,69 @@ class ImageClassifier(QMainWindow):
             removed_count = original_count - len(unique_files)
             self.logger.info(f"[去重修复] 移除了 {removed_count} 个重复文件，剩余 {len(unique_files)} 个文件")
             self.statusBar.showMessage(f"✅ 已修复重复文件问题，移除 {removed_count} 个重复项")
-    
+
+    def _supplement_moved_files_to_list(self):
+        """移动模式下，补充已分类和已移除的图片到列表"""
+        if not self.image_files:
+            return
+
+        # 复制模式下不需要补充，因为文件本来就在原目录
+        if self.is_copy_mode:
+            return
+
+        # 收集当前列表中已有的路径
+        existing_paths = {str(f) for f in self.image_files}
+        added_files = []
+
+        # 补充已分类的图片
+        for img_path in self.classified_images.keys():
+            if img_path not in existing_paths:
+                # 验证文件实际存在
+                real_path = self.get_real_file_path(img_path)
+                if real_path.exists():
+                    added_files.append(Path(img_path))
+                    self.logger.debug(f"补充已分类图片到列表: {Path(img_path).name}")
+
+        # 补充已移除的图片
+        for img_path in self.removed_images:
+            if img_path not in existing_paths:
+                # 验证文件实际存在
+                real_path = self.get_real_file_path(img_path)
+                if real_path.exists():
+                    added_files.append(Path(img_path))
+                    self.logger.debug(f"补充已移除图片到列表: {Path(img_path).name}")
+
+        # 将补充的文件添加到列表
+        if added_files:
+            # 保存当前查看的图片路径（如果有）
+            current_image_path = None
+            if self.image_files and 0 <= self.current_index < len(self.image_files):
+                current_image_path = str(self.image_files[self.current_index])
+
+            self.image_files.extend(added_files)
+            self.all_image_files.extend(added_files)
+
+            # 补充后重新排序，保持文件的自然顺序（按文件名）
+            self.image_files.sort(key=lambda p: p.name.lower())
+            self.all_image_files.sort(key=lambda p: p.name.lower())
+
+            self.total_images = len(self.image_files)
+
+            # 如果之前在查看某张图片，重新定位到该图片
+            if current_image_path:
+                try:
+                    self.current_index = next(i for i, p in enumerate(self.image_files) if str(p) == current_image_path)
+                    self.logger.debug(f"排序后重新定位到图片: {Path(current_image_path).name}，新索引: {self.current_index}")
+                except StopIteration:
+                    # 如果找不到原图片，保持索引不变或重置为0
+                    if self.current_index >= len(self.image_files):
+                        self.current_index = 0
+
+            # 更新图片加载器的文件列表引用
+            self.image_loader.set_image_files_reference(self.image_files)
+
+            self.logger.info(f"[移动模式补充] 添加了 {len(added_files)} 个已移动的图片到列表，总计 {self.total_images} 个文件（已重新排序）")
+
     def on_files_found(self, file_batch):
         """处理后续发现的文件批次"""
         if not self.background_loading:
@@ -1370,26 +1439,36 @@ class ImageClassifier(QMainWindow):
         
         # 最终更新图片加载器的文件列表引用
         self.image_loader.set_image_files_reference(self.image_files)
-        
+
+        # 移动模式下，补充已分类和已移除的图片到列表
+        self._supplement_moved_files_to_list()
+
+        # 更新实际总数（可能在补充后增加）
+        actual_count = len(self.image_files)
+        self.total_images = actual_count
+
+        # 补充后再次更新图片加载器的文件列表引用
+        self.image_loader.set_image_files_reference(self.image_files)
+
         # 延迟启动同步操作
         if hasattr(self, 'categories') and self.categories:
             QTimer.singleShot(2000, lambda: self._delayed_start_sync())
-            
+
         self.update_category_counts()
-        
+
         # 重新更新UI以显示完整列表
         self.schedule_ui_update('image_list', 'statistics')
-        
+
         # 静默完成通知
         path_str = str(self.current_dir) if self.current_dir else ""
         is_network_path = path_str.startswith('\\\\')
         location_type = "网络路径" if is_network_path else "本地路径"
-        
+
         self.statusBar.showMessage(f"🎯 {location_type}扫描完成，总计 {actual_count} 张图片")
-        
+
         # 强制更新UI列表
         self.schedule_ui_update('image_list', 'statistics')
-        
+
         self.logger.info(f"🎯 后台扫描完成: 实际文件 {actual_count} 个")
 
     def on_scan_progress(self, message):
@@ -1756,7 +1835,38 @@ class ImageClassifier(QMainWindow):
         self.schedule_ui_update('category_buttons')
     
     # ===== 图片显示和导航方法 =====
-    
+
+    def get_real_file_path(self, original_path: str) -> Path:
+        """
+        根据操作模式和分类状态计算文件的实际路径
+
+        Args:
+            original_path: JSON中存储的原始路径
+
+        Returns:
+            文件的实际路径
+        """
+        original_file = Path(original_path)
+
+        # 复制模式：文件始终在原目录（包括多分类模式）
+        if self.is_copy_mode:
+            return original_file
+
+        # 移动模式：检查分类状态
+        # 已移除：文件在 remove 目录
+        if original_path in self.removed_images:
+            remove_dir = self.current_dir.parent / 'remove'
+            return remove_dir / original_file.name
+
+        # 已分类：文件在分类目录
+        if original_path in self.classified_images:
+            category = self.classified_images[original_path]
+            category_dir = self.current_dir.parent / category
+            return category_dir / original_file.name
+
+        # 未分类：文件在原目录
+        return original_file
+
     @performance_monitor
     def show_current_image(self):
         """显示当前图片 - 防止多图刷新"""
@@ -1778,30 +1888,33 @@ class ImageClassifier(QMainWindow):
         """内部显示当前图片方法 - 优化防止多图刷新"""
         if 0 <= self.current_index < len(self.image_files):
             img_path = str(self.image_files[self.current_index])
-            
-            # 记录图片文件信息
-            self.log_image_info(img_path)
-            
+
+            # 计算文件的实际路径（根据操作模式和分类状态）
+            real_path = str(self.get_real_file_path(img_path))
+
+            # 记录图片文件信息（使用真实路径）
+            self.log_image_info(real_path)
+
             # 立即更新窗口标题和状态信息
             self.update_window_title(img_path)
-            
+
             # 设置当前图片索引用于智能缓存
             self.image_loader.set_current_image_index(self.current_index)
-            
-            # 检查缓存命中情况
-            cache_key = self.image_loader._get_cache_key(img_path)
+
+            # 检查缓存命中情况（使用真实路径）
+            cache_key = self.image_loader._get_cache_key(real_path)
             is_cached = cache_key in self.image_loader.cache
-            
+
             self.log_performance_info(
                 "显示图片_开始",
                 文件=Path(img_path).name,
                 索引=f"{self.current_index + 1}/{len(self.image_files)}",
                 缓存命中=is_cached
             )
-            
+
             # 检查当前图片的分类状态并更新类别选择
             self.update_category_selection_for_current_image(img_path)
-            
+
             # 如果缓存命中，直接显示；否则显示占位符
             if is_cached:
                 # 直接从缓存加载，避免闪烁
@@ -1819,9 +1932,9 @@ class ImageClassifier(QMainWindow):
                     self.show_loading_placeholder(img_path)
             else:
                 self.show_loading_placeholder(img_path)
-            
-            # 异步加载完整图片（即使缓存命中也要确保是最新的）
-            self.image_loader.load_image(img_path, priority=True)
+
+            # 异步加载完整图片（使用真实路径）
+            self.image_loader.load_image(real_path, priority=True)
             
             # 延迟预加载相邻图片，避免影响当前图片显示
             is_network_current = self._is_network_path(img_path)
@@ -1976,17 +2089,19 @@ class ImageClassifier(QMainWindow):
         """预加载相邻图片"""
         if not self.image_files or self.current_index < 0:
             return
-        
+
         # 计算预加载范围
         preload_range = 5  # 前后各5张图片
         start_idx = max(0, self.current_index - preload_range)
         end_idx = min(len(self.image_files), self.current_index + preload_range + 1)
-        
+
         # 预加载指定范围内的图片
         for i in range(start_idx, end_idx):
             if i != self.current_index:  # 跳过当前图片
                 img_path = str(self.image_files[i])
-                self.image_loader.load_image(img_path, priority=False)
+                # 计算文件的实际路径（根据操作模式和分类状态）
+                real_path = str(self.get_real_file_path(img_path))
+                self.image_loader.load_image(real_path, priority=False)
     
     def log_image_info(self, image_path, pixmap=None):
         """记录图片详细信息"""
@@ -2151,8 +2266,10 @@ class ImageClassifier(QMainWindow):
         """移动当前图片到指定类别 - 支持重新分类和多分类"""
         if not self.image_files or self.current_index < 0:
             return
-            
+
         current_path = str(self.image_files[self.current_index])
+        # 计算文件的实际路径（根据操作模式和分类状态）
+        real_path = str(self.get_real_file_path(current_path))
         old_category = self.classified_images.get(current_path)
         
         # 检查是否从移除状态恢复
@@ -2179,8 +2296,8 @@ class ImageClassifier(QMainWindow):
                 
                 # 在复制模式下，需要删除已复制的文件
                 if self.is_copy_mode:
-                    self._remove_copied_file_from_category(current_path, category_name)
-                
+                    self._remove_copied_file_from_category(real_path, category_name)
+
                 # 如果列表为空，则完全移除分类记录
                 if not old_category:
                     del self.classified_images[current_path]
@@ -2189,19 +2306,19 @@ class ImageClassifier(QMainWindow):
                 # 添加新类别到列表
                 old_category.append(category_name)
                 self.logger.info(f"多分类模式: 添加 {Path(current_path).name} 到 {category_name}")
-                
+
                 # 在物理文件系统中执行操作
                 if was_removed:
-                    self._move_from_remove_to_category(current_path, category_name)
+                    self._move_from_remove_to_category(real_path, category_name)
                 else:
                     # 无论内存状态如何，都检查目标文件是否存在
-                    self._execute_file_operation_with_check(current_path, category_name, is_remove=False)
+                    self._execute_file_operation_with_check(real_path, category_name, is_remove=False)
         else:
             # 单分类模式 - 支持撤销分类
             # 检查是否要撤销分类（再次点击同一类别）
             if old_category and old_category == category_name:
                 # 撤销分类：移除分类记录，将文件移回原目录
-                self._undo_classification(current_path, old_category)
+                self._undo_classification(real_path, old_category)
                 return
             # 如果是重新分类，需要从旧目录移动到新目录
             elif old_category and old_category != category_name:
@@ -2216,15 +2333,15 @@ class ImageClassifier(QMainWindow):
                 else:
                     self.logger.info(f"重新分类: {Path(current_path).name} 从 {old_category} 到 {category_name}")
                     # 无论复制模式还是移动模式，重新分类都要从旧目录移动到新目录
-                    self._move_between_categories(current_path, old_category, category_name)
+                    self._move_between_categories(real_path, old_category, category_name)
             elif was_removed:
                 # 从移除状态恢复：从remove目录移动到分类目录
                 self.logger.info(f"从移除状态恢复: {Path(current_path).name} 恢复到 {category_name}")
-                self._move_from_remove_to_category(current_path, category_name)
+                self._move_from_remove_to_category(real_path, category_name)
             else:
                 # 首次分类：从原目录复制/移动到分类目录
                 # 无论内存状态如何，都检查目标文件是否存在
-                self._execute_file_operation_with_check(current_path, category_name, is_remove=False)
+                self._execute_file_operation_with_check(real_path, category_name, is_remove=False)
             
             # 单分类模式下，直接更新为新类别
             self.classified_images[current_path] = category_name
@@ -2352,11 +2469,13 @@ class ImageClassifier(QMainWindow):
             return
 
         current_path = str(self.image_files[self.current_index])
+        # 计算文件的实际路径（根据操作模式和分类状态）
+        real_path = str(self.get_real_file_path(current_path))
 
         # 检查是否要撤销删除（图片已在remove状态）
         if current_path in self.removed_images:
             # 撤销删除：从remove目录恢复图片
-            self._undo_removal(current_path)
+            self._undo_removal(real_path)
             return
 
         old_category = self.classified_images.get(current_path)
@@ -2372,20 +2491,20 @@ class ImageClassifier(QMainWindow):
         # 从分类记录中移除
         if current_path in self.classified_images:
             del self.classified_images[current_path]
-        
+
         # 如果图片已分类，需要从分类目录移动到remove目录
         if old_category:
             # 多分类模式 - 图片可能有多个类别
             if isinstance(old_category, list) and old_category:
                 # 对于多分类图片，选择第一个类别作为源目录
-                self._move_from_category_to_remove(current_path, old_category[0])
+                self._move_from_category_to_remove(real_path, old_category[0])
                 self.logger.info(f"多分类图片已移除: {Path(current_path).name} 从 {old_category[0]} 目录")
             else:
                 # 单分类模式
-                self._move_from_category_to_remove(current_path, old_category)
+                self._move_from_category_to_remove(real_path, old_category)
         else:
             # 如果图片未分类，直接从原目录移动到remove目录
-            self._execute_file_operation(current_path, 'remove', is_remove=True)
+            self._execute_file_operation(real_path, 'remove', is_remove=True)
         
         # 立即保存状态到文件
         self.save_state()
@@ -2450,8 +2569,10 @@ class ImageClassifier(QMainWindow):
             if image_path in self.classified_images:
                 del self.classified_images[image_path]
 
+            # 立即同步保存状态（撤销操作必须立即生效）
+            self._save_state_sync()
+
             # 更新UI和状态
-            self.save_state()
             self._update_single_image_status(self.current_index, image_path)
             QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
 
@@ -2506,8 +2627,10 @@ class ImageClassifier(QMainWindow):
             # 清除删除记录
             self.removed_images.discard(image_path)
 
+            # 立即同步保存状态（撤销操作必须立即生效）
+            self._save_state_sync()
+
             # 更新UI和状态
-            self.save_state()
             self._update_single_image_status(self.current_index, image_path)
             QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
 
@@ -3513,7 +3636,11 @@ class ImageClassifier(QMainWindow):
             # 关键修复：只有当前选中的图片才显示，其他都是预加载缓存
             if self.image_files and 0 <= self.current_index < len(self.image_files):
                 current_path = str(self.image_files[self.current_index])
-                if current_path != image_path:
+                # 计算当前图片的实际路径（移动模式下可能在分类目录）
+                current_real_path = str(self.get_real_file_path(current_path))
+
+                # 比较实际路径而不是原始路径
+                if current_real_path != image_path:
                     # 不是当前图片，只是预加载缓存，不显示UI
                     self.logger.debug(f"预加载完成(不显示): {Path(image_path).name}")
                     return
