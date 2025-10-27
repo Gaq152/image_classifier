@@ -294,6 +294,13 @@ DOWNLOAD_INFO = {
     "package_registry_base": "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier"
 }
 
+# 联系信息
+CONTACT_INFO = {
+    "support_email": "gonganqi@gddi.com.cn",
+    "company": "GDDI",
+    "copyright_year": "2025"
+}
+
 # ================================
 # 🎯 帮助和About信息
 # ================================

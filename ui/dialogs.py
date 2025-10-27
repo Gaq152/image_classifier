@@ -12,16 +12,16 @@ import shutil
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, unquote
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-                            QPushButton, QTextEdit, QListWidget, QListWidgetItem, 
-                            QMessageBox, QTabWidget, QProgressBar, QApplication, 
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                            QPushButton, QTextEdit, QListWidget, QListWidgetItem,
+                            QMessageBox, QTabWidget, QProgressBar, QApplication,
                             QWidget, QTextBrowser,QCheckBox)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QKeySequence,QIcon
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl
+from PyQt6.QtGui import QKeySequence,QIcon, QDesktopServices
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from .._version_ import compare_version, __version__
 from ..utils.exceptions import FileOperationError
-from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url
+from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 
@@ -526,21 +526,19 @@ class TabbedHelpDialog(QDialog):
             
             layout.addWidget(tab_widget)
             
-            # 添加关闭按钮
+            # 添加底部按钮
             button_layout = QHBoxLayout()
-            
+
             # 添加清理SMB缓存按钮
             clear_cache_btn = QPushButton('🗑️ 清理SMB缓存')
             clear_cache_btn.setObjectName("clearCacheBtn")
             clear_cache_btn.clicked.connect(self.clear_smb_cache)
             button_layout.addWidget(clear_cache_btn)
-            
+
             button_layout.addStretch()
-            
-            close_btn = QPushButton('✖️ 关闭')
-            close_btn.clicked.connect(self.accept)
-            button_layout.addWidget(close_btn)
-            
+
+            # 移除关闭按钮，窗口自带关闭按钮已足够
+
             layout.addLayout(button_layout)
             
         except Exception as e:
@@ -712,7 +710,27 @@ class TabbedHelpDialog(QDialog):
         except Exception as e:
             self.logger.error(f"清理SMB缓存失败: {e}")
             toast_error(self, f'清理SMB缓存失败: {e}')
-    
+
+    def _handle_link_click(self, url):
+        """处理链接点击事件"""
+        try:
+            url_str = url.toString()
+
+            # 处理复制邮箱地址的链接
+            if url_str.startswith('copy://'):
+                email = url_str.replace('copy://', '')
+                # 复制到剪贴板
+                clipboard = QApplication.clipboard()
+                clipboard.setText(email)
+                toast_success(self, f'邮箱地址已复制: {email}')
+                self.logger.info(f"复制邮箱地址到剪贴板: {email}")
+            else:
+                # 其他链接使用默认浏览器打开
+                QDesktopServices.openUrl(url)
+        except Exception as e:
+            self.logger.error(f"处理链接点击失败: {e}")
+            toast_error(self, f'操作失败: {e}')
+
     def _show_styled_message(self, msg_type, title, text):
         """显示样式化的消息框"""     
         msgBox = QMessageBox(self)
@@ -1225,8 +1243,8 @@ class TabbedHelpDialog(QDialog):
         layout = QVBoxLayout(widget)
         
         text_browser = QTextBrowser()
-        
-        faq_text = '''
+
+        faq_text = f'''
         <h2>❓ 常见问题解答</h2>
         
 
@@ -1305,13 +1323,17 @@ class TabbedHelpDialog(QDialog):
         </ol>
         
         <h4>📞 获取帮助</h4>
-        <p>如果问题仍未解决，请将错误日志和操作步骤通过以下方式反馈：<br>
-        • 创建 GitHub Issue 描述问题<br>
-        • 发送错误日志到开发者邮箱<br>
-        • 在用户社区寻求帮助</p>
+        <p>如果问题仍未解决，请将错误日志和操作步骤反馈给我们：</p>
+        <p style="background-color: #e3f2fd; padding: 12px; border-radius: 6px; border-left: 4px solid #2196f3;">
+        📧 <b>问题反馈邮箱：</b><br>
+        <a href="copy://{CONTACT_INFO['support_email']}" style="color: #2196f3; text-decoration: none; font-size: 15px; font-weight: bold; cursor: pointer;">
+        {CONTACT_INFO['support_email']}
+        </a>
+        <span style="color: #666; font-size: 13px; margin-left: 10px;">（点击复制邮箱地址）</span>
+        </p>
         </div>
         '''
-        
+
         # 设置样式确保文本颜色对比度
         text_browser.setStyleSheet("""
             QTextBrowser {
@@ -1320,8 +1342,20 @@ class TabbedHelpDialog(QDialog):
                 selection-background-color: #0078d4;
                 selection-color: white;
             }
+            a {
+                color: #2196f3;
+                text-decoration: underline;
+            }
+            a:hover {
+                color: #1976d2;
+                background-color: #e3f2fd;
+            }
         """)
-        
+
+        # 连接链接点击事件
+        text_browser.setOpenLinks(False)  # 禁用默认的链接打开行为
+        text_browser.anchorClicked.connect(self._handle_link_click)
+
         text_browser.setHtml(faq_text)
         layout.addWidget(text_browser)
         
