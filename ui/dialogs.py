@@ -111,39 +111,54 @@ class AnimatedToggle(QWidget):
 
 class CategoryShortcutDialog(QDialog):
     """类别快捷键设置对话框"""
-    
+
     def __init__(self, config, category, parent=None):
         super().__init__(parent)
         self.config = config
         self.category = category
         self.logger = logging.getLogger(__name__)
-        
+
         self.setWindowTitle(f'设置类别"{category}"的快捷键')
         self.setModal(True)
-        
+
+        # 应用主题样式
+        from .components.styles import DialogStyles
+        from .components.styles.theme import default_theme
+        c = default_theme.colors
+        self.setStyleSheet(DialogStyles.get_form_dialog_style())
+
         layout = QVBoxLayout(self)
-        
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
         # 创建快捷键编辑区域
         row = QHBoxLayout()
         label = QLabel('快捷键:')
+        label.setStyleSheet(f"QLabel {{ color: {c.TEXT_PRIMARY}; }}")
         self.edit = QLineEdit(self.config.category_shortcuts.get(category, ''))
         self.edit.setReadOnly(True)
         self.edit.setPlaceholderText('点击此处按下新的快捷键')
         row.addWidget(label)
         row.addWidget(self.edit)
         layout.addLayout(row)
-        
+
         # 添加说明标签
         tip_label = QLabel('支持单个按键或组合键(Ctrl+, Alt+, Shift+)\n按ESC清除快捷键')
-        tip_label.setStyleSheet('color: gray;')
+        tip_label.setStyleSheet(f"QLabel {{ color: {c.TEXT_SECONDARY}; }}")
         layout.addWidget(tip_label)
-        
+
         # 添加确定和取消按钮
         buttons = QHBoxLayout()
         ok_btn = QPushButton('确定')
         cancel_btn = QPushButton('取消')
         ok_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
+
+        # 应用按钮样式
+        from .components.styles import ButtonStyles
+        ok_btn.setStyleSheet(ButtonStyles.get_primary_button_style())
+        cancel_btn.setStyleSheet(ButtonStyles.get_secondary_button_style(""))
+
         buttons.addWidget(ok_btn)
         buttons.addWidget(cancel_btn)
         layout.addLayout(buttons)
@@ -258,46 +273,104 @@ class AddCategoriesDialog(QDialog):
     def initUI(self):
         """初始化UI"""
         try:
+            # 应用主题样式
+            from .components.styles import DialogStyles, ButtonStyles
+            from .components.styles.theme import default_theme
+            c = default_theme.colors
+            self.setStyleSheet(DialogStyles.get_form_dialog_style())
+
             self.setWindowTitle('批量添加类别')
             self.setMinimumWidth(400)
             layout = QVBoxLayout(self)
-            
+            layout.setContentsMargins(20, 20, 20, 20)
+            layout.setSpacing(15)
+
             # 添加说明标签
             tip_label = QLabel('请输入类别名称，多个类别用逗号或换行分隔\n已存在的类别会被自动忽略')
-            tip_label.setStyleSheet('color: gray;')
+            tip_label.setStyleSheet(f'QLabel {{ color: {c.TEXT_SECONDARY}; }}')
             layout.addWidget(tip_label)
-            
+
             # 添加文本编辑框
             self.edit = QTextEdit()
             self.edit.setPlaceholderText('例如: 类别1, 类别2\n类别3\n类别4')
             self.edit.setMinimumHeight(100)
+            self.edit.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color: {c.BACKGROUND_SECONDARY};
+                    color: {c.TEXT_PRIMARY};
+                    border: 1px solid {c.BORDER_MEDIUM};
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 13px;
+                }}
+            """)
             layout.addWidget(self.edit)
-            
+
             # 添加预览区域
             preview_group = QWidget()
             preview_layout = QVBoxLayout(preview_group)
-            preview_layout.addWidget(QLabel('预览:'))
+            preview_label = QLabel('预览:')
+            preview_label.setStyleSheet(f'QLabel {{ color: {c.TEXT_PRIMARY}; font-weight: bold; }}')
+            preview_layout.addWidget(preview_label)
             self.preview_list = QListWidget()
             self.preview_list.setMaximumHeight(150)
+            self.preview_list.setStyleSheet(f"""
+                QListWidget {{
+                    background-color: {c.BACKGROUND_SECONDARY};
+                    color: {c.TEXT_PRIMARY};
+                    border: 1px solid {c.BORDER_MEDIUM};
+                    border-radius: 4px;
+                    padding: 4px;
+                }}
+                QListWidget::item {{
+                    padding: 4px 8px;
+                    border-radius: 3px;
+                }}
+                QListWidget::item:hover {{
+                    background-color: {c.BACKGROUND_HOVER};
+                }}
+            """)
             preview_layout.addWidget(self.preview_list)
             layout.addWidget(preview_group)
-            
+
             # 添加按钮
             btn_layout = QHBoxLayout()
             add_btn = QPushButton('添加')
             add_btn.clicked.connect(self.add_categories)
+            add_btn.setStyleSheet(ButtonStyles.get_primary_button_style())
+
             continue_btn = QPushButton('添加并继续')
             continue_btn.clicked.connect(self.add_and_continue)
+            continue_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c.SUCCESS};
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-size: 13px;
+                    font-weight: 500;
+                }}
+                QPushButton:hover {{
+                    background-color: {c.SUCCESS_DARK};
+                }}
+                QPushButton:pressed {{
+                    background-color: {c.SUCCESS_DARK};
+                }}
+            """)
+
             cancel_btn = QPushButton('取消')
             cancel_btn.clicked.connect(self.reject)
+            cancel_btn.setStyleSheet(ButtonStyles.get_secondary_button_style(""))
+
             btn_layout.addWidget(add_btn)
             btn_layout.addWidget(continue_btn)
             btn_layout.addWidget(cancel_btn)
             layout.addLayout(btn_layout)
-            
+
             # 连接文本变化信号
             self.edit.textChanged.connect(self.update_preview)
-            
+
         except Exception as e:
             self.logger.error(f"初始化添加类别对话框UI失败: {e}")
         
@@ -1824,23 +1897,31 @@ class ProgressDialog(QDialog):
         self.cancelled_flag = False
         self._force_closed = False  # 添加强制关闭标志
         self.logger = logging.getLogger(__name__)
-        
+
+        # 应用主题样式
+        from .components.styles import DialogStyles
+        from .components.styles.theme import default_theme
+        c = default_theme.colors
+
         layout = QVBoxLayout(self)
-        
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
         # 主要进度信息
         self.main_label = QLabel("正在处理...")
+        self.main_label.setStyleSheet(f"QLabel {{ color: {c.TEXT_PRIMARY}; font-weight: bold; }}")
         layout.addWidget(self.main_label)
-        
+
         # 进度条
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         layout.addWidget(self.progress_bar)
-        
+
         # 详细信息
         self.detail_label = QLabel("")
-        self.detail_label.setStyleSheet("color: gray; font-size: 11px;")
+        self.detail_label.setStyleSheet(f"QLabel {{ color: {c.TEXT_SECONDARY}; font-size: 11px; }}")
         layout.addWidget(self.detail_label)
-        
+
         # 取消按钮
         button_layout = QHBoxLayout()
         self.cancel_button = QPushButton("取消")
@@ -1848,40 +1929,39 @@ class ProgressDialog(QDialog):
         button_layout.addStretch()
         button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
-        
+
         # 设置样式
-        self.setStyleSheet("""
-            QDialog {
-                background-color: white;
-            }
-            QLabel {
+        self.setStyleSheet(f"""
+            {DialogStyles.get_base_dialog_style()}
+            QLabel {{
                 padding: 4px;
-            }
-            QProgressBar {
+            }}
+            QProgressBar {{
                 text-align: center;
                 min-height: 20px;
-                border: 1px solid #6C757D;
+                border: 1px solid {c.BORDER_MEDIUM};
                 border-radius: 10px;
-                background-color: #E9ECEF;
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_PRIMARY};
                 font-size: 11px;
                 font-weight: bold;
-            }
-            QProgressBar::chunk {
+            }}
+            QProgressBar::chunk {{
                 background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #28A745, stop: 1 #20C997);
+                    stop: 0 {c.SUCCESS}, stop: 1 {c.SUCCESS_DARK});
                 border-radius: 8px;
                 margin: 1px;
-            }
-            QPushButton {
+            }}
+            QPushButton {{
                 padding: 6px 20px;
-                background-color: #dc3545;
+                background-color: {c.ERROR};
                 color: white;
                 border: none;
                 border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {c.ERROR_DARK};
+            }}
         """)
         
     def update_progress(self, value, maximum=100):
@@ -1956,49 +2036,53 @@ class ManageIgnoredCategoriesDialog(QDialog):
 
     def init_ui(self):
         """初始化UI"""
+        from .components.styles.theme import default_theme
+        c = default_theme.colors
+
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
 
         # 标题说明
         title_label = QLabel("当前已忽略的类别目录：")
-        title_label.setStyleSheet("""
-            QLabel {
+        title_label.setStyleSheet(f"""
+            QLabel {{
                 font-size: 14px;
                 font-weight: bold;
-                color: #2C3E50;
-            }
+                color: {c.TEXT_PRIMARY};
+            }}
         """)
         layout.addWidget(title_label)
 
         # 列表容器
         self.list_widget = QListWidget()
-        self.list_widget.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #BDC3C7;
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
+                border: 1px solid {c.BORDER_MEDIUM};
                 border-radius: 4px;
-                background-color: #FFFFFF;
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_PRIMARY};
                 font-size: 13px;
-            }
-            QListWidget::item {
-                border-bottom: 1px solid #ECF0F1;
-            }
-            QListWidget::item:hover {
-                background-color: #F8F9FA;
-            }
+            }}
+            QListWidget::item {{
+                border-bottom: 1px solid {c.BORDER_LIGHT};
+            }}
+            QListWidget::item:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+            }}
         """)
         layout.addWidget(self.list_widget)
 
         # 底部说明
         info_label = QLabel("💡 提示：被忽略的目录不会被删除，只是不显示在类别列表中")
-        info_label.setStyleSheet("""
-            QLabel {
+        info_label.setStyleSheet(f"""
+            QLabel {{
                 font-size: 12px;
-                color: #7F8C8D;
+                color: {c.TEXT_SECONDARY};
                 padding: 5px;
-                background-color: #F8F9FA;
+                background-color: {c.BACKGROUND_HOVER};
                 border-radius: 4px;
-            }
+            }}
         """)
         layout.addWidget(info_label)
 
@@ -2009,44 +2093,44 @@ class ManageIgnoredCategoriesDialog(QDialog):
         # 批量恢复按钮
         batch_restore_btn = QPushButton("批量恢复选中")
         batch_restore_btn.clicked.connect(self.batch_restore)
-        batch_restore_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
+        batch_restore_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.WARNING};
                 color: white;
                 border: none;
                 border-radius: 4px;
                 padding: 8px 16px;
                 font-size: 13px;
                 min-width: 100px;
-            }
-            QPushButton:hover {
-                background-color: #F57C00;
-            }
-            QPushButton:pressed {
-                background-color: #E65100;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {c.WARNING_DARK};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.WARNING_DARK};
+            }}
         """)
         button_layout.addWidget(batch_restore_btn)
 
         # 关闭按钮
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.close_dialog)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95A5A6;
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.GRAY_500};
                 color: white;
                 border: none;
                 border-radius: 4px;
                 padding: 8px 16px;
                 font-size: 13px;
                 min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #7F8C8D;
-            }
-            QPushButton:pressed {
-                background-color: #5D6D7E;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {c.GRAY_600};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.GRAY_700};
+            }}
         """)
         button_layout.addWidget(close_btn)
 
@@ -2071,6 +2155,9 @@ class ManageIgnoredCategoriesDialog(QDialog):
 
     def create_list_item(self, category_name):
         """创建列表项（类别名 + 恢复按钮）"""
+        from .components.styles.theme import default_theme
+        c = default_theme.colors
+
         # 创建容器widget
         item_widget = QWidget()
         item_widget.setFixedHeight(45)  # 设置固定高度，确保按钮完整显示
@@ -2080,11 +2167,11 @@ class ManageIgnoredCategoriesDialog(QDialog):
 
         # 复选框
         checkbox = QCheckBox(f"📁 {category_name}")
-        checkbox.setStyleSheet("""
-            QCheckBox {
+        checkbox.setStyleSheet(f"""
+            QCheckBox {{
                 font-size: 13px;
-                color: #2C3E50;
-            }
+                color: {c.TEXT_PRIMARY};
+            }}
         """)
         item_layout.addWidget(checkbox)
 
@@ -2093,20 +2180,20 @@ class ManageIgnoredCategoriesDialog(QDialog):
         # 恢复按钮
         restore_btn = QPushButton("恢复")
         restore_btn.setFixedSize(60, 32)
-        restore_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
+        restore_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.SUCCESS};
                 color: white;
                 border: none;
                 border-radius: 3px;
                 font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #45A049;
-            }
-            QPushButton:pressed {
-                background-color: #3D8B40;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {c.SUCCESS_DARK};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.SUCCESS_DARK};
+            }}
         """)
         restore_btn.clicked.connect(lambda: self.restore_category(category_name))
         item_layout.addWidget(restore_btn)

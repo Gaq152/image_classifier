@@ -18,11 +18,11 @@ import subprocess
 from pathlib import Path
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
-from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
-                            QSplitter, QLabel, QScrollArea, QStatusBar, QToolBar 
-                            , QSizePolicy, QFileDialog, 
+from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
+                            QSplitter, QLabel, QScrollArea, QStatusBar, QToolBar
+                            , QSizePolicy, QFileDialog,
                             QMessageBox, QApplication, QListWidget,
-                            QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox)
+                            QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage
 from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
@@ -787,15 +787,18 @@ class ImageClassifier(QMainWindow):
         self.statusBar.showMessage("准备就绪")
 
         # 在状态栏右侧添加版本信息
-        version_label = QLabel(f"版本 {__version__}")
-        version_label.setStyleSheet("""
-            QLabel {
-                color: #666;
+        self.version_label = QLabel(f"版本 {__version__}")
+        # 使用主题颜色
+        from .components.styles.theme import default_theme
+        c = default_theme.colors
+        self.version_label.setStyleSheet(f"""
+            QLabel {{
+                color: {c.TEXT_SECONDARY};
                 padding: 2px 8px;
                 font-size: 11px;
-            }
+            }}
         """)
-        self.statusBar.addPermanentWidget(version_label)
+        self.statusBar.addPermanentWidget(self.version_label)
     
     @performance_monitor
     def setup_shortcuts(self):
@@ -1138,10 +1141,10 @@ class ImageClassifier(QMainWindow):
             
             # 分配默认快捷键
             self.config.assign_default_shortcuts(self.categories)
-            
-            # 按名称排序，确保类别显示顺序一致
-            self.ordered_categories = sorted(list(self.categories))
-            
+
+            # 根据配置的排序模式排序类别
+            self.ordered_categories = self.config.get_sorted_categories(self.categories)
+
             # 保存更新后的配置
             self.config.save_config()
             
@@ -2892,23 +2895,24 @@ class ImageClassifier(QMainWindow):
         except Exception:
             pass
         
-        # 设置统一样式
-        msg.setStyleSheet("""
-            QMessageBox {
-                background-color: #F8F9FA;
-                color: #2C3E50;
-                border: 1px solid #BDC3C7;
+        # 设置主题样式
+        c = default_theme.colors
+        msg.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {c.BACKGROUND_CARD};
+                color: {c.TEXT_PRIMARY};
+                border: 1px solid {c.BORDER_MEDIUM};
                 border-radius: 8px;
                 font-size: 14px;
                 min-width: 400px;
-            }
-            QMessageBox QLabel {
-                color: #2C3E50;
+            }}
+            QMessageBox QLabel {{
+                color: {c.TEXT_PRIMARY};
                 font-size: 14px;
                 padding: 10px;
-            }
-            QMessageBox QPushButton {
-                background-color: #3498DB;
+            }}
+            QMessageBox QPushButton {{
+                background-color: {c.PRIMARY};
                 color: white;
                 border: none;
                 border-radius: 6px;
@@ -2917,25 +2921,25 @@ class ImageClassifier(QMainWindow):
                 font-weight: bold;
                 min-width: 80px;
                 margin: 2px;
-            }
-            QMessageBox QPushButton:hover {
-                background-color: #2980B9;
-            }
-            QMessageBox QPushButton:pressed {
-                background-color: #21618C;
-            }
-            QMessageBox QPushButton[text="覆盖"] {
-                background-color: #E74C3C;
-            }
-            QMessageBox QPushButton[text="覆盖"]:hover {
-                background-color: #C0392B;
-            }
-            QMessageBox QPushButton[text="重命名"] {
-                background-color: #F39C12;
-            }
-            QMessageBox QPushButton[text="重命名"]:hover {
-                background-color: #E67E22;
-            }
+            }}
+            QMessageBox QPushButton:hover {{
+                background-color: {c.PRIMARY_DARK};
+            }}
+            QMessageBox QPushButton:pressed {{
+                background-color: {c.PRIMARY_DARK};
+            }}
+            QMessageBox QPushButton[text="覆盖"] {{
+                background-color: {c.ERROR};
+            }}
+            QMessageBox QPushButton[text="覆盖"]:hover {{
+                background-color: {c.ERROR_DARK};
+            }}
+            QMessageBox QPushButton[text="重命名"] {{
+                background-color: {c.WARNING};
+            }}
+            QMessageBox QPushButton[text="重命名"]:hover {{
+                background-color: {c.WARNING_DARK};
+            }}
         """)
         
         # 添加中文按钮
@@ -3618,6 +3622,36 @@ class ImageClassifier(QMainWindow):
 
         self.logger.info(f"分类模式已切换为: {'多分类' if self.is_multi_category else '单分类'}")
 
+    def change_category_sort_mode(self, new_mode):
+        """切换类别排序模式
+
+        Args:
+            new_mode: "name" 或 "shortcut"
+        """
+        try:
+            if new_mode not in ["name", "shortcut"]:
+                self.logger.error(f"无效的排序模式: {new_mode}")
+                return
+
+            # 更新配置
+            self.config.category_sort_mode = new_mode
+            self.config.save_config()
+
+            # 重新排序类别
+            self.ordered_categories = self.config.get_sorted_categories(self.categories)
+
+            # 更新UI
+            self.update_category_buttons()
+
+            # 显示提示
+            mode_name = "按名称排序" if new_mode == "name" else "按快捷键排序"
+            toast_success(self, f"已切换到{mode_name}")
+            self.logger.info(f"类别排序模式已切换为: {mode_name}")
+
+        except Exception as e:
+            self.logger.error(f"切换排序模式失败: {e}")
+            toast_error(self, f"切换排序模式失败: {str(e)}")
+
     def fit_to_window(self):
         """适应窗口大小"""
         if hasattr(self, 'image_label'):
@@ -4078,6 +4112,37 @@ class ImageClassifier(QMainWindow):
                     # 只更新没有特殊样式的标签
                     if "background-color: #FFF8E1" not in current_style and "color:" not in current_style:
                         label.setStyleSheet(f"QLabel {{ color: {c.TEXT_PRIMARY}; }}")
+
+            # 更新状态栏样式
+            if hasattr(self, 'statusBar'):
+                self.statusBar.setStyleSheet(f"""
+                    QStatusBar {{
+                        background-color: {c.BACKGROUND_SECONDARY};
+                        color: {c.TEXT_PRIMARY};
+                        border-top: 1px solid {c.BORDER_MEDIUM};
+                    }}
+                    QStatusBar::item {{
+                        border: none;
+                    }}
+                """)
+
+            # 更新版本标签样式
+            if hasattr(self, 'version_label'):
+                self.version_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {c.TEXT_SECONDARY};
+                        padding: 2px 8px;
+                        font-size: 11px;
+                    }}
+                """)
+
+            # 更新分类按钮样式（重新创建按钮以应用新主题）
+            if hasattr(self, 'category_buttons') and self.category_buttons:
+                self._update_category_buttons_internal()
+                # 更新所有类别按钮的标签颜色
+                for button in self.category_buttons.values():
+                    if hasattr(button, 'update_label_colors'):
+                        button.update_label_colors()
 
             # 强制重绘
             self.update()
@@ -4626,26 +4691,27 @@ class ImageClassifier(QMainWindow):
         except Exception:
             pass
 
-        # 使用新的样式系统
+        # 使用主题样式
+        c = default_theme.colors
         message_box_style = f"""
             QMessageBox {{
-                background-color: #F8F9FA;
-                color: #2C3E50;
-                border: 1px solid #BDC3C7;
+                background-color: {c.BACKGROUND_CARD};
+                color: {c.TEXT_PRIMARY};
+                border: 1px solid {c.BORDER_MEDIUM};
                 border-radius: 8px;
                 font-size: 14px;
             }}
             QMessageBox QLabel {{
-                color: #2C3E50;
+                color: {c.TEXT_PRIMARY};
                 font-size: 14px;
                 padding: 10px;
             }}
             {ButtonStyles.get_primary_button_style()}
             QPushButton:default {{
-                background-color: #27AE60;
+                background-color: {c.SUCCESS};
             }}
             QPushButton:default:hover {{
-                background-color: #229954;
+                background-color: {c.SUCCESS_DARK};
             }}
         """
         msgBox.setStyleSheet(message_box_style)
