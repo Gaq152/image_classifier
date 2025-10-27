@@ -50,26 +50,14 @@ class EnhancedImageLabel(QLabel):
         try:
             from PyQt6.QtWidgets import QPushButton
             from PyQt6.QtCore import Qt
+            from ..styles.widget_styles import WidgetStyles
 
             # 创建圆形信息按钮
             self.info_button = QPushButton("ℹ️", self)
             self.info_button.setFixedSize(30, 30)
-            self.info_button.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(0, 0, 0, 120);
-                    color: white;
-                    border: none;
-                    border-radius: 15px;
-                    font-size: 14px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: rgba(0, 0, 0, 180);
-                }
-                QPushButton:pressed {
-                    background-color: rgba(0, 0, 0, 220);
-                }
-            """)
+
+            # 使用主题样式
+            self.info_button.setStyleSheet(WidgetStyles.get_info_button_style())
 
             # 设置提示文本
             self.info_button.setToolTip("点击查看图片详细信息")

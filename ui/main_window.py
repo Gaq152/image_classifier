@@ -29,7 +29,8 @@ from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLab
                                 StatisticsPanel)
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
-from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog, 
+from .components.styles.theme import default_theme
+from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
                      TabbedHelpDialog, ProgressDialog)
 from .managers import FileStateManager
 from ..core.config import Config
@@ -348,21 +349,21 @@ class ImageClassifier(QMainWindow):
         left_layout.addWidget(title_container, 0)  # 不拉伸
         
         # 图片显示区域 - 主要拉伸区域
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scroll_area.setStyleSheet("""
+        self.image_scroll_area = QScrollArea()
+        self.image_scroll_area.setWidgetResizable(True)
+        self.image_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_scroll_area.setStyleSheet("""
             QScrollArea {
                 border: 1px solid #ADB5BD;
                 border-radius: 4px;
                 background-color: #F8F9FA;
             }
         """)
-        
+
         self.image_label = EnhancedImageLabel()
-        scroll_area.setWidget(self.image_label)
-        
-        left_layout.addWidget(scroll_area, 1)  # 主要拉伸权重
+        self.image_scroll_area.setWidget(self.image_label)
+
+        left_layout.addWidget(self.image_scroll_area, 1)  # 主要拉伸权重
         
         parent.addWidget(left_widget)
     
@@ -747,6 +748,20 @@ class ImageClassifier(QMainWindow):
                                                    '刷新类别目录，同步外部变化 (F5)',
                                                    self.refresh_categories)
         toolbar.addWidget(refresh_button)
+
+        # 从配置中读取主题设置
+        current_theme = "light"
+        if hasattr(self.config, 'theme'):
+            current_theme = self.config.theme
+        default_theme.set_theme(current_theme)
+
+        # 主题切换按钮 - 使用简洁线条图标
+        theme_icon = '☾' if current_theme == "light" else '☼'  # ☾ 月亮(暗色) ☼ 太阳(亮色)
+        theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
+        self.theme_button = self.create_toolbar_button(theme_icon, 'theme_button',
+                                                      theme_tooltip,
+                                                      self.toggle_theme)
+        toolbar.addWidget(self.theme_button)
 
         # 帮助按钮 - 使用统一样式
         help_button = self.create_toolbar_button('?', 'help_button',
@@ -3765,8 +3780,313 @@ class ImageClassifier(QMainWindow):
     def show_help_dialog(self):
         """显示帮助对话框"""
         dialog = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
+        # 确保对话框应用当前主题
+        if hasattr(dialog, '_apply_theme'):
+            dialog._apply_theme()
         dialog.exec()
-    
+
+    def toggle_theme(self):
+        """切换主题"""
+        try:
+            # 获取当前主题并切换
+            current_theme = default_theme.get_current_theme()
+            new_theme = "dark" if current_theme == "light" else "light"
+            default_theme.set_theme(new_theme)
+
+            # 保存到配置
+            if hasattr(self, 'config'):
+                self.config.theme = new_theme
+                try:
+                    self.config.save_config()
+                except Exception as e:
+                    self.logger.error(f"保存主题配置失败: {e}")
+
+            # 应用主题到主窗口和所有组件
+            self.apply_theme()
+
+            # 更新按钮图标和提示
+            if hasattr(self, 'theme_button'):
+                theme_icon = '☾' if new_theme == "light" else '☼'  # ☾ 月亮(暗色) ☼ 太阳(亮色)
+                theme_tooltip = '切换到暗色主题' if new_theme == "light" else '切换到亮色主题'
+                self.theme_button.setText(theme_icon)
+                self.theme_button.setToolTip(theme_tooltip)
+
+            toast_success(self, f'已切换到{"暗色" if new_theme == "dark" else "亮色"}主题')
+        except Exception as e:
+            self.logger.error(f"切换主题失败: {e}")
+            toast_error(self, f'主题切换失败: {str(e)}')
+
+    def apply_theme(self):
+        """应用主题到主窗口和所有组件"""
+        try:
+            c = default_theme.colors
+
+            # 应用主窗口样式
+            self.setStyleSheet(MainWindowStyles.get_main_window_style())
+
+            # 应用工具栏样式
+            if hasattr(self, 'findChildren'):
+                toolbars = self.findChildren(QToolBar)
+                for toolbar in toolbars:
+                    toolbar.setStyleSheet(ToolbarStyles.get_main_toolbar_style())
+
+            # 更新左侧面板样式
+            left_panel = self.findChild(QWidget, "left_panel")
+            if left_panel:
+                left_panel.setStyleSheet(f"""
+                    QWidget#left_panel {{
+                        background-color: {c.BACKGROUND_PRIMARY};
+                        border: 1px solid {c.BORDER_MEDIUM};
+                        border-radius: 6px;
+                    }}
+                """)
+
+            # 更新左侧标题容器
+            title_container = self.findChild(QWidget, "title_container")
+            if title_container:
+                title_container.setStyleSheet(f"""
+                    QWidget#title_container {{
+                        border-bottom: 1px solid {c.BORDER_MEDIUM};
+                        max-height: 28px;
+                        min-height: 28px;
+                    }}
+                """)
+
+            # 更新图片预览标题标签
+            if hasattr(self, 'findChildren'):
+                for label in self.findChildren(QLabel):
+                    if label.text() == "🖼️ 图片预览":
+                        label.setStyleSheet(f"""
+                            QLabel {{
+                                font-size: 14px;
+                                font-weight: bold;
+                                color: {c.TEXT_SECONDARY};
+                                border: none;
+                            }}
+                        """)
+
+            # 更新右侧面板样式
+            right_panel = self.findChild(QWidget, "right_panel")
+            if right_panel:
+                right_panel.setStyleSheet(f"""
+                    QWidget#right_panel {{
+                        background-color: {c.BACKGROUND_PRIMARY};
+                        border: 1px solid {c.BORDER_MEDIUM};
+                        border-radius: 6px;
+                    }}
+                """)
+
+            # 更新图片列表区域
+            if hasattr(self, 'image_list'):
+                self.image_list.setStyleSheet(f"""
+                    QListWidget {{
+                        border: 1px solid {c.BORDER_MEDIUM};
+                        border-radius: 4px;
+                        background-color: {c.BACKGROUND_SECONDARY};
+                        padding: 2px;
+                    }}
+                    QListWidget::item {{
+                        border: 1px solid transparent;
+                        border-radius: 3px;
+                        padding: 4px 6px;
+                        margin: 1px;
+                        color: {c.TEXT_PRIMARY};
+                    }}
+                    QListWidget::item:hover {{
+                        background-color: {c.BACKGROUND_HOVER};
+                        border-color: {c.PRIMARY};
+                    }}
+                    QListWidget::item:selected {{
+                        background-color: {c.PRIMARY};
+                        color: white;
+                        border-color: {c.PRIMARY_DARK};
+                    }}
+                    QScrollBar:vertical {{
+                        border: 1px solid {c.BORDER_LIGHT};
+                        background: {c.BACKGROUND_SECONDARY};
+                        width: 10px;
+                        border-radius: 3px;
+                    }}
+                    QScrollBar::handle:vertical {{
+                        background: {c.PRIMARY};
+                        border-radius: 3px;
+                        min-height: 15px;
+                    }}
+                    QScrollBar::handle:vertical:hover {{
+                        background: {c.PRIMARY_DARK};
+                    }}
+                    QScrollBar::handle:vertical:pressed {{
+                        background: {c.PRIMARY_DARK};
+                    }}
+                    QScrollBar:horizontal {{
+                        border: 1px solid {c.BORDER_LIGHT};
+                        background: {c.BACKGROUND_SECONDARY};
+                        height: 10px;
+                        border-radius: 3px;
+                    }}
+                    QScrollBar::handle:horizontal {{
+                        background: {c.PRIMARY};
+                        border-radius: 3px;
+                        min-width: 15px;
+                    }}
+                    QScrollBar::handle:horizontal:hover {{
+                        background: {c.PRIMARY_DARK};
+                    }}
+                    QScrollBar::handle:horizontal:pressed {{
+                        background: {c.PRIMARY_DARK};
+                    }}
+                    QScrollBar::add-line:vertical,
+                    QScrollBar::sub-line:vertical,
+                    QScrollBar::add-line:horizontal,
+                    QScrollBar::sub-line:horizontal {{
+                        border: none;
+                        background: none;
+                    }}
+                """)
+
+            # 更新图片列表标题容器
+            list_title_container = self.findChild(QWidget, "list_title_container")
+            if list_title_container:
+                list_title_container.setStyleSheet(f"""
+                    QWidget#list_title_container {{
+                        border-bottom: 2px solid {c.PRIMARY};
+                        margin-bottom: 4px;
+                        max-height: 28px;
+                        min-height: 28px;
+                    }}
+                """)
+
+            # 更新类别标题容器
+            category_title_container = self.findChild(QWidget, "category_title_container")
+            if category_title_container:
+                category_title_container.setStyleSheet(f"""
+                    QWidget#category_title_container {{
+                        border-bottom: 2px solid {c.WARNING};
+                        margin-bottom: 4px;
+                        max-height: 28px;
+                        min-height: 28px;
+                    }}
+                """)
+
+            # 更新图片预览滚动区域
+            if hasattr(self, 'image_scroll_area'):
+                self.image_scroll_area.setStyleSheet(f"""
+                    QScrollArea {{
+                        border: 1px solid {c.BORDER_MEDIUM};
+                        border-radius: 4px;
+                        background-color: {c.BACKGROUND_SECONDARY};
+                    }}
+                """)
+
+            # 更新类别按钮滚动区域
+            if hasattr(self, 'category_scroll'):
+                self.category_scroll.setStyleSheet(f"""
+                    QScrollArea {{
+                        border: 1px solid {c.WARNING};
+                        border-radius: 4px;
+                        background-color: {c.BACKGROUND_SECONDARY};
+                    }}
+                    QScrollBar:vertical {{
+                        border: 1px solid {c.WARNING};
+                        background: {c.BACKGROUND_SECONDARY};
+                        width: 10px;
+                        border-radius: 3px;
+                    }}
+                    QScrollBar::handle:vertical {{
+                        background: {c.WARNING};
+                        border-radius: 3px;
+                        min-height: 15px;
+                    }}
+                    QScrollBar::handle:vertical:hover {{
+                        background: {c.WARNING_DARK};
+                    }}
+                    QScrollBar::handle:vertical:pressed {{
+                        background: {c.WARNING_DARK};
+                    }}
+                    QScrollBar:horizontal {{
+                        border: 1px solid {c.WARNING};
+                        background: {c.BACKGROUND_SECONDARY};
+                        height: 10px;
+                        border-radius: 3px;
+                    }}
+                    QScrollBar::handle:horizontal {{
+                        background: {c.WARNING};
+                        border-radius: 3px;
+                        min-width: 15px;
+                    }}
+                    QScrollBar::handle:horizontal:hover {{
+                        background: {c.WARNING_DARK};
+                    }}
+                    QScrollBar::handle:horizontal:pressed {{
+                        background: {c.WARNING_DARK};
+                    }}
+                    QScrollBar::add-line:vertical,
+                    QScrollBar::sub-line:vertical,
+                    QScrollBar::add-line:horizontal,
+                    QScrollBar::sub-line:horizontal {{
+                        border: none;
+                        background: none;
+                    }}
+                """)
+
+            # 更新类别按钮容器
+            if hasattr(self, 'category_widget'):
+                self.category_widget.setStyleSheet(f"""
+                    QWidget {{
+                        background-color: {c.BACKGROUND_SECONDARY};
+                    }}
+                """)
+
+            # 更新统计面板
+            if hasattr(self, 'statistics_panel') and hasattr(self.statistics_panel, 'apply_theme'):
+                self.statistics_panel.apply_theme()
+
+            # 更新移除按钮（红色主题按钮）
+            if hasattr(self, 'delete_button'):
+                self.delete_button.setStyleSheet(f"""
+                    QPushButton#remove_button {{
+                        background-color: {c.ERROR};
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-size: 14px;
+                        font-weight: normal;
+                        text-align: center;
+                    }}
+                    QPushButton#remove_button:hover {{
+                        background-color: {c.ERROR_DARK};
+                    }}
+                    QPushButton#remove_button:pressed {{
+                        background-color: {c.ERROR_DARK};
+                    }}
+                """)
+
+            # 更新EnhancedImageLabel背景
+            if hasattr(self, 'image_label'):
+                # 更新图像标签样式
+                from .components.styles.widget_styles import WidgetStyles
+                self.image_label.setStyleSheet(WidgetStyles.get_image_label_style())
+
+                # 更新信息按钮样式
+                if hasattr(self.image_label, 'info_button'):
+                    self.image_label.info_button.setStyleSheet(WidgetStyles.get_info_button_style())
+
+            # 更新所有QLabel的颜色
+            if hasattr(self, 'findChildren'):
+                for label in self.findChildren(QLabel):
+                    current_style = label.styleSheet()
+                    # 只更新没有特殊样式的标签
+                    if "background-color: #FFF8E1" not in current_style and "color:" not in current_style:
+                        label.setStyleSheet(f"QLabel {{ color: {c.TEXT_PRIMARY}; }}")
+
+            # 强制重绘
+            self.update()
+
+            self.logger.info(f"主题已切换到: {default_theme.get_current_theme()}")
+
+        except Exception as e:
+            self.logger.error(f"应用主题失败: {e}")
+
     def focusInEvent(self, event):
         """窗口获得焦点时的处理"""
         try:

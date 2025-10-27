@@ -24,6 +24,7 @@ from ..utils.exceptions import FileOperationError
 from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
+from .components.styles.theme import default_theme
 
 
 class AnimatedToggle(QWidget):
@@ -467,15 +468,161 @@ class TabbedHelpDialog(QDialog):
         except Exception:
             return None
         
+    def _get_html_colors(self):
+        """获取用于 HTML 内容的主题颜色映射"""
+        c = default_theme.colors
+        return {
+            'bg_primary': c.BACKGROUND_PRIMARY,
+            'bg_secondary': c.BACKGROUND_SECONDARY,
+            'bg_hover': c.BACKGROUND_HOVER,
+            'text_primary': c.TEXT_PRIMARY,
+            'text_secondary': c.TEXT_SECONDARY,
+            'border': c.BORDER_MEDIUM,
+            'primary': c.PRIMARY,
+            'primary_light': c.PRIMARY_LIGHT,
+        }
+
+    def _get_dialog_style(self):
+        """根据当前主题获取对话框样式"""
+        c = default_theme.colors
+
+        return f"""
+                QDialog {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                    color: {c.TEXT_PRIMARY};
+                }}
+                QTabWidget {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                    border: 1px solid {c.BORDER_MEDIUM};
+                    border-radius: 4px;
+                }}
+                QTabWidget::pane {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                    border: 1px solid {c.BORDER_MEDIUM};
+                    border-radius: 4px;
+                    top: -1px;
+                }}
+                QTabBar::tab {{
+                    background-color: {c.BACKGROUND_SECONDARY};
+                    color: {c.TEXT_SECONDARY};
+                    border: 1px solid {c.BORDER_MEDIUM};
+                    padding: 8px 16px;
+                    margin-right: 2px;
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                    font-weight: normal;
+                    min-width: 80px;
+                }}
+                QTabBar::tab:selected {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                    color: {c.TEXT_PRIMARY};
+                    border-bottom-color: {c.BACKGROUND_PRIMARY};
+                    font-weight: 500;
+                }}
+                QTabBar::tab:hover {{
+                    background-color: {c.BACKGROUND_HOVER};
+                }}
+                QTabBar::tab:selected:hover {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                }}
+                QPushButton {{
+                    background-color: {c.PRIMARY};
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-size: 13px;
+                    font-weight: normal;
+                    min-width: 80px;
+                }}
+                QPushButton:hover {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+                QPushButton:pressed {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+                QPushButton#clearCacheBtn {{
+                    background-color: {c.WARNING};
+                }}
+                QPushButton#clearCacheBtn:hover {{
+                    background-color: {c.WARNING_DARK};
+                }}
+                QPushButton#clearCacheBtn:pressed {{
+                    background-color: {c.WARNING_DARK};
+                }}
+                QTextBrowser {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                    color: {c.TEXT_PRIMARY};
+                    border: none;
+                    selection-background-color: {c.PRIMARY};
+                    selection-color: white;
+                }}
+                QLabel {{
+                    color: {c.TEXT_PRIMARY};
+                }}
+            """
+
+    def _apply_theme(self):
+        """应用主题到对话框"""
+        try:
+            c = default_theme.colors
+
+            # 更新对话框样式
+            self.setStyleSheet(self._get_dialog_style())
+
+            # 更新所有 QTextBrowser 的样式并重新生成HTML内容
+            if hasattr(self, 'findChildren'):
+                # 找到所有QTextBrowser并重新生成其HTML内容
+                tab_widget = self.findChild(QTabWidget)
+                if tab_widget:
+                    for i in range(tab_widget.count()):
+                        tab = tab_widget.widget(i)
+                        if tab:
+                            text_browser = tab.findChild(QTextBrowser)
+                            if text_browser:
+                                # 更新样式
+                                text_browser.setStyleSheet(f"""
+                                    QTextBrowser {{
+                                        background-color: {c.BACKGROUND_PRIMARY};
+                                        color: {c.TEXT_PRIMARY};
+                                        font-size: 13px;
+                                        line-height: 1.6;
+                                        selection-background-color: {c.PRIMARY};
+                                        selection-color: white;
+                                        border: none;
+                                    }}
+                                """)
+
+                                # 根据标签页名称重新生成HTML内容
+                                tab_title = tab_widget.tabText(i)
+                                if tab_title == '快速入门':
+                                    text_browser.setHtml(self._generate_quick_start_html())
+                                elif tab_title == '使用指南':
+                                    text_browser.setHtml(self._generate_help_html())
+                                elif tab_title == '高级功能':
+                                    text_browser.setHtml(self._generate_advanced_html())
+                                elif tab_title == '常见问题':
+                                    text_browser.setHtml(self._generate_faq_html())
+                                elif tab_title == '关于':
+                                    text_browser.setHtml(self._generate_about_html())
+
+            # 强制重绘
+            self.update()
+        except Exception as e:
+            self.logger.error(f"应用主题失败: {e}")
+
     def initUI(self):
         """初始化UI"""
         try:
             self.setWindowTitle('帮助和关于')
             self.setMinimumSize(700, 500)
             self.setModal(True)
-            
-            # 设置对话框整体样式 - 清爽白色系
-            self.setStyleSheet("""
+
+            # 设置对话框整体样式
+            self.setStyleSheet(self._get_dialog_style())
+
+            # 旧的样式代码已移到_get_dialog_style方法中
+            old_style = """
                 QDialog {
                     background-color: #FFFFFF;
                     color: #212121;
@@ -539,7 +686,7 @@ class TabbedHelpDialog(QDialog):
                 QPushButton#clearCacheBtn:pressed {
                     background-color: #E65100;
                 }
-            """)
+            """
             
             layout = QVBoxLayout(self)
             
@@ -567,10 +714,12 @@ class TabbedHelpDialog(QDialog):
                 except Exception as e:
                     self.logger.error(f"保存自动更新配置失败: {e}")
             auto_chk.clicked.connect(toggle_auto)
+
             check_btn.clicked.connect(self._handle_check_update)
             top_btn_bar.addWidget(check_btn)
             top_btn_bar.addStretch()
-            # 右侧只显示拨动开关和标签，不重复文字
+
+            # 右侧显示自动更新开关
             auto_label = QLabel('自动检查')
             top_btn_bar.addWidget(auto_label)
             top_btn_bar.addWidget(auto_chk)
@@ -613,7 +762,10 @@ class TabbedHelpDialog(QDialog):
             # 移除关闭按钮，窗口自带关闭按钮已足够
 
             layout.addLayout(button_layout)
-            
+
+            # 应用当前主题
+            self._apply_theme()
+
         except Exception as e:
             self.logger.error(f"初始化帮助对话框UI失败: {e}")
 
@@ -912,72 +1064,68 @@ class TabbedHelpDialog(QDialog):
             no_btn.setText("取消")
         return box.exec()
         
-    def create_quick_start_tab(self):
-        """创建快速入门标签页"""
-        
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        text_browser = QTextBrowser()
-        
-        quick_start_text = '''
-        <h2 style="border-bottom: 2px solid #3498DB; padding-bottom: 8px; color: #2C3E50;">快速入门指南</h2>
+    def _generate_quick_start_html(self):
+        """生成快速入门标签页的HTML内容"""
+        colors = self._get_html_colors()
 
-        <div style="background-color: #F0F7FF; padding: 15px; border-left: 4px solid #3498DB; margin: 15px 0;">
-        <h3 style="color: #2980B9; margin-top: 0;">三步快速开始</h3>
-        <ol style="line-height: 1.8; color: #2C3E50;">
+        return f'''
+        <h2 style="border-bottom: 2px solid {colors['primary']}; padding-bottom: 8px; color: {colors['text_primary']};">快速入门指南</h2>
+
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h3 style="color: {colors['primary']}; margin-top: 0;">三步快速开始</h3>
+        <ol style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>选择文件夹</b>：点击"打开目录"选择包含图片的文件夹</li>
         <li><b>创建类别</b>：点击"新增类别"添加分类标签</li>
         <li><b>开始分类</b>：双击类别按钮或使用快捷键分类图片</li>
         </ol>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">支持的图片格式</h3>
-        <p style="background-color: #F8F9FA; padding: 10px; border: 1px solid #E0E0E0; color: #2C3E50;">
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">支持的图片格式</h3>
+        <p style="background-color: {colors['bg_secondary']}; padding: 10px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">
         JPG, JPEG, PNG, BMP, GIF, TIFF
         </p>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">核心操作</h3>
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #E0E0E0;">
-        <tr style="background-color: #F8F9FA;">
-        <th style="width: 25%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">操作</th>
-        <th style="width: 35%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">方法</th>
-        <th style="width: 40%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">说明</th>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">核心操作</h3>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid {colors['border']};">
+        <tr style="background-color: {colors['bg_secondary']};">
+        <th style="width: 25%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">操作</th>
+        <th style="width: 35%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">方法</th>
+        <th style="width: 40%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">说明</th>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">浏览图片</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">← → 键 或 鼠标点击</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">在图片列表中前后导航</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">浏览图片</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">← → 键 或 鼠标点击</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">在图片列表中前后导航</td>
         </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">选择类别</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">↑ ↓ 键</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">在类别列表中上下切换选择</td>
-        </tr>
-        <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">分类图片</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">双击类别按钮 或 Enter键</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">将当前图片分类到选中类别</td>
-        </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">缩放图片</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">鼠标滚轮 或 Ctrl +/-</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">放大缩小查看图片细节</td>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">选择类别</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">↑ ↓ 键</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">在类别列表中上下切换选择</td>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">移动图片</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">鼠标左键拖拽</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">移动图片查看不同区域</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">分类图片</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">双击类别按钮 或 Enter键</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">将当前图片分类到选中类别</td>
         </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">移出图片</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">Delete 键</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">将图片移到移出目录</td>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">缩放图片</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">鼠标滚轮 或 Ctrl +/-</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">放大缩小查看图片细节</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">移动图片</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">鼠标左键拖拽</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">移动图片查看不同区域</td>
+        </tr>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">移出图片</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Delete 键</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">将图片移到移出目录</td>
         </tr>
         </table>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">高效使用技巧</h3>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">高效使用技巧</h3>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>使用快捷键</b>：按数字键 1-9 快速分类到对应类别</li>
         <li><b>文件模式切换</b>：点击工具栏的"复制模式"/"移动模式"按钮切换</li>
         <li><b>多分类模式</b>：点击"→ 单分类模式"按钮开启多分类，一图多标签</li>
@@ -986,9 +1134,9 @@ class TabbedHelpDialog(QDialog):
         <li><b>状态保存</b>：工作状态会自动保存，重启后恢复</li>
         </ul>
 
-        <div style="background-color: #F0F7FF; padding: 15px; border-left: 4px solid #3498DB; margin: 20px 0;">
-        <h4 style="color: #2980B9; margin-top: 0;">专业提示</h4>
-        <p style="line-height: 1.6; color: #2C3E50;">
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 20px 0;">
+        <h4 style="color: {colors['primary']}; margin-top: 0;">专业提示</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};">
         • 使用右键点击类别按钮可以自定义快捷键<br>
         • 按 F5 键可以刷新文件列表同步外部变化<br>
         • 按 Ctrl+F 键可以让图片适应窗口大小<br>
@@ -999,52 +1147,52 @@ class TabbedHelpDialog(QDialog):
         </div>
         '''
 
-        # Markdown风格样式
-        text_browser.setStyleSheet("""
-            QTextBrowser {
-                background-color: white;
-                color: #212121;
-                font-size: 13px;
-                line-height: 1.6;
-                selection-background-color: #bdbdbd;
-                selection-color: white;
-            }
-            h2 {
-                color: #424242;
-            }
-            h3, h4 {
-                color: #616161;
-            }
-        """)
-        
-        text_browser.setHtml(quick_start_text)
-        layout.addWidget(text_browser)
-        
-        return widget
-        
-    def create_help_tab(self):
-        """创建帮助标签页"""
-        
+    def create_quick_start_tab(self):
+        """创建快速入门标签页"""
+
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+
         text_browser = QTextBrowser()
 
-        help_text = '''
-        <h2 style="border-bottom: 2px solid #3498DB; padding-bottom: 8px; color: #2C3E50;">详细使用指南</h2>
+        # 应用主题样式
+        c = default_theme.colors
+        text_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+                font-size: 13px;
+                line-height: 1.6;
+                selection-background-color: {c.PRIMARY};
+                selection-color: white;
+                border: none;
+            }}
+        """)
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">文件管理</h3>
+        text_browser.setHtml(self._generate_quick_start_html())
+        layout.addWidget(text_browser)
 
-        <h4 style="color: #2C3E50;">目录操作</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        return widget
+        
+    def _generate_help_html(self):
+        """生成使用指南标签页的HTML内容"""
+        colors = self._get_html_colors()
+
+        return f'''
+        <h2 style="border-bottom: 2px solid {colors['primary']}; padding-bottom: 8px; color: {colors['text_primary']};">详细使用指南</h2>
+
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">文件管理</h3>
+
+        <h4 style="color: {colors['text_primary']};">目录操作</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>打开目录</b>：选择包含待分类图片的根目录</li>
         <li><b>子目录处理</b>：程序会递归扫描所有子目录中的图片</li>
         <li><b>目录结构</b>：分类后的图片会按类别名创建对应文件夹</li>
         <li><b>移出目录</b>：删除的图片会移动到 "remove" 文件夹</li>
         </ul>
 
-        <h4 style="color: #2C3E50;">类别管理</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">类别管理</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>新增类别</b>：单个添加或批量添加（逗号分隔）</li>
         <li><b>编辑类别</b>：右键类别按钮选择"编辑"</li>
         <li><b>删除类别</b>：右键类别按钮选择"删除"</li>
@@ -1052,60 +1200,60 @@ class TabbedHelpDialog(QDialog):
         <li><b>类别限制</b>：类别名最长50个字符，支持中英文</li>
         </ul>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">图片浏览与操作</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">图片浏览与操作</h3>
 
-        <h4 style="color: #2C3E50;">视图控制</h4>
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #E0E0E0;">
-        <tr style="background-color: #F8F9FA;">
-        <th style="width: 20%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">功能</th>
-        <th style="width: 30%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">操作方法</th>
-        <th style="width: 20%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">快捷键</th>
-        <th style="width: 30%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">说明</th>
+        <h4 style="color: {colors['text_primary']};">视图控制</h4>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid {colors['border']};">
+        <tr style="background-color: {colors['bg_secondary']};">
+        <th style="width: 20%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">功能</th>
+        <th style="width: 30%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">操作方法</th>
+        <th style="width: 20%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">快捷键</th>
+        <th style="width: 30%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">说明</th>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">适应窗口</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">菜单/快捷键</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">Ctrl+F</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">自动调整图片大小适应显示区域</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">适应窗口</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">菜单/快捷键</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Ctrl+F</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">自动调整图片大小适应显示区域</td>
         </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">放大图片</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">滚轮向上/菜单</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">Ctrl + =</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">放大图片，最大3倍</td>
-        </tr>
-        <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">缩小图片</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">滚轮向下/菜单</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">Ctrl + -</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">缩小图片显示</td>
-        </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">原始大小</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">菜单/快捷键</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">Ctrl + 0</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">显示图片100%原始大小</td>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">放大图片</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">滚轮向上/菜单</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Ctrl + =</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">放大图片，最大3倍</td>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">拖拽移动</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">鼠标左键拖拽</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">-</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">移动图片查看不同区域</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">缩小图片</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">滚轮向下/菜单</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Ctrl + -</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">缩小图片显示</td>
+        </tr>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">原始大小</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">菜单/快捷键</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Ctrl + 0</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">显示图片100%原始大小</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">拖拽移动</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">鼠标左键拖拽</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">-</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">移动图片查看不同区域</td>
         </tr>
         </table>
-        
-        <h4 style="color: #2C3E50;">分类操作</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+
+        <h4 style="color: {colors['text_primary']};">分类操作</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>复制模式</b>：保留原文件，复制到目标类别文件夹（默认）</li>
         <li><b>移动模式</b>：直接移动文件到目标类别文件夹</li>
         <li><b>分类方法</b>：双击类别按钮、使用快捷键或按回车键</li>
         <li><b>多分类模式</b>：同一张图片可分配到多个类别</li>
         </ul>
 
-        <h4 style="color: #2C3E50;">分类模式详解</h4>
-        <div style="background-color: #F0F7FF; padding: 15px; border-left: 4px solid #3498DB; margin: 15px 0;">
-        <h5 style="color: #2980B9; margin-top: 0;">单分类模式（默认）</h5>
-        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">分类模式详解</h4>
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h5 style="color: {colors['primary']}; margin-top: 0;">单分类模式（默认）</h5>
+        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li>一张图片只能属于一个类别</li>
         <li>重新分类会自动从旧类别移动到新类别</li>
         <li>类别按钮显示绿色背景表示已分类</li>
@@ -1113,9 +1261,9 @@ class TabbedHelpDialog(QDialog):
         </ul>
         </div>
 
-        <div style="background-color: #E8F5E9; padding: 15px; border-left: 4px solid #4CAF50; margin: 15px 0;">
-        <h5 style="color: #2E7D32; margin-top: 0;">多分类模式（新功能）</h5>
-        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: #2C3E50;">
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h5 style="color: {colors['primary']}; margin-top: 0;">多分类模式（新功能）</h5>
+        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li><b>灵活分类</b>：一张图片可以同时属于多个类别</li>
         <li><b>切换方式</b>：点击工具栏"→ 单分类模式"按钮切换</li>
         <li><b>分类操作</b>：点击类别按钮添加分类，再次点击取消分类</li>
@@ -1123,33 +1271,33 @@ class TabbedHelpDialog(QDialog):
         <li><b>应用场景</b>：标签化管理，如"风景+日落"、"人物+室内"等</li>
         </ul>
 
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #E0E0E0;">
-        <tr style="background-color: #F8F9FA;">
-        <th style="padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">操作</th>
-        <th style="padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">多分类模式行为</th>
-        <th style="padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">单分类模式行为</th>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid {colors['border']};">
+        <tr style="background-color: {colors['bg_secondary']};">
+        <th style="padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">操作</th>
+        <th style="padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">多分类模式行为</th>
+        <th style="padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">单分类模式行为</th>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">首次分类</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">添加到类别列表</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">直接分类到该类别</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">首次分类</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">添加到类别列表</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">直接分类到该类别</td>
         </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">已分类的类别</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">从列表中移除（取消分类）</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">不执行操作</td>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">已分类的类别</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">从列表中移除（取消分类）</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">不执行操作</td>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">其他类别</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">同时添加到类别列表</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">从旧类别移动到新类别</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">其他类别</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">同时添加到类别列表</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">从旧类别移动到新类别</td>
         </tr>
         </table>
         </div>
 
-        <div style="background-color: #FFF8E1; padding: 15px; border-left: 4px solid #FFC107; margin: 20px 0;">
-        <h5 style="color: #F57C00; margin-top: 0;">多分类模式使用技巧</h5>
-        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: #2C3E50;">
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 20px 0;">
+        <h5 style="color: {colors['primary']}; margin-top: 0;">多分类模式使用技巧</h5>
+        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li><b>标签化思维</b>：把类别当作标签，一张图片可以有多个标签</li>
         <li><b>快速取消</b>：再次点击已分类的类别按钮可快速取消该分类</li>
         <li><b>状态查看</b>：蓝色背景的类别按钮表示当前图片属于该类别</li>
@@ -1157,244 +1305,260 @@ class TabbedHelpDialog(QDialog):
         <li><b>模式切换</b>：可随时在单分类和多分类模式间切换</li>
         </ul>
         </div>
-        
-        <h3 style="color: #2C3E50; margin-top: 20px;">状态与统计</h3>
 
-        <h4 style="color: #2C3E50;">状态标识</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">状态与统计</h3>
+
+        <h4 style="color: {colors['text_primary']};">状态标识</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>已分类</b>：图片已成功分类到某个类别</li>
         <li><b>已移出</b>：图片已移动到移出目录</li>
         <li><b>未处理</b>：尚未分类的图片</li>
         <li><b>进度显示</b>：底部状态栏显示处理进度</li>
         </ul>
 
-        <h4 style="color: #2C3E50;">实时统计</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">实时统计</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>总数统计</b>：显示图片总数和处理进度</li>
         <li><b>类别统计</b>：每个类别的图片数量</li>
         <li><b>效率统计</b>：分类速度和剩余时间估计</li>
         </ul>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">同步与刷新</h3>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">同步与刷新</h3>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>自动同步</b>：程序会定期检测外部文件变化</li>
         <li><b>手动刷新</b>：按 F5 键立即同步文件状态</li>
         <li><b>智能检测</b>：检测新增、删除、移动的文件</li>
         <li><b>状态保存</b>：工作状态自动保存，重启后恢复</li>
         </ul>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">高级设置</h3>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">高级设置</h3>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>性能优化</b>：针对大量图片的性能优化</li>
         <li><b>网络优化</b>：SMB/NAS网络存储专项优化</li>
         <li><b>缓存管理</b>：智能图片缓存提高浏览速度</li>
         </ul>
         '''
-        
-        # 设置样式确保文本颜色对比度
-        text_browser.setStyleSheet("""
-            QTextBrowser {
-                background-color: white;
-                color: black;
-                selection-background-color: #0078d4;
-                selection-color: white;
-            }
-        """)
-        
-        text_browser.setHtml(help_text)
-        layout.addWidget(text_browser)
-        
-        return widget
-        
-    def create_advanced_tab(self):
-        """创建高级功能标签页"""
-        
+
+    def create_help_tab(self):
+        """创建帮助标签页"""
+
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+
         text_browser = QTextBrowser()
+
+        # 应用主题样式
+        c = default_theme.colors
+        text_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+                font-size: 13px;
+                line-height: 1.6;
+                selection-background-color: {c.PRIMARY};
+                selection-color: white;
+                border: none;
+            }}
+        """)
+
+        text_browser.setHtml(self._generate_help_html())
+        layout.addWidget(text_browser)
+
+        return widget
         
-        advanced_text = '''
-        <h2 style="border-bottom: 2px solid #3498DB; padding-bottom: 8px; color: #2C3E50;">高级功能详解</h2>
+    def _generate_advanced_html(self):
+        """生成高级功能标签页的HTML内容"""
+        colors = self._get_html_colors()
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">分类操作</h3>
+        return f'''
+        <h2 style="border-bottom: 2px solid {colors['primary']}; padding-bottom: 8px; color: {colors['text_primary']};">高级功能详解</h2>
 
-        <h4 style="color: #2C3E50;">当前分类功能</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">分类操作</h3>
+
+        <h4 style="color: {colors['text_primary']};">当前分类功能</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>单张分类</b>：双击类别按钮分类当前图片</li>
         <li><b>快捷键分类</b>：使用数字键1-9或自定义快捷键</li>
         <li><b>多分类模式</b>：一张图片可同时分配到多个类别</li>
         <li><b>快速导航</b>：使用方向键浏览图片和选择类别</li>
         </ul>
 
-        <h4 style="color: #2C3E50;">类别管理</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">类别管理</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>批量添加</b>：输入多个类别名，用逗号分隔</li>
         <li><b>快捷键绑定</b>：右键类别按钮自定义快捷键</li>
         <li><b>类别排序</b>：拖拽调整类别显示顺序</li>
         <li><b>状态统计</b>：实时显示每个类别的图片数量</li>
         </ul>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">自定义功能</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">自定义功能</h3>
 
-        <h4 style="color: #2C3E50;">快捷键自定义</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">快捷键自定义</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>数字键</b>：1-9 对应前9个类别</li>
         <li><b>字母键</b>：a-z 可自定义对应不同类别</li>
         <li><b>功能键</b>：F1-F12 可绑定特殊操作</li>
         <li><b>组合键</b>：支持 Ctrl、Alt、Shift 组合</li>
         </ul>
 
-        <h4 style="color: #2C3E50;">界面特性</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">界面特性</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>响应式布局</b>：界面自动适应窗口大小</li>
         <li><b>分割面板</b>：可拖拽调整各区域大小</li>
         <li><b>状态保存</b>：界面布局自动保存和恢复</li>
         </ul>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">网络存储优化</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">网络存储优化</h3>
 
-        <h4 style="color: #2C3E50;">SMB/NAS 支持</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">SMB/NAS 支持</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>网络路径</b>：支持 \\\\server\\share 格式</li>
         <li><b>连接池</b>：维护网络连接池提高效率</li>
         <li><b>操作重试</b>：网络操作失败时自动重试</li>
         <li><b>缓存优化</b>：智能缓存网络图片</li>
         </ul>
 
-        <h4 style="color: #2C3E50;">性能优化</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">性能优化</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>预加载</b>：提前加载下一张图片</li>
         <li><b>内存管理</b>：智能释放不需要的图片内存</li>
         <li><b>多线程</b>：后台线程处理文件操作</li>
         <li><b>进度缓存</b>：缓存处理进度避免重复扫描</li>
         </ul>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">同步与备份</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">同步与备份</h3>
 
-        <h4 style="color: #2C3E50;">文件同步</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">文件同步</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>实时监控</b>：监控目录变化自动更新</li>
         <li><b>增量同步</b>：只处理变化的文件</li>
         <li><b>冲突解决</b>：智能处理文件名冲突</li>
         <li><b>分类撤销</b>：多分类模式支持快速取消分类</li>
         </ul>
 
-        <h4 style="color: #2C3E50;">状态备份</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">状态备份</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>自动保存</b>：定期保存工作状态</li>
         <li><b>手动备份</b>：导出当前分类状态</li>
         <li><b>状态恢复</b>：从备份文件恢复工作状态</li>
         </ul>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">图片分析</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">图片分析</h3>
 
-        <h4 style="color: #2C3E50;">图片信息</h4>
-        <ul style="line-height: 1.8; color: #2C3E50;">
+        <h4 style="color: {colors['text_primary']};">图片信息</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>EXIF 数据</b>：显示拍摄时间、相机信息等</li>
         <li><b>文件属性</b>：大小、分辨率、格式信息</li>
         </ul>
         '''
-        
-        # 设置样式确保文本颜色对比度
-        text_browser.setStyleSheet("""
-            QTextBrowser {
-                background-color: white;
-                color: black;
-                selection-background-color: #0078d4;
-                selection-color: white;
-            }
-        """)
-        
-        text_browser.setHtml(advanced_text)
-        layout.addWidget(text_browser)
-        
-        return widget
-        
-    def create_faq_tab(self):
-        """创建常见问题标签页"""
-        
+
+    def create_advanced_tab(self):
+        """创建高级功能标签页"""
+
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+
         text_browser = QTextBrowser()
 
-        faq_text = f'''
-        <h2 style="border-bottom: 2px solid #3498DB; padding-bottom: 8px; color: #2C3E50;">常见问题解答</h2>
+        # 应用主题样式
+        c = default_theme.colors
+        text_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+                font-size: 13px;
+                line-height: 1.6;
+                selection-background-color: {c.PRIMARY};
+                selection-color: white;
+                border: none;
+            }}
+        """)
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">文件和目录</h3>
+        text_browser.setHtml(self._generate_advanced_html())
+        layout.addWidget(text_browser)
 
-        <div style="background-color: #F0F7FF; padding: 15px; border-left: 4px solid #3498DB; margin: 15px 0;">
-        <h4 style="color: #2980B9;">Q: 程序支持哪些图片格式？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 支持 JPG、JPEG、PNG、BMP、GIF、TIFF 等常见格式，区分大小写。</p>
+        return widget
+        
+    def _generate_faq_html(self):
+        """生成常见问题标签页的HTML内容"""
+        colors = self._get_html_colors()
 
-        <h4 style="color: #2980B9; margin-top: 15px;">Q: 可以处理子目录中的图片吗？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 是的，程序会递归扫描选定目录下的所有子目录，自动发现图片文件。</p>
+        return f'''
+        <h2 style="border-bottom: 2px solid {colors['primary']}; padding-bottom: 8px; color: {colors['text_primary']};">常见问题解答</h2>
 
-        <h4 style="color: #2980B9; margin-top: 15px;">Q: 分类后的图片存储在哪里？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 在原目录下创建以类别名命名的文件夹，图片会复制或移动到相应文件夹中。</p>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">文件和目录</h3>
 
-        <h4 style="color: #2980B9; margin-top: 15px;">Q: 删除的图片会永久消失吗？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 不会，删除的图片会移动到 "remove" 目录中，可以手动恢复。</p>
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h4 style="color: {colors['primary']};">Q: 程序支持哪些图片格式？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 支持 JPG、JPEG、PNG、BMP、GIF、TIFF 等常见格式，区分大小写。</p>
+
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 可以处理子目录中的图片吗？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 是的，程序会递归扫描选定目录下的所有子目录，自动发现图片文件。</p>
+
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 分类后的图片存储在哪里？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 在原目录下创建以类别名命名的文件夹，图片会复制或移动到相应文件夹中。</p>
+
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 删除的图片会永久消失吗？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 不会，删除的图片会移动到 "remove" 目录中，可以手动恢复。</p>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">图片显示和操作</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">图片显示和操作</h3>
 
-        <div style="background-color: #E8F5E9; padding: 15px; border-left: 4px solid #4CAF50; margin: 15px 0;">
-        <h4 style="color: #2E7D32;">Q: 图片显示很慢或模糊？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 对于大图片和网络路径，程序会自动检测并启用性能优化模式，提供最佳的显示效果。</p>
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h4 style="color: {colors['primary']};">Q: 图片显示很慢或模糊？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 对于大图片和网络路径，程序会自动检测并启用性能优化模式，提供最佳的显示效果。</p>
 
-        <h4 style="color: #2E7D32; margin-top: 15px;">Q: 如何查看图片的详细信息？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 点击图片右上角的 ℹ️ 按钮即可显示半透明的信息面板，查看图片的基本信息、尺寸属性和分类状态。点击"更多信息"可展开查看详细的文件信息。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 如何查看图片的详细信息？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 点击图片右上角的 ℹ️ 按钮即可显示半透明的信息面板，查看图片的基本信息、尺寸属性和分类状态。点击"更多信息"可展开查看详细的文件信息。</p>
 
-        <h4 style="color: #2E7D32; margin-top: 15px;">Q: 缩放后图片位置错乱？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 按 Ctrl+F 键重置为适应窗口模式，或按 Ctrl+0 显示原始大小。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 缩放后图片位置错乱？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 按 Ctrl+F 键重置为适应窗口模式，或按 Ctrl+0 显示原始大小。</p>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">分类和管理</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">分类和管理</h3>
 
-        <div style="background-color: #FFF8E1; padding: 15px; border-left: 4px solid #FFC107; margin: 15px 0;">
-        <h4 style="color: #F57C00;">Q: 复制模式和移动模式有什么区别？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 复制模式保留原文件并创建副本；移动模式直接移动文件到目标位置。</p>
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h4 style="color: {colors['primary']};">Q: 复制模式和移动模式有什么区别？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 复制模式保留原文件并创建副本；移动模式直接移动文件到目标位置。</p>
 
-        <h4 style="color: #F57C00; margin-top: 15px;">Q: 如何撤销错误的分类操作？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> <b>单分类模式</b>：只能更改分类，不能变为未分类状态，需手动移除文件后按F5刷新。<b>多分类模式</b>：再次点击已分类的类别按钮可直接取消该分类。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 如何撤销错误的分类操作？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> <b>单分类模式</b>：只能更改分类，不能变为未分类状态，需手动移除文件后按F5刷新。<b>多分类模式</b>：再次点击已分类的类别按钮可直接取消该分类。</p>
 
-        <h4 style="color: #F57C00; margin-top: 15px;">Q: 类别名称有长度限制吗？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 类别名称最长50个字符，支持中英文和常见符号，但不能包含文件系统禁用字符。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 类别名称有长度限制吗？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 类别名称最长50个字符，支持中英文和常见符号，但不能包含文件系统禁用字符。</p>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">网络存储</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">网络存储</h3>
 
-        <div style="background-color: #F3E5F5; padding: 15px; border-left: 4px solid #9C27B0; margin: 15px 0;">
-        <h4 style="color: #6A1B9A;">Q: 支持网络驱动器（NAS）吗？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 支持，默认启用"网络路径优化"设置以提高性能。</p>
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h4 style="color: {colors['primary']};">Q: 支持网络驱动器（NAS）吗？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 支持，默认启用"网络路径优化"设置以提高性能。</p>
 
-        <h4 style="color: #6A1B9A; margin-top: 15px;">Q: 网络断开后程序崩溃？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 程序有文件操作重试机制，网络操作失败时会自动重试3次。建议保持网络稳定以获得最佳性能。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 网络断开后程序崩溃？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 程序有文件操作重试机制，网络操作失败时会自动重试3次。建议保持网络稳定以获得最佳性能。</p>
 
-        <h4 style="color: #6A1B9A; margin-top: 15px;">Q: SMB 共享访问很慢？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 默认启用"SMB缓存优化"，程序会缓存常用图片以提高访问速度。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: SMB 共享访问很慢？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 默认启用"SMB缓存优化"，程序会缓存常用图片以提高访问速度。</p>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">性能和优化</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">性能和优化</h3>
 
-        <div style="background-color: #E1F5FE; padding: 15px; border-left: 4px solid #03A9F4; margin: 15px 0;">
-        <h4 style="color: #0277BD;">Q: 处理大量图片时程序卡顿？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 程序会根据图片数量和系统性能自动调整优化策略，包括减少动画效果和智能预加载。</p>
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h4 style="color: {colors['primary']};">Q: 处理大量图片时程序卡顿？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 程序会根据图片数量和系统性能自动调整优化策略，包括减少动画效果和智能预加载。</p>
 
-        <h4 style="color: #0277BD; margin-top: 15px;">Q: 内存占用过高？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 程序会自动管理内存，也可以手动清理缓存（帮助对话框中的清理按钮）。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 内存占用过高？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 程序会自动管理内存，也可以手动清理缓存（帮助对话框中的清理按钮）。</p>
 
-        <h4 style="color: #0277BD; margin-top: 15px;">Q: 如何清理程序产生的缓存？</h4>
-        <p style="line-height: 1.6; color: #2C3E50;"><b>A:</b> 在帮助对话框中点击"清理SMB缓存"按钮，或手动删除用户目录下的 .image_classifier_cache 文件夹。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 如何清理程序产生的缓存？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 在帮助对话框中点击"清理SMB缓存"按钮，或手动删除用户目录下的 .image_classifier_cache 文件夹。</p>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">故障排除</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">故障排除</h3>
 
-        <div style="background-color: #FFEBEE; padding: 15px; border-left: 4px solid #F44336; margin: 15px 0;">
-        <h4 style="color: #C62828;">常见问题诊断步骤</h4>
-        <ol style="line-height: 1.8; color: #2C3E50;">
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h4 style="color: {colors['primary']};">常见问题诊断步骤</h4>
+        <ol style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>检查日志</b>：查看 logs/image_classifier.log 了解错误详情</li>
         <li><b>重启程序</b>：简单重启通常能解决临时问题</li>
         <li><b>清理缓存</b>：清理程序缓存解决数据冲突</li>
@@ -1402,138 +1566,156 @@ class TabbedHelpDialog(QDialog):
         <li><b>更新程序</b>：下载最新版本获得 bug 修复</li>
         </ol>
 
-        <h4 style="color: #C62828; margin-top: 15px;">获取帮助</h4>
-        <p style="line-height: 1.6; color: #2C3E50;">如果问题仍未解决，请将错误日志和操作步骤反馈给我们：</p>
-        <p style="background-color: #F8F9FA; padding: 12px; border-left: 4px solid #3498DB; margin: 10px 0;">
-        <b style="color: #2C3E50;">问题反馈邮箱：</b><br>
-        <a href="copy://{CONTACT_INFO['support_email']}" style="color: #3498DB; text-decoration: none; font-size: 15px; font-weight: bold; cursor: pointer;">
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">获取帮助</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};">如果问题仍未解决，请将错误日志和操作步骤反馈给我们：</p>
+        <p style="background-color: {colors['bg_secondary']}; padding: 12px; border-left: 4px solid {colors['primary']}; margin: 10px 0;">
+        <b style="color: {colors['text_primary']};">问题反馈邮箱：</b><br>
+        <a href="copy://{CONTACT_INFO['support_email']}" style="color: {colors['primary']}; text-decoration: none; font-size: 15px; font-weight: bold; cursor: pointer;">
         {CONTACT_INFO['support_email']}
         </a>
-        <span style="color: #7F8C8D; font-size: 13px; margin-left: 10px;">（点击复制邮箱地址）</span>
+        <span style="color: {colors['text_secondary']}; font-size: 13px; margin-left: 10px;">（点击复制邮箱地址）</span>
         </p>
         </div>
         '''
 
-        # 设置样式确保文本颜色对比度
-        text_browser.setStyleSheet("""
-            QTextBrowser {
-                background-color: white;
-                color: black;
-                selection-background-color: #0078d4;
+    def create_faq_tab(self):
+        """创建常见问题标签页"""
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        text_browser = QTextBrowser()
+
+        # 应用主题样式
+        c = default_theme.colors
+        text_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+                font-size: 13px;
+                line-height: 1.6;
+                selection-background-color: {c.PRIMARY};
                 selection-color: white;
-            }
-            a {
-                color: #2196f3;
+                border: none;
+            }}
+            a {{
+                color: {c.PRIMARY};
                 text-decoration: underline;
-            }
-            a:hover {
-                color: #1976d2;
-                background-color: #e3f2fd;
-            }
+            }}
+            a:hover {{
+                color: {c.PRIMARY_LIGHT};
+                background-color: {c.BACKGROUND_HOVER};
+            }}
         """)
 
         # 连接链接点击事件
         text_browser.setOpenLinks(False)  # 禁用默认的链接打开行为
         text_browser.anchorClicked.connect(self._handle_link_click)
 
-        text_browser.setHtml(faq_text)
+        text_browser.setHtml(self._generate_faq_html())
         layout.addWidget(text_browser)
-        
+
         return widget
     
     def _generate_version_history_html(self):
         """生成版本历史HTML内容"""
         html_parts = []
-        
-        # 版本样式配色
-        version_styles = [
-            {"bg": "#e8f5e8", "border": "#4caf50", "text": "#2e7d32", "emoji": "🎉", "label": "(当前版本)"},
-            {"bg": "#f0f7ff", "border": "#2196f3", "text": "#1565c0", "emoji": "✨", "label": ""},
-            {"bg": "#f8f9fa", "border": "#6c757d", "text": "#495057", "emoji": "🚀", "label": ""},
-            {"bg": "#fff3e0", "border": "#ff9800", "text": "#ef6c00", "emoji": "🔧", "label": ""},
-            {"bg": "#fce4ec", "border": "#e91e63", "text": "#c2185b", "emoji": "📦", "label": ""},
-        ]
-        
+        colors = self._get_html_colors()
+
+        # 根据主题选择版本样式配色
+        if default_theme.is_dark:
+            # 暗色主题配色
+            version_styles = [
+                {"bg": "#1e3a1e", "border": "#4caf50", "text": "#81c784", "emoji": "🎉", "label": "(当前版本)"},
+                {"bg": "#1a2a3a", "border": "#2196f3", "text": "#64b5f6", "emoji": "✨", "label": ""},
+                {"bg": "#2a2a2a", "border": "#6c757d", "text": "#b0b0b0", "emoji": "🚀", "label": ""},
+                {"bg": "#3a2a1a", "border": "#ff9800", "text": "#ffb74d", "emoji": "🔧", "label": ""},
+                {"bg": "#3a1a2a", "border": "#e91e63", "text": "#f48fb1", "emoji": "📦", "label": ""},
+            ]
+        else:
+            # 亮色主题配色
+            version_styles = [
+                {"bg": "#e8f5e8", "border": "#4caf50", "text": "#2e7d32", "emoji": "🎉", "label": "(当前版本)"},
+                {"bg": "#f0f7ff", "border": "#2196f3", "text": "#1565c0", "emoji": "✨", "label": ""},
+                {"bg": "#f8f9fa", "border": "#6c757d", "text": "#495057", "emoji": "🚀", "label": ""},
+                {"bg": "#fff3e0", "border": "#ff9800", "text": "#ef6c00", "emoji": "🔧", "label": ""},
+                {"bg": "#fce4ec", "border": "#e91e63", "text": "#c2185b", "emoji": "📦", "label": ""},
+            ]
+
         for i, version_info in enumerate(VERSION_HISTORY):
             style = version_styles[min(i, len(version_styles) - 1)]
-            
+
             # 当前版本标记
             version_label = style["label"] if i == 0 else ""
-            
+
             html_part = f'''
             <div style="background-color: {style["bg"]}; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid {style["border"]};">
             <h4 style="color: {style["text"]}; margin: 0 0 10px 0;">{style["emoji"]} v{version_info["version"]} {version_label} - {version_info["date"]}</h4>
             '''
-            
+
             if version_info.get("title"):
                 html_part += f'<p style="margin: 0 0 10px 0; font-weight: bold; color: {style["text"]};">{version_info["title"]}</p>'
-            
+
             # 添加亮点
             if version_info.get("highlights"):
-                html_part += '<ul style="margin: 5px 0; padding-left: 20px;">'
+                html_part += f'<ul style="margin: 5px 0; padding-left: 20px; color: {colors["text_primary"]};">'
                 for highlight in version_info["highlights"]:
                     html_part += f'<li>{highlight}</li>'
                 html_part += '</ul>'
             # 如果没有亮点，使用详细信息的前几项
             elif version_info.get("details"):
-                html_part += '<ul style="margin: 5px 0; padding-left: 20px;">'
+                html_part += f'<ul style="margin: 5px 0; padding-left: 20px; color: {colors["text_primary"]};">'
                 for detail in version_info["details"][:4]:  # 只显示前4项
                     html_part += f'<li>{detail}</li>'
                 html_part += '</ul>'
-            
+
             html_part += '</div>'
             html_parts.append(html_part)
-        
+
         return '\n'.join(html_parts)
         
-    def create_about_tab(self):
-        """创建关于标签页"""
-        
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        text_browser = QTextBrowser()
-        
-        # 获取版本信息
+    def _generate_about_html(self):
+        """生成关于标签页的HTML内容"""
         about_info = get_about_info()
-        
-        about_text = f'''
-        <h2 style="border-bottom: 2px solid #3498DB; padding-bottom: 8px; color: #2C3E50;">图片分类工具 v{about_info["version"]}</h2>
+        colors = self._get_html_colors()
 
-        <div style="text-align: center; background-color: #F0F7FF; padding: 20px; border-left: 4px solid #3498DB; margin: 20px 0;">
-        <h3 style="margin: 0; color: #2980B9;">专业图片分类管理工具</h3>
-        <p style="margin: 10px 0 0 0; color: #2C3E50;">提高图片整理效率，让分类工作更简单</p>
+        return f'''
+        <h2 style="border-bottom: 2px solid {colors['primary']}; padding-bottom: 8px; color: {colors['text_primary']};">图片分类工具 v{about_info["version"]}</h2>
+
+        <div style="text-align: center; background-color: {colors['bg_hover']}; padding: 20px; border-left: 4px solid {colors['primary']}; margin: 20px 0;">
+        <h3 style="margin: 0; color: {colors['primary']};">专业图片分类管理工具</h3>
+        <p style="margin: 10px 0 0 0; color: {colors['text_primary']};">提高图片整理效率，让分类工作更简单</p>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">核心特性</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">核心特性</h3>
 
-        <div style="background-color: #E8F5E9; padding: 15px; border-left: 4px solid #4CAF50; margin: 15px 0;">
-        <h4 style="color: #2E7D32; margin-top: 0;">图片处理</h4>
-        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: #2C3E50;">
+        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
+        <h4 style="color: {colors['primary']}; margin-top: 0;">图片处理</h4>
+        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li>支持多种常见图片格式</li>
         <li>智能图片预览和缩放</li>
         <li>拖拽移动查看细节</li>
         <li>EXIF信息显示</li>
         </ul>
 
-        <h4 style="color: #2E7D32; margin-top: 15px;">文件管理</h4>
-        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: #2C3E50;">
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">文件管理</h4>
+        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li>复制/移动双模式操作</li>
         <li>批量分类处理</li>
         <li>智能类别管理</li>
         <li>自动状态同步</li>
         </ul>
 
-        <h4 style="color: #2E7D32; margin-top: 15px;">操作体验</h4>
-        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: #2C3E50;">
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">操作体验</h4>
+        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li>丰富的快捷键支持</li>
         <li>自定义快捷键设置</li>
         <li>直观的状态提示</li>
         <li>实时进度跟踪</li>
         </ul>
 
-        <h4 style="color: #2E7D32; margin-top: 15px;">性能优化</h4>
-        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: #2C3E50;">
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">性能优化</h4>
+        <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li>网络存储优化</li>
         <li>智能缓存机制</li>
         <li>多线程处理</li>
@@ -1541,80 +1723,92 @@ class TabbedHelpDialog(QDialog):
         </ul>
         </div>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">技术架构</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">技术架构</h3>
 
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid #E0E0E0;">
-        <tr style="background-color: #F8F9FA;">
-        <th style="width: 30%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">技术栈</th>
-        <th style="width: 35%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">版本/库</th>
-        <th style="width: 35%; padding: 8px; border: 1px solid #E0E0E0; text-align: left; color: #2C3E50;">说明</th>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid {colors['border']};">
+        <tr style="background-color: {colors['bg_secondary']};">
+        <th style="width: 30%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">技术栈</th>
+        <th style="width: 35%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">版本/库</th>
+        <th style="width: 35%; padding: 8px; border: 1px solid {colors['border']}; text-align: left; color: {colors['text_primary']};">说明</th>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;"><b>开发语言</b></td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">Python 3.8+</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">主要开发语言</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};"><b>开发语言</b></td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Python 3.8+</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">主要开发语言</td>
         </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;"><b>界面框架</b></td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">PyQt6</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">现代化GUI框架</td>
-        </tr>
-        <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;"><b>图像处理</b></td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">OpenCV + Pillow</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">图片加载和处理</td>
-        </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;"><b>数据存储</b></td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">JSON</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">配置和状态存储</td>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};"><b>界面框架</b></td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">PyQt6</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">现代化GUI框架</td>
         </tr>
         <tr>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;"><b>日志系统</b></td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">Python logging</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">错误跟踪和调试</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};"><b>图像处理</b></td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">OpenCV + Pillow</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">图片加载和处理</td>
         </tr>
-        <tr style="background-color: #FAFAFA;">
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;"><b>多线程</b></td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">QThread</td>
-        <td style="padding: 8px; border: 1px solid #E0E0E0; color: #2C3E50;">后台任务处理</td>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};"><b>数据存储</b></td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">JSON</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">配置和状态存储</td>
+        </tr>
+        <tr>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};"><b>日志系统</b></td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Python logging</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">错误跟踪和调试</td>
+        </tr>
+        <tr style="background-color: {colors['bg_hover']};">
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};"><b>多线程</b></td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">QThread</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">后台任务处理</td>
         </tr>
         </table>
 
-        <h3 style="color: #2C3E50; margin-top: 20px;">版本发展历程</h3>
+        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">版本发展历程</h3>
         <div style="margin: 20px 0;">
         {self._generate_version_history_html()}
         </div>
 
-        <div style="background-color: #F0F7FF; padding: 20px; border-left: 4px solid #3498DB; text-align: center; margin: 30px 0;">
-        <h3 style="margin: 0 0 15px 0; color: #2980B9;">版权信息</h3>
-        <p style="margin: 5px 0; color: #2C3E50;"><b>© 2025 GDDI</b></p>
-        <p style="margin: 5px 0; color: #2C3E50;">专注于提升图片管理效率的专业软件</p>
-        <p style="margin: 15px 0 5px 0; color: #7F8C8D; font-size: 14px; line-height: 1.6;">
+        <div style="background-color: {colors['bg_hover']}; padding: 20px; border-left: 4px solid {colors['primary']}; text-align: center; margin: 30px 0;">
+        <h3 style="margin: 0 0 15px 0; color: {colors['primary']};">版权信息</h3>
+        <p style="margin: 5px 0; color: {colors['text_primary']};"><b>© 2025 GDDI</b></p>
+        <p style="margin: 5px 0; color: {colors['text_primary']};">专注于提升图片管理效率的专业软件</p>
+        <p style="margin: 15px 0 5px 0; color: {colors['text_secondary']}; font-size: 14px; line-height: 1.6;">
         本软件遵循 MIT 开源协议<br>
         感谢所有贡献者和用户的支持
         </p>
-        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #BDC3C7;">
-        <span style="color: #95A5A6; font-size: 13px;">
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid {colors['border']};">
+        <span style="color: {colors['text_secondary']}; font-size: 13px;">
         让图片整理变得简单高效
         </span>
         </div>
         </div>
         '''
-        
-        # 设置样式确保文本颜色对比度
-        text_browser.setStyleSheet("""
-            QTextBrowser {
-                background-color: white;
-                color: black;
-                selection-background-color: #0078d4;
+
+    def create_about_tab(self):
+        """创建关于标签页"""
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        text_browser = QTextBrowser()
+
+        # 应用主题样式
+        c = default_theme.colors
+        text_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+                font-size: 13px;
+                line-height: 1.6;
+                selection-background-color: {c.PRIMARY};
                 selection-color: white;
-            }
+                border: none;
+            }}
         """)
-        
-        text_browser.setHtml(about_text)
+
+        text_browser.setHtml(self._generate_about_html())
         layout.addWidget(text_browser)
-        
+
         return widget
 
 

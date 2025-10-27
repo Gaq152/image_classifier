@@ -6,8 +6,8 @@
 """
 
 
-class Colors:
-    """颜色方案定义"""
+class LightColors:
+    """亮色主题颜色方案"""
 
     # 主色调
     PRIMARY = "#3498DB"
@@ -68,6 +68,74 @@ class Colors:
     SHADOW = "rgba(0, 0, 0, 0.1)"
     OVERLAY = "rgba(0, 0, 0, 0.5)"
     HIGHLIGHT = "rgba(52, 152, 219, 0.1)"
+
+
+class DarkColors:
+    """暗色主题颜色方案"""
+
+    # 主色调
+    PRIMARY = "#42A5F5"
+    PRIMARY_DARK = "#1E88E5"
+    PRIMARY_LIGHT = "#64B5F6"
+
+    # 成功色
+    SUCCESS = "#66BB6A"
+    SUCCESS_DARK = "#43A047"
+    SUCCESS_LIGHT = "#81C784"
+
+    # 警告色
+    WARNING = "#FFA726"
+    WARNING_DARK = "#FB8C00"
+    WARNING_LIGHT = "#FFB74D"
+
+    # 错误色
+    ERROR = "#EF5350"
+    ERROR_DARK = "#E53935"
+    ERROR_LIGHT = "#EF5350"
+
+    # 中性色
+    WHITE = "#FFFFFF"
+    BLACK = "#000000"
+
+    # 灰色系（暗色反转）
+    GRAY_50 = "#1E1E1E"  # 最暗
+    GRAY_100 = "#252525"
+    GRAY_200 = "#2D2D2D"
+    GRAY_300 = "#383838"
+    GRAY_400 = "#4A4A4A"
+    GRAY_500 = "#6B6B6B"
+    GRAY_600 = "#9E9E9E"
+    GRAY_700 = "#B0B0B0"
+    GRAY_800 = "#C5C5C5"
+    GRAY_900 = "#E0E0E0"  # 最亮
+
+    # 背景色
+    BACKGROUND_PRIMARY = "#1E1E1E"
+    BACKGROUND_SECONDARY = "#252525"
+    BACKGROUND_CARD = "#2D2D2D"
+    BACKGROUND_HOVER = "#383838"
+    BACKGROUND_PRESSED = "#4A4A4A"
+
+    # 文本色
+    TEXT_PRIMARY = "#E0E0E0"
+    TEXT_SECONDARY = "#B0B0B0"
+    TEXT_DISABLED = "#6B6B6B"
+    TEXT_ON_PRIMARY = WHITE
+    TEXT_ON_DARK = WHITE
+
+    # 边框色
+    BORDER_LIGHT = "#383838"
+    BORDER_MEDIUM = "#4A4A4A"
+    BORDER_DARK = "#6B6B6B"
+
+    # 特殊用途颜色
+    SHADOW = "rgba(0, 0, 0, 0.3)"
+    OVERLAY = "rgba(0, 0, 0, 0.7)"
+    HIGHLIGHT = "rgba(66, 165, 245, 0.15)"
+
+
+# 为了向后兼容，保留Colors类指向LightColors
+Colors = LightColors
 
 
 class Sizes:
@@ -149,12 +217,45 @@ class Animations:
 class Theme:
     """主题配置类"""
 
+    _instance = None
+    _current_theme = "light"  # 默认亮色主题
+
+    def __new__(cls):
+        """单例模式"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
-        self.colors = Colors()
-        self.sizes = Sizes()
-        self.fonts = Fonts()
-        self.shadows = Shadows()
-        self.animations = Animations()
+        if not hasattr(self, '_initialized'):
+            self.sizes = Sizes()
+            self.fonts = Fonts()
+            self.shadows = Shadows()
+            self.animations = Animations()
+            self._update_colors()
+            self._initialized = True
+
+    def _update_colors(self):
+        """根据当前主题更新颜色"""
+        if self._current_theme == "dark":
+            self.colors = DarkColors()
+        else:
+            self.colors = LightColors()
+
+    @property
+    def is_dark(self):
+        """是否为暗色主题"""
+        return self._current_theme == "dark"
+
+    def set_theme(self, theme_name: str):
+        """设置主题"""
+        if theme_name in ("light", "dark"):
+            self._current_theme = theme_name
+            self._update_colors()
+
+    def get_current_theme(self):
+        """获取当前主题名称"""
+        return self._current_theme
 
     @staticmethod
     def get_rgba_color(hex_color: str, alpha: float = 1.0) -> str:
@@ -173,5 +274,5 @@ class Theme:
         return f"linear-gradient({direction}, {color1}, {color2})"
 
 
-# 默认主题实例
+# 默认主题实例（单例）
 default_theme = Theme()

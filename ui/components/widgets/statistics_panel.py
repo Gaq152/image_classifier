@@ -6,6 +6,7 @@
 
 import logging
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QLabel, QProgressBar
+from ..styles.theme import default_theme
 
 
 class StatisticsPanel(QWidget):
@@ -154,3 +155,76 @@ class StatisticsPanel(QWidget):
 
         except Exception as e:
             self.logger.error(f"更新统计信息失败: {e}")
+
+    def apply_theme(self):
+        """应用主题到统计面板"""
+        try:
+            c = default_theme.colors
+
+            # 更新标题标签样式
+            if hasattr(self, 'findChildren'):
+                for label in self.findChildren(QLabel):
+                    if label.text().startswith("📊"):
+                        label.setStyleSheet(f"""
+                            QLabel {{
+                                font-size: 13px;
+                                font-weight: bold;
+                                color: {c.PRIMARY};
+                                border-bottom: 2px solid {c.PRIMARY};
+                                padding: 4px 6px;
+                                margin-bottom: 4px;
+                            }}
+                        """)
+
+            # 更新统计标签样式
+            label_style = f"""
+                QLabel {{
+                    padding: 4px 6px;
+                    margin: 1px;
+                    font-size: 11px;
+                    border-radius: 3px;
+                    background-color: {c.BACKGROUND_SECONDARY};
+                    color: {c.TEXT_PRIMARY};
+                }}
+            """
+
+            for label in [self.total_label, self.classified_label, self.removed_label, self.remaining_label]:
+                label.setStyleSheet(label_style)
+
+            # 更新进度条样式
+            if hasattr(self, 'progress_bar'):
+                # 获取当前进度值来确定颜色
+                current_value = self.progress_bar.value()
+                if current_value >= 100:
+                    chunk_color = "stop: 0 #28A745, stop: 1 #20C997"
+                elif current_value >= 75:
+                    chunk_color = "stop: 0 #17A2B8, stop: 1 #20C997"
+                elif current_value >= 50:
+                    chunk_color = "stop: 0 #FFC107, stop: 1 #FFD700"
+                else:
+                    chunk_color = "stop: 0 #DC3545, stop: 1 #FF6B6B"
+
+                progress_style = f"""
+                    QProgressBar {{
+                        border: 1px solid {c.BORDER_MEDIUM};
+                        border-radius: 10px;
+                        background-color: {c.BACKGROUND_SECONDARY};
+                        text-align: center;
+                        font-weight: bold;
+                        font-size: 12px;
+                        height: 24px;
+                        margin: 2px 0px;
+                        color: {c.TEXT_PRIMARY};
+                    }}
+                    QProgressBar::chunk {{
+                        background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                            {chunk_color});
+                        border-radius: 8px;
+                        margin: 0px;
+                        border: none;
+                    }}
+                """
+                self.progress_bar.setStyleSheet(progress_style)
+
+        except Exception as e:
+            self.logger.error(f"应用主题到统计面板失败: {e}")
