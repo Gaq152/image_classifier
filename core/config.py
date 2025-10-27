@@ -20,6 +20,7 @@ class Config:
         self.category_order = []
         self.category_shortcuts = {}
         self.ignored_categories = []  # 被忽略的类别目录列表
+        self.category_sort_mode = "name"  # 类别排序模式: "name" 或 "shortcut"
         self._lock = threading.Lock()
         
         # 系统保留的快捷键和类别
@@ -126,6 +127,7 @@ class Config:
                     self.category_order = config_data.get('category_order', [])
                     self.category_shortcuts = config_data.get('category_shortcuts', {})
                     self.ignored_categories = config_data.get('ignored_categories', [])  # 忽略列表
+                    self.category_sort_mode = config_data.get('category_sort_mode', 'name')  # 类别排序模式
                     # 自动更新相关配置（默认值）
                     self.auto_update_enabled = bool(config_data.get('auto_update_enabled', True))
                     self.last_update_check_ts = int(config_data.get('last_update_check_ts', 0))
@@ -154,6 +156,7 @@ class Config:
                 'category_order': self.category_order,
                 'category_shortcuts': self.category_shortcuts,
                 'ignored_categories': getattr(self, 'ignored_categories', []),  # 保存忽略列表
+                'category_sort_mode': getattr(self, 'category_sort_mode', 'name'),  # 保存排序模式
                 'auto_update_enabled': getattr(self, 'auto_update_enabled', True),
                 'last_update_check_ts': getattr(self, 'last_update_check_ts', 0),
                 'update_endpoint': getattr(self, 'update_endpoint', f"https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"),
@@ -192,6 +195,26 @@ class Config:
             return (2, shortcut, category)  # 组合键放最后
 
         return sorted(categories, key=get_shortcut_weight)
+
+    def get_sorted_categories(self, categories, sort_mode=None):
+        """根据排序模式返回排序后的类别列表
+
+        Args:
+            categories: 类别集合或列表
+            sort_mode: 排序模式 ("name" 或 "shortcut")，默认使用配置的模式
+
+        Returns:
+            排序后的类别列表
+        """
+        if sort_mode is None:
+            sort_mode = self.category_sort_mode
+
+        if sort_mode == "shortcut":
+            # 按快捷键排序
+            return self.sort_categories(categories)
+        else:  # sort_mode == "name" (默认)
+            # 按名称排序
+            return sorted(list(categories))
 
     def add_ignored_category(self, category_name):
         """添加类别到忽略列表"""

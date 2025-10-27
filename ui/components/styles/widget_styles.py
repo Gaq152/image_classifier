@@ -15,79 +15,90 @@ class WidgetStyles:
 
     @staticmethod
     def get_category_button_style() -> str:
-        """类别按钮样式 - 保持原始外观"""
-        return """
-            QPushButton {
+        """类别按钮样式 - 使用主题颜色"""
+        # 根据主题选择合适的文字颜色
+        # 对于有彩色背景的状态，使用白色或深色以确保对比度
+        if default_theme.is_dark:
+            # 深色主题：彩色背景上使用白色文字
+            colored_bg_text = "#FFFFFF"
+        else:
+            # 浅色主题：彩色背景上使用深色文字
+            colored_bg_text = default_theme.colors.GRAY_800
+
+        return f"""
+            QPushButton {{
                 font-size: 13px;
                 padding: 6px 8px;
-                border: 1px solid #ddd;
+                border: 1px solid {default_theme.colors.BORDER_LIGHT};
                 border-radius: 4px;
-                background-color: #ffffff;
+                background-color: {default_theme.colors.BACKGROUND_CARD};
+                color: {default_theme.colors.TEXT_PRIMARY};
                 text-align: left;
                 margin: 1px 0;
                 font-weight: 500;
                 min-height: 20px;
-            }
-            QPushButton:hover {
-                border-color: #aaa;
-                background-color: #f0f0f0;
-            }
+            }}
+            QPushButton:hover {{
+                border-color: {default_theme.colors.BORDER_MEDIUM};
+                background-color: {default_theme.colors.BACKGROUND_HOVER};
+                color: {default_theme.colors.TEXT_PRIMARY};
+            }}
             /* 键盘导航或鼠标选中状态 - 蓝色边框 */
-            QPushButton:checked {
-                border: 2px solid #2196F3;
-                background-color: #E3F2FD;
-                color: #1565C0;
+            QPushButton:checked {{
+                border: 2px solid {default_theme.colors.PRIMARY};
+                background-color: {default_theme.colors.PRIMARY_LIGHT};
+                color: {colored_bg_text};
                 font-weight: bold;
-            }
+            }}
             /* 已分类状态 - 绿色背景（多分类模式下已选中的类别）*/
-            QPushButton[classified="true"] {
-                border: 1px solid #4CAF50;
-                background-color: #E8F5E8;
-                color: #2E7D32;
+            QPushButton[classified="true"] {{
+                border: 1px solid {default_theme.colors.SUCCESS};
+                background-color: {default_theme.colors.SUCCESS_LIGHT};
+                color: {colored_bg_text};
                 font-weight: bold;
-            }
+            }}
             /* 已分类且当前选中状态 - 蓝色边框，绿色背景 */
-            QPushButton[classified="true"]:checked {
-                border: 2px solid #2196F3;
-                background-color: #C8E6C9;
-                color: #1B5E20;
+            QPushButton[classified="true"]:checked {{
+                border: 2px solid {default_theme.colors.PRIMARY};
+                background-color: {default_theme.colors.SUCCESS_LIGHT};
+                color: {colored_bg_text};
                 font-weight: bold;
-            }
+            }}
             /* 多分类状态 - 绿色背景（用于多分类模式下已分类的类别）*/
-            QPushButton[multi_classified="true"] {
-                border: 1px solid #4CAF50;
-                background-color: #E8F5E8;
-                color: #2E7D32;
+            QPushButton[multi_classified="true"] {{
+                border: 1px solid {default_theme.colors.SUCCESS};
+                background-color: {default_theme.colors.SUCCESS_LIGHT};
+                color: {colored_bg_text};
                 font-weight: bold;
-            }
+            }}
             /* 多分类且当前选中状态 - 蓝色边框，绿色背景 */
-            QPushButton[multi_classified="true"]:checked {
-                border: 2px solid #2196F3;
-                background-color: #C8E6C9;
-                color: #1B5E20;
+            QPushButton[multi_classified="true"]:checked {{
+                border: 2px solid {default_theme.colors.PRIMARY};
+                background-color: {default_theme.colors.SUCCESS_LIGHT};
+                color: {colored_bg_text};
                 font-weight: bold;
-            }
+            }}
             /* 已移除状态 - 红色背景 */
-            QPushButton[removed="true"] {
-                border: 1px solid #F44336;
-                background-color: #FFEBEE;
-                color: #C62828;
+            QPushButton[removed="true"] {{
+                border: 1px solid {default_theme.colors.ERROR};
+                background-color: {default_theme.colors.ERROR_LIGHT};
+                color: {colored_bg_text};
                 font-weight: bold;
-            }
+            }}
             /* 已移除且选中状态 */
-            QPushButton[removed="true"]:checked {
-                border: 2px solid #2196F3;
-                background-color: #FFCDD2;
-                color: #B71C1C;
+            QPushButton[removed="true"]:checked {{
+                border: 2px solid {default_theme.colors.PRIMARY};
+                background-color: {default_theme.colors.ERROR_LIGHT};
+                color: {colored_bg_text};
                 font-weight: bold;
-            }
-            QLabel {
+            }}
+            QLabel {{
                 background: transparent;
                 border: none;
                 font-size: 13px;
                 font-weight: inherit;
                 color: inherit;
-            }
+            }}
         """
 
     @staticmethod

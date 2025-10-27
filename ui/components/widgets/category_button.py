@@ -53,6 +53,9 @@ class CategoryButton(QPushButton):
         # 使用统一的样式系统
         apply_category_button_style(self)
 
+        # 更新标签颜色以匹配主题
+        self.update_label_colors()
+
     def update_text(self):
         """更新按钮文本"""
         try:
@@ -76,12 +79,14 @@ class CategoryButton(QPushButton):
         self.setProperty("classified", classified)
         self.style().unpolish(self)
         self.style().polish(self)
+        self.update_label_colors()  # 更新标签颜色
 
     def set_removed(self, removed):
         """设置移除状态"""
         self.setProperty("removed", removed)
         self.style().unpolish(self)
         self.style().polish(self)
+        self.update_label_colors()  # 更新标签颜色
 
     def set_multi_classified(self, multi_classified):
         """设置多分类状态"""
@@ -89,13 +94,47 @@ class CategoryButton(QPushButton):
         self.setProperty("multi_classified", multi_classified)
         self.style().unpolish(self)
         self.style().polish(self)
+        self.update_label_colors()  # 更新标签颜色
         if multi_classified:
             self.logger.debug(f"设置多分类标记: {self.category_name}")
+
+    def update_label_colors(self):
+        """更新标签颜色以匹配当前主题"""
+        try:
+            from ..styles.theme import default_theme
+
+            # 获取当前按钮状态
+            is_classified = self.property("classified")
+            is_removed = self.property("removed")
+            is_multi = self.property("multi_classified")
+            is_checked = self.isChecked()
+
+            # 根据状态选择颜色
+            if is_classified or is_multi or is_removed or is_checked:
+                # 有彩色背景的状态：使用白色（深色主题）或深色（浅色主题）
+                if default_theme.is_dark:
+                    color = "#FFFFFF"
+                else:
+                    color = default_theme.colors.GRAY_800
+            else:
+                # 普通状态：使用主题的 TEXT_PRIMARY
+                color = default_theme.colors.TEXT_PRIMARY
+
+            # 应用颜色到标签
+            label_style = f"color: {color}; background: transparent; border: none;"
+            self.text_label.setStyleSheet(label_style)
+            self.count_label.setStyleSheet(label_style)
+
+        except Exception as e:
+            self.logger.error(f"更新标签颜色失败: {e}")
 
     def show_context_menu(self, pos):
         """显示右键菜单"""
         try:
             menu = QMenu(self)
+
+            # 应用主题样式
+            menu.setStyleSheet(WidgetStyles.get_context_menu_style())
 
             # 修改类别名称
             rename_action = menu.addAction("🏷️ 修改类别名称")
@@ -117,6 +156,25 @@ class CategoryButton(QPushButton):
             manage_ignored_action.triggered.connect(self.manage_ignored_categories)
 
             menu.addSeparator()
+
+            # 排序模式选项
+            main_window = self.window()
+            if main_window and hasattr(main_window, 'config') and hasattr(main_window.config, 'category_sort_mode'):
+                current_mode = main_window.config.category_sort_mode
+
+                # 按名称排序
+                sort_by_name_action = menu.addAction("📝 按名称排序")
+                if current_mode == "name":
+                    sort_by_name_action.setText("✓ 📝 按名称排序")  # 标记当前选中
+                sort_by_name_action.triggered.connect(lambda: self.change_sort_mode("name"))
+
+                # 按快捷键排序
+                sort_by_shortcut_action = menu.addAction("⌨️ 按快捷键排序")
+                if current_mode == "shortcut":
+                    sort_by_shortcut_action.setText("✓ ⌨️ 按快捷键排序")  # 标记当前选中
+                sort_by_shortcut_action.triggered.connect(lambda: self.change_sort_mode("shortcut"))
+
+                menu.addSeparator()
 
             # 删除类别（如果不是移除按钮）
             if not self.is_remove:
@@ -238,9 +296,28 @@ class CategoryButton(QPushButton):
             else:
                 toast_error(self, f"打开管理对话框失败: {e}")
 
+    def change_sort_mode(self, new_mode):
+        """切换排序模式"""
+        try:
+            main_window = self.window()
+            if main_window and hasattr(main_window, 'change_category_sort_mode'):
+                main_window.change_category_sort_mode(new_mode)
+        except Exception as e:
+            # 获取主窗口用于显示Toast
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'show_error_toast'):
+                main_window = main_window.parent()
+            if main_window:
+                main_window.show_error_toast(f"切换排序模式失败: {e}")
+            else:
+                toast_error(self, f"切换排序模式失败: {e}")
+
     def ignore_category(self):
         """忽略类别"""
         try:
+            from ..styles.theme import default_theme
+            c = default_theme.colors
+
             # 创建自定义消息框
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("⊘ 确认忽略")
@@ -258,14 +335,14 @@ class CategoryButton(QPushButton):
             # 设置默认按钮为"否"
             msg_box.setDefaultButton(no_button)
 
-            # 使用统一的样式系统
+            # 使用主题样式
             message_box_style = f"""
                 QMessageBox {{
-                    background-color: #F8F9FA;
-                    color: #2C3E50;
+                    background-color: {c.BACKGROUND_CARD};
+                    color: {c.TEXT_PRIMARY};
                 }}
                 QMessageBox QLabel {{
-                    color: #2C3E50;
+                    color: {c.TEXT_PRIMARY};
                     font-size: 14px;
                 }}
                 {ButtonStyles.get_primary_button_style()}
@@ -294,6 +371,9 @@ class CategoryButton(QPushButton):
     def delete_category(self):
         """删除类别"""
         try:
+            from ..styles.theme import default_theme
+            c = default_theme.colors
+
             # 创建自定义消息框
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("🗑️ 确认删除")
@@ -311,14 +391,14 @@ class CategoryButton(QPushButton):
             # 设置默认按钮为"否"
             msg_box.setDefaultButton(no_button)
 
-            # 使用统一的样式系统
+            # 使用主题样式
             message_box_style = f"""
                 QMessageBox {{
-                    background-color: #F8F9FA;
-                    color: #2C3E50;
+                    background-color: {c.BACKGROUND_CARD};
+                    color: {c.TEXT_PRIMARY};
                 }}
                 QMessageBox QLabel {{
-                    color: #2C3E50;
+                    color: {c.TEXT_PRIMARY};
                     font-size: 14px;
                 }}
                 {ButtonStyles.get_primary_button_style()}
