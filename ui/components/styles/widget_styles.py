@@ -386,6 +386,32 @@ class WidgetStyles:
                 background-color: {default_theme.colors.BORDER_LIGHT};
                 margin: {default_theme.sizes.SPACING_XS} {default_theme.sizes.SPACING_SM};
             }}
+            QMenu {{
+                icon-size: 20px 20px;
+            }}
+            QMenu::icon {{
+                width: 20px;
+                height: 20px;
+                padding-left: 4px;
+            }}
+            QMenu::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 2px solid {default_theme.colors.BORDER_MEDIUM};
+                border-radius: 3px;
+                background-color: {default_theme.colors.BACKGROUND_CARD};
+                margin-left: 6px;
+                margin-right: 10px;
+            }}
+            QMenu::indicator:non-exclusive:checked {{
+                background-color: {default_theme.colors.PRIMARY};
+                border-color: {default_theme.colors.PRIMARY_DARK};
+                image: none;
+            }}
+            QMenu::indicator:non-exclusive:unchecked {{
+                background-color: {default_theme.colors.BACKGROUND_CARD};
+                border-color: {default_theme.colors.BORDER_MEDIUM};
+            }}
         """
 
 

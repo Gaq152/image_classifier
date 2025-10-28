@@ -23,8 +23,8 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                             , QSizePolicy, QFileDialog,
                             QMessageBox, QApplication, QListWidget,
                             QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
-from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint
+from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush
 from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
                                 StatisticsPanel)
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
@@ -450,8 +450,44 @@ class ImageClassifier(QMainWindow):
         """)
         list_title_layout.addWidget(list_label)
 
-        # 添加弹性空间，推送文件夹按钮到右侧
+        # 添加弹性空间，推送右侧按钮到最右边
         list_title_layout.addStretch()
+
+        # 筛选按钮 - 筛选图片显示条件
+        self.filter_button = self.create_toolbar_button('▼', 'filter_button',
+                                                       '筛选图片显示条件',
+                                                       self.show_filter_menu,
+                                                       size=(18, 18))
+        # 初始化过滤器状态（默认全部显示）
+        self.filter_unclassified = True
+        self.filter_classified = True
+        self.filter_removed = True
+
+        # 应用样式
+        self.filter_button.setStyleSheet("""
+            QPushButton#filter_button {
+                background-color: transparent;
+                color: #0D6EFD;
+                border: none;
+                border-radius: 3px;
+                font-size: 11px;
+                font-weight: normal;
+                text-align: center;
+                margin: 0px;
+                padding: 0px;
+            }
+            QPushButton#filter_button:hover {
+                background-color: rgba(245, 245, 245, 180);
+            }
+            QPushButton#filter_button:pressed {
+                background-color: rgba(224, 224, 224, 180);
+            }
+            QPushButton#filter_button[active="true"] {
+                color: #2196F3;
+                font-weight: bold;
+            }
+        """)
+        list_title_layout.addWidget(self.filter_button)
 
         # 文件夹图标按钮 - 打开目录功能
         folder_button = self.create_toolbar_button('📁', 'folder_button',
@@ -586,8 +622,35 @@ class ImageClassifier(QMainWindow):
         """)
         category_title_layout.addWidget(category_label)
 
-        # 添加弹性空间，推送添加按钮到右侧
+        # 添加弹性空间，推送右侧按钮到最右边
         category_title_layout.addStretch()
+
+        # 排序按钮 - 类别排序选项
+        self.sort_button = self.create_toolbar_button('▼', 'sort_button',
+                                                     '类别排序方式',
+                                                     self.show_sort_menu,
+                                                     size=(18, 18))
+        # 应用样式
+        self.sort_button.setStyleSheet("""
+            QPushButton#sort_button {
+                background-color: transparent;
+                color: #E65100;
+                border: none;
+                border-radius: 3px;
+                font-size: 11px;
+                font-weight: normal;
+                text-align: center;
+                margin: 0px;
+                padding: 0px;
+            }
+            QPushButton#sort_button:hover {
+                background-color: rgba(245, 245, 245, 180);
+            }
+            QPushButton#sort_button:pressed {
+                background-color: rgba(224, 224, 224, 180);
+            }
+        """)
+        category_title_layout.addWidget(self.sort_button)
 
         # 添加类别图标按钮 - "+"字符
         add_button = self.create_toolbar_button('+', 'add_category_button',
@@ -1308,8 +1371,13 @@ class ImageClassifier(QMainWindow):
             # 移动模式下，补充已分类和已移除的图片到列表
             self._supplement_moved_files_to_list()
 
-            # 状态加载完成后，更新UI显示（不包括current_image，避免重复刷新）
-            self.schedule_ui_update('image_list', 'statistics')
+            # 应用过滤器（如果按钮已创建）
+            if hasattr(self, 'filter_button'):
+                self.apply_image_filter()
+            else:
+                # 状态加载完成后，更新UI显示（不包括current_image，避免重复刷新）
+                self.schedule_ui_update('image_list', 'statistics')
+
             self.logger.debug("状态文件异步加载完成")
         except Exception as e:
             self.logger.error(f"延迟加载状态文件失败: {e}")
@@ -2257,7 +2325,313 @@ class ImageClassifier(QMainWindow):
         if hasattr(item, 'image_index'):
             self.current_index = item.image_index
             self.show_current_image()
-    
+
+    def create_filter_status_icon(self, status_type, is_checked=False):
+        """创建筛选菜单的状态图标（带checkbox）
+
+        Args:
+            status_type: 状态类型，'unclassified', 'classified', 'removed'
+            is_checked: 是否选中
+
+        Returns:
+            QIcon: 状态图标
+        """
+        # 创建72x40的图标（左侧checkbox + 右侧状态图标）
+        from PyQt6.QtGui import QPainter, QPen, QBrush, QFont
+
+        pixmap = QPixmap(72, 40)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 绘制checkbox（左侧，增大尺寸）
+        checkbox_x = 4
+        checkbox_y = 6
+        checkbox_size = 28
+
+        # Checkbox背景
+        if is_checked:
+            painter.setPen(QPen(QColor("#0D6EFD"), 2))
+            painter.setBrush(QBrush(QColor("#0D6EFD"), Qt.BrushStyle.SolidPattern))
+        else:
+            painter.setPen(QPen(QColor("#ADB5BD"), 2))
+            painter.setBrush(QBrush(QColor("#FFFFFF"), Qt.BrushStyle.SolidPattern))
+
+        painter.drawRoundedRect(checkbox_x, checkbox_y, checkbox_size, checkbox_size, 5, 5)
+
+        # 绘制勾选标记（调整位置和大小）
+        if is_checked:
+            painter.setPen(QPen(Qt.GlobalColor.white, 3))
+            painter.drawLine(checkbox_x + 7, checkbox_y + 14, checkbox_x + 11, checkbox_y + 19)
+            painter.drawLine(checkbox_x + 11, checkbox_y + 19, checkbox_x + 21, checkbox_y + 8)
+
+        # 绘制状态图标（右侧，偏移36像素）
+        offset_x = 36
+
+        # 根据状态设置颜色和图标
+        if status_type == 'classified':
+            # 已分类 - 绿色勾选图标
+            color = QColor("#4CAF50")
+            shadow_color = QColor("#2E7D32")
+        elif status_type == 'removed':
+            # 已移除 - 红色删除图标
+            color = QColor("#F44336")
+            shadow_color = QColor("#C62828")
+        else:  # unclassified
+            # 待处理 - 橙色警告图标
+            color = QColor("#FF9800")
+            shadow_color = QColor("#F57C00")
+
+        # 绘制阴影效果（垂直居中）
+        painter.setPen(QPen(shadow_color, 2))
+        painter.setBrush(QBrush(shadow_color, Qt.BrushStyle.SolidPattern))
+        painter.drawEllipse(offset_x + 3, 7, 28, 28)
+
+        # 绘制主圆形（垂直居中）
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(QBrush(color, Qt.BrushStyle.SolidPattern))
+        painter.drawEllipse(offset_x + 2, 6, 28, 28)
+
+        # 绘制状态符号（调整y坐标以居中）
+        painter.setPen(QPen(Qt.GlobalColor.white, 3))
+        if status_type == 'classified':
+            # 绘制√ - 更优雅的勾选
+            painter.drawLine(offset_x + 8, 20, offset_x + 14, 26)
+            painter.drawLine(offset_x + 14, 26, offset_x + 26, 14)
+        elif status_type == 'removed':
+            # 绘制× - 删除符号
+            painter.drawLine(offset_x + 10, 14, offset_x + 24, 28)
+            painter.drawLine(offset_x + 24, 14, offset_x + 10, 28)
+        else:  # unclassified
+            # 绘制! - 待处理警告
+            painter.setPen(QPen(Qt.GlobalColor.white, 2))
+            painter.drawLine(offset_x + 16, 12, offset_x + 16, 22)  # 竖线
+            painter.drawEllipse(offset_x + 14, 26, 4, 4)  # 点
+
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_checkbox_icon(self, checked=False):
+        """创建复选框图标
+
+        Args:
+            checked: 是否选中状态
+        """
+        from .components.styles import default_theme
+
+        # 创建18x18的图标
+        pixmap = QPixmap(18, 18)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if checked:
+            # 选中状态 - 蓝色背景 + 白色打勾
+            painter.setPen(QPen(QColor(default_theme.colors.PRIMARY_DARK), 2))
+            painter.setBrush(QBrush(QColor(default_theme.colors.PRIMARY)))
+            painter.drawRoundedRect(1, 1, 16, 16, 3, 3)
+
+            # 绘制白色打勾符号
+            painter.setPen(QPen(Qt.GlobalColor.white, 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            painter.drawLine(4, 9, 7, 13)
+            painter.drawLine(7, 13, 14, 5)
+        else:
+            # 未选中状态 - 灰色边框 + 空白背景
+            painter.setPen(QPen(QColor(default_theme.colors.BORDER_MEDIUM), 2))
+            painter.setBrush(QBrush(QColor(default_theme.colors.BACKGROUND_CARD)))
+            painter.drawRoundedRect(1, 1, 16, 16, 3, 3)
+
+        painter.end()
+        return QIcon(pixmap)
+
+    def show_sort_menu(self):
+        """显示排序方式菜单"""
+        from .components.styles import WidgetStyles
+
+        menu = QMenu(self)
+        menu.setStyleSheet(WidgetStyles.get_context_menu_style())
+
+        # 获取当前排序模式
+        current_mode = getattr(self.config, 'category_sort_mode', 'name')
+
+        # 两个单选菜单项 - 使用自定义复选框图标
+        action_name = QAction(self.create_checkbox_icon(current_mode == 'name'), "按名称排序", self)
+        action_name.triggered.connect(lambda: self.change_category_sort_mode('name'))
+        menu.addAction(action_name)
+
+        action_shortcut = QAction(self.create_checkbox_icon(current_mode == 'shortcut'), "按快捷键排序", self)
+        action_shortcut.triggered.connect(lambda: self.change_category_sort_mode('shortcut'))
+        menu.addAction(action_shortcut)
+
+        # 在排序按钮下方显示菜单 - 使用popup()让Qt自动处理边界
+        button_pos = self.sort_button.mapToGlobal(self.sort_button.rect().bottomLeft())
+        menu.popup(button_pos)
+
+    def show_filter_menu(self):
+        """显示筛选菜单"""
+        from .components.styles import WidgetStyles
+
+        menu = QMenu(self)
+        menu.setStyleSheet(WidgetStyles.get_context_menu_style())
+
+        # 三个可勾选的菜单项 - 使用自定义复选框图标
+        action_unclassified = QAction(self.create_checkbox_icon(self.filter_unclassified), "⚠️ 显示未分类图片", self)
+        action_unclassified.triggered.connect(lambda: self.toggle_filter('unclassified'))
+        menu.addAction(action_unclassified)
+
+        action_classified = QAction(self.create_checkbox_icon(self.filter_classified), "✅ 显示已分类图片", self)
+        action_classified.triggered.connect(lambda: self.toggle_filter('classified'))
+        menu.addAction(action_classified)
+
+        action_removed = QAction(self.create_checkbox_icon(self.filter_removed), "❌ 显示已移除图片", self)
+        action_removed.triggered.connect(lambda: self.toggle_filter('removed'))
+        menu.addAction(action_removed)
+
+        menu.addSeparator()
+
+        # 统计信息（不可点击）
+        if hasattr(self, 'image_files') and self.image_files:
+            stats = self.get_filter_stats()
+            stats_text = f"未分类: {stats['unclassified']} | 已分类: {stats['classified']} | 已移除: {stats['removed']}"
+            action_stats = QAction(stats_text, self)
+            action_stats.setEnabled(False)  # 不可点击
+            menu.addAction(action_stats)
+
+            # 显示当前过滤结果
+            filtered_count = self.image_list.count()
+            total_count = len(self.image_files)
+            if filtered_count < total_count:
+                action_result = QAction(f"✓ 已应用筛选: 显示 {filtered_count}/{total_count} 张", self)
+                action_result.setEnabled(False)
+                menu.addAction(action_result)
+
+        # 在筛选按钮下方显示菜单 - 使用popup()让Qt自动处理边界
+        button_pos = self.filter_button.mapToGlobal(self.filter_button.rect().bottomLeft())
+        menu.popup(button_pos)
+
+    def toggle_filter(self, filter_type):
+        """切换过滤器状态"""
+        # 切换状态
+        if filter_type == 'unclassified':
+            self.filter_unclassified = not self.filter_unclassified
+        elif filter_type == 'classified':
+            self.filter_classified = not self.filter_classified
+        elif filter_type == 'removed':
+            self.filter_removed = not self.filter_removed
+
+        # 至少保留一个选项
+        if not (self.filter_unclassified or self.filter_classified or self.filter_removed):
+            toast_warning(self, "至少需要选择一种图片类型")
+            # 恢复刚才的选择
+            if filter_type == 'unclassified':
+                self.filter_unclassified = True
+            elif filter_type == 'classified':
+                self.filter_classified = True
+            elif filter_type == 'removed':
+                self.filter_removed = True
+            return
+
+        # 应用过滤
+        self.apply_image_filter()
+
+        # 更新按钮状态（有过滤时高亮）
+        is_filtering = not (self.filter_unclassified and self.filter_classified and self.filter_removed)
+        self.filter_button.setProperty("active", is_filtering)
+        self.filter_button.style().unpolish(self.filter_button)
+        self.filter_button.style().polish(self.filter_button)
+
+    def apply_image_filter(self):
+        """应用过滤器到图片列表"""
+        if not hasattr(self, 'image_files') or not self.image_files:
+            return
+
+        # 保存当前选中的图片路径
+        current_item = self.image_list.currentItem()
+        current_path = current_item.image_path if current_item and hasattr(current_item, 'image_path') else None
+
+        # 清空列表
+        self.image_list.clear()
+
+        # 遍历并过滤
+        new_index = -1
+        display_index = 0
+        for idx, img_path in enumerate(self.image_files):
+            img_path_str = str(img_path)
+
+            # 判断状态
+            is_removed = img_path_str in self.removed_images
+            is_classified = img_path_str in self.classified_images
+            is_unclassified = not is_removed and not is_classified
+
+            # 检查是否显示
+            should_show = (
+                (is_unclassified and self.filter_unclassified) or
+                (is_classified and self.filter_classified) or
+                (is_removed and self.filter_removed)
+            )
+
+            if should_show:
+                item = ImageListItem(img_path, is_classified, is_removed)
+                item.image_index = idx  # 保存原始索引
+
+                # 设置多分类状态
+                if is_classified:
+                    category = self.classified_images.get(img_path_str)
+                    if isinstance(category, list):
+                        item.is_multi_classified = True
+
+                # 设置图标
+                item.set_status_icon()
+
+                self.image_list.addItem(item)
+
+                # 恢复之前选中的项
+                if current_path and str(img_path) == str(current_path):
+                    new_index = display_index
+
+                display_index += 1
+
+        # 恢复选中
+        if new_index >= 0:
+            self.image_list.setCurrentRow(new_index)
+            # 更新 current_index 为原始索引
+            item = self.image_list.item(new_index)
+            if item and hasattr(item, 'image_index'):
+                self.current_index = item.image_index
+        elif self.image_list.count() > 0:
+            self.image_list.setCurrentRow(0)
+            item = self.image_list.item(0)
+            if item and hasattr(item, 'image_index'):
+                self.current_index = item.image_index
+
+        # 更新图片显示
+        if self.image_list.count() > 0:
+            self.show_current_image()
+
+    def get_filter_stats(self):
+        """获取过滤统计信息"""
+        stats = {
+            'unclassified': 0,
+            'classified': 0,
+            'removed': 0
+        }
+
+        if not hasattr(self, 'image_files') or not self.image_files:
+            return stats
+
+        for img_path in self.image_files:
+            img_path_str = str(img_path)
+            if img_path_str in self.removed_images:
+                stats['removed'] += 1
+            elif img_path_str in self.classified_images:
+                stats['classified'] += 1
+            else:
+                stats['unclassified'] += 1
+
+        return stats
+
     def select_category(self, category_name):
         """选择类别并更新视觉状态"""
         self.selected_category = category_name
