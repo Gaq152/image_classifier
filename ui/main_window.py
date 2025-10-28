@@ -2523,14 +2523,6 @@ class ImageClassifier(QMainWindow):
             action_stats.setEnabled(False)  # 不可点击
             menu.addAction(action_stats)
 
-            # 显示当前过滤结果
-            filtered_count = self.image_list.count()
-            total_count = len(self.image_files)
-            if filtered_count < total_count:
-                action_result = QAction(f"✓ 已应用筛选: 显示 {filtered_count}/{total_count} 张", self)
-                action_result.setEnabled(False)
-                menu.addAction(action_result)
-
         # 在筛选按钮下方显示菜单 - 智能定位防止超出窗口
         # 先让菜单调整大小以获得准确的尺寸
         menu.adjustSize()
