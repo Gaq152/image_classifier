@@ -16,6 +16,7 @@ class ImageListItem(QListWidgetItem):
     def __init__(self, image_path, is_classified, is_removed, parent=None):
         super().__init__(parent)
         self.image_path = image_path
+        self.file_path = image_path  # 兼容性别名
         self.is_classified = is_classified
         self.is_removed = is_removed
         self.is_multi_classified = False  # 多分类状态标记
