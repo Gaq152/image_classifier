@@ -31,6 +31,7 @@ from .components.widgets.badge_button import BadgeWidget
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
 from .components.styles.theme import default_theme
+from .components.tutorial import TutorialManager
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
                      TabbedHelpDialog, ProgressDialog)
 from .managers import FileStateManager
@@ -78,6 +79,14 @@ class ImageClassifier(QMainWindow):
         # 设置快捷键
         self.setup_shortcuts()
 
+        # 初始化教程管理器
+        try:
+            self.tutorial_manager = TutorialManager(self)
+            self.logger.info("教程管理器初始化成功")
+        except Exception as e:
+            self.logger.error(f"教程管理器初始化失败: {e}")
+            self.tutorial_manager = None
+
         # 启动后自动检查更新（非阻塞，可配置开关）
         try:
             if getattr(self.config, 'auto_update_enabled', True):
@@ -86,6 +95,9 @@ class ImageClassifier(QMainWindow):
                 self.logger.info("自动检查更新：已关闭")
         except Exception as e:
             self.logger.debug(f"启动自动检查更新调度失败: {e}")
+
+        # 延迟检查是否显示教程（确保窗口已完全初始化）
+        QTimer.singleShot(1000, self._check_and_show_tutorial)
     
     def _get_resource_path(self, relative_path):
         """获取资源文件路径，兼容开发环境和打包环境"""
@@ -247,6 +259,7 @@ class ImageClassifier(QMainWindow):
             
             # 创建中央控件
             central_widget = QWidget()
+            central_widget.setObjectName("central_widget")  # 教程系统需要
             self.setCentralWidget(central_widget)
             
             # 创建主要布局
@@ -351,6 +364,7 @@ class ImageClassifier(QMainWindow):
         
         # 图片显示区域 - 主要拉伸区域
         self.image_scroll_area = QScrollArea()
+        self.image_scroll_area.setObjectName("image_preview_container")  # 设置对象名以便教程系统找到
         self.image_scroll_area.setWidgetResizable(True)
         self.image_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_scroll_area.setStyleSheet("""
@@ -521,6 +535,7 @@ class ImageClassifier(QMainWindow):
         
         # 图片列表容器 - 可随窗口拉伸
         self.image_list = QListWidget()
+        self.image_list.setObjectName("image_list")  # 设置对象名以便教程系统找到
         self.image_list.setMinimumHeight(120)  # 设置最小高度
         # 移除最大高度限制，让它能够拉伸
         self.image_list.setStyleSheet("""
@@ -684,6 +699,7 @@ class ImageClassifier(QMainWindow):
         
         # 类别按钮滚动区域 - 可随窗口拉伸
         self.category_scroll = QScrollArea()
+        self.category_scroll.setObjectName("category_list")  # 设置对象名以便教程系统找到
         self.category_scroll.setWidgetResizable(True)
         self.category_scroll.setMinimumHeight(150)  # 设置最小高度
         # 移除最大高度限制，让它能够拉伸
@@ -776,6 +792,7 @@ class ImageClassifier(QMainWindow):
     def create_toolbar(self):
         """创建工具栏"""
         toolbar = QToolBar()
+        toolbar.setObjectName("toolbar")  # 设置对象名以便教程系统找到
         toolbar.setMovable(False)
         toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)  # 禁用右键菜单
         # 应用工具栏样式
@@ -813,10 +830,15 @@ class ImageClassifier(QMainWindow):
                                                    self.refresh_categories)
         toolbar.addWidget(refresh_button)
 
-        # 从配置中读取主题设置
+        # 从应用配置中读取主题设置
         current_theme = "light"
-        if hasattr(self.config, 'theme'):
-            current_theme = self.config.theme
+        try:
+            from utils.app_config import get_app_config
+            app_config = get_app_config()
+            current_theme = app_config.theme
+            self.logger.info(f"从应用配置加载主题: {current_theme}")
+        except Exception as e:
+            self.logger.warning(f"加载主题配置失败，使用默认: {e}")
         default_theme.set_theme(current_theme)
 
         # 主题切换按钮 - 使用简洁线条图标
@@ -4237,6 +4259,27 @@ class ImageClassifier(QMainWindow):
             dialog._apply_theme()
         dialog.exec()
 
+    def _check_and_show_tutorial(self):
+        """检查是否需要显示教程"""
+        try:
+            if self.tutorial_manager and self.tutorial_manager.should_show_tutorial():
+                self.logger.info("首次运行，显示教程引导")
+                self.tutorial_manager.start_tutorial()
+        except Exception as e:
+            self.logger.error(f"检查教程显示状态失败: {e}")
+
+    def start_tutorial(self):
+        """开始或重新开始教程（提供给菜单调用）"""
+        try:
+            if self.tutorial_manager:
+                self.tutorial_manager.reset_tutorial()
+                toast_info(self, "教程已重新开始")
+            else:
+                toast_error(self, "教程系统不可用")
+        except Exception as e:
+            self.logger.error(f"启动教程失败: {e}")
+            toast_error(self, f"启动教程失败: {str(e)}")
+
     def toggle_theme(self):
         """切换主题"""
         try:
@@ -4245,13 +4288,14 @@ class ImageClassifier(QMainWindow):
             new_theme = "dark" if current_theme == "light" else "light"
             default_theme.set_theme(new_theme)
 
-            # 保存到配置
-            if hasattr(self, 'config'):
-                self.config.theme = new_theme
-                try:
-                    self.config.save_config()
-                except Exception as e:
-                    self.logger.error(f"保存主题配置失败: {e}")
+            # 保存到应用配置（app_config.json）
+            try:
+                from utils.app_config import get_app_config
+                app_config = get_app_config()
+                app_config.theme = new_theme
+                self.logger.info(f"主题已保存到应用配置: {new_theme}")
+            except Exception as e:
+                self.logger.error(f"保存主题到应用配置失败: {e}")
 
             # 应用主题到主窗口和所有组件
             self.apply_theme()

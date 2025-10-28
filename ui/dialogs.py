@@ -840,6 +840,12 @@ class TabbedHelpDialog(QDialog):
             clear_cache_btn.clicked.connect(self.clear_smb_cache)
             button_layout.addWidget(clear_cache_btn)
 
+            # 添加重新开始教程按钮
+            restart_tutorial_btn = QPushButton('📖 重新开始教程')
+            restart_tutorial_btn.setObjectName("restartTutorialBtn")
+            restart_tutorial_btn.clicked.connect(self.restart_tutorial)
+            button_layout.addWidget(restart_tutorial_btn)
+
             button_layout.addStretch()
 
             # 移除关闭按钮，窗口自带关闭按钮已足够
@@ -1111,6 +1117,21 @@ class TabbedHelpDialog(QDialog):
         except Exception as e:
             self.logger.error(f"清理SMB缓存失败: {e}")
             toast_error(self, f'清理SMB缓存失败: {e}')
+
+    def restart_tutorial(self):
+        """重新开始教程"""
+        try:
+            if self.parent() and hasattr(self.parent(), 'start_tutorial'):
+                # 关闭帮助对话框
+                self.close()
+                # 调用主窗口的重新开始教程方法
+                self.parent().start_tutorial()
+            else:
+                toast_error(self, '教程系统不可用')
+                self.logger.error("主窗口未实现start_tutorial方法")
+        except Exception as e:
+            self.logger.error(f"重新开始教程失败: {e}")
+            toast_error(self, f'重新开始教程失败: {e}')
 
     def _handle_link_click(self, url):
         """处理链接点击事件"""

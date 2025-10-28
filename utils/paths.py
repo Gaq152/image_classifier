@@ -47,6 +47,17 @@ def get_update_dir() -> Path:
     return get_app_data_dir() / "update"
 
 
+def get_config_dir() -> Path:
+    r"""获取配置目录
+
+    Returns:
+        Path: C:\Users\<username>\image_classifier\config
+    """
+    config_dir = get_app_data_dir() / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
+
+
 # 向后兼容：获取旧的隐藏缓存目录路径（用于迁移）
 def get_old_cache_dir() -> Path:
     r"""获取旧的隐藏缓存目录路径
