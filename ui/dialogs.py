@@ -25,6 +25,7 @@ from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles.theme import default_theme
+from .components.widgets.badge_button import BadgeWidget
 
 
 class AnimatedToggle(QWidget):
@@ -769,6 +770,16 @@ class TabbedHelpDialog(QDialog):
             # 顶部操作区：更新相关
             top_btn_bar = QHBoxLayout()
             check_btn = QPushButton('检查更新')
+            check_btn.clicked.connect(self._handle_check_update)
+
+            # 使用BadgeWidget包装检查更新按钮，支持红点标记
+            self.check_btn_badge = BadgeWidget(check_btn, self)
+            # 从主窗口同步红点状态
+            if self.parent() and hasattr(self.parent(), 'help_button_badge'):
+                badge_visible = self.parent().help_button_badge.is_badge_visible()
+                self.check_btn_badge.set_badge_visible(badge_visible)
+            else:
+                self.check_btn_badge.set_badge_visible(False)
 
             # 使用带流畅滑动动画的拨动开关
             auto_chk = AnimatedToggle()
@@ -788,8 +799,7 @@ class TabbedHelpDialog(QDialog):
                     self.logger.error(f"保存自动更新配置失败: {e}")
             auto_chk.clicked.connect(toggle_auto)
 
-            check_btn.clicked.connect(self._handle_check_update)
-            top_btn_bar.addWidget(check_btn)
+            top_btn_bar.addWidget(self.check_btn_badge)
             top_btn_bar.addStretch()
 
             # 右侧显示自动更新开关
@@ -844,6 +854,30 @@ class TabbedHelpDialog(QDialog):
 
     def _handle_check_update(self, suppress_if_latest: bool = False):
         try:
+            # 先检查本地是否已有更新包
+            from ..utils.paths import get_update_dir
+            import re
+
+            local_pending_version = None
+            local_download_path = None
+            local_batch_path = None
+            update_dir = get_update_dir()
+
+            if update_dir.exists():
+                # 查找本地更新包
+                exe_files = list(update_dir.glob('*.exe'))
+                if exe_files:
+                    exe_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                    local_download_path = exe_files[0]
+                    match = re.search(r'v(\d+\.\d+\.\d+)', local_download_path.name)
+                    if match:
+                        local_pending_version = match.group(1)
+                    batch_files = list(update_dir.glob('update.bat'))
+                    if batch_files:
+                        local_batch_path = batch_files[0]
+                    self.logger.info(f"手动更新：发现本地更新包 v{local_pending_version}")
+
+            # 检查线上版本
             endpoint = None
             token = ''
             if self.config:
@@ -860,13 +894,73 @@ class TabbedHelpDialog(QDialog):
             size_bytes = int(manifest.get('size_bytes', 0) or 0)
             notes = str(manifest.get('notes', '')).strip()
             display_name = str(manifest.get('display_name', '')).strip()
-            self.logger.info(f"检查更新：发现新版本 v{new_ver}")
-            display_name = str(manifest.get('display_name', '')).strip()
+            self.logger.info(f"检查更新：发现线上版本 v{new_ver}")
 
-            
+            # 如果本地已有相同或更新版本，直接提示安装
+            if local_pending_version and local_download_path:
+                if compare_version(local_pending_version, new_ver) >= 0:
+                    self.logger.info(f"手动更新：本地包v{local_pending_version}已是最新，提示安装")
+                    # 确保批处理脚本存在
+                    if not local_batch_path or not local_batch_path.exists():
+                        # launch_self_update 已在顶部导入，无需重复导入
+                        if getattr(sys, 'frozen', False):
+                            exe_path = Path(sys.executable)
+                        else:
+                            exe_path = Path.cwd() / "ImageClassifier.exe"
+                        local_batch_path = launch_self_update(exe_path, local_download_path)
+                        self.logger.info(f"已生成批处理脚本: {local_batch_path}")
+
+                    # 询问是否立即重启更新
+                    reply = self._ask_yes_no(
+                        '已下载更新',
+                        f'本地已有更新包 v{local_pending_version}，是否立即重启并完成更新？'
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        try:
+                            subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
+                            self.logger.info("更新安装：已启动安装脚本")
+                        except Exception as e:
+                            toast_error(self, f'更新失败: 无法启动更新程序')
+                            self.logger.error(f"更新安装：启动脚本失败 {e}")
+                            return
+                        try:
+                            if self.parent():
+                                self.parent().close()
+                        except Exception:
+                            pass
+                        QApplication.processEvents()
+                        try:
+                            self.logger.debug("更新安装：应用即将退出以释放句柄")
+                            os._exit(0)
+                        except Exception:
+                            QApplication.quit()
+                    else:
+                        self.logger.info("更新已准备：用户选择稍后安装")
+                        toast_info(self, '已保存更新包，下次启动时继续提示')
+                        # 用户选择稍后安装，显示红点持续提醒
+                        if hasattr(self, 'check_btn_badge'):
+                            self.check_btn_badge.set_badge_visible(True)
+                        if self.parent() and hasattr(self.parent(), 'help_button_badge'):
+                            self.parent().help_button_badge.set_badge_visible(True)
+                    return
+                else:
+                    # 线上版本更新，清理旧包
+                    self.logger.info(f"手动更新：线上版本v{new_ver}更新，清理本地旧包v{local_pending_version}")
+                    try:
+                        if local_download_path.exists():
+                            local_download_path.unlink()
+                            self.logger.info(f"已删除旧更新包: {local_download_path}")
+                    except Exception as e:
+                        self.logger.warning(f"清理旧更新包失败: {e}")
+
             if not new_ver or compare_version(new_ver, __version__) <= 0:
                 if not suppress_if_latest:
                     toast_info(self, '当前已是最新版本')
+                # 当前已是最新版本，清除红点标记
+                if hasattr(self, 'check_btn_badge'):
+                    self.check_btn_badge.set_badge_visible(False)
+                if self.parent() and hasattr(self.parent(), 'help_button_badge'):
+                    self.parent().help_button_badge.set_badge_visible(False)
                 return
 
             # 发现新版本，显示Toast通知
@@ -877,6 +971,11 @@ class TabbedHelpDialog(QDialog):
             reply = self._ask_yes_no('发现新版本', msg)
             if reply != QMessageBox.StandardButton.Yes:
                 self.logger.info("检查更新：用户选择暂不更新")
+                # 用户选择暂不更新，显示红点持续提醒
+                if hasattr(self, 'check_btn_badge'):
+                    self.check_btn_badge.set_badge_visible(True)
+                if self.parent() and hasattr(self.parent(), 'help_button_badge'):
+                    self.parent().help_button_badge.set_badge_visible(True)
                 return
 
             # 下载到用户目录下的 update 子目录
@@ -925,22 +1024,26 @@ class TabbedHelpDialog(QDialog):
                 self.logger.debug("更新下载：开始")
                 download_with_progress(url, dest, token or None, on_progress)
                 self.logger.info("更新下载：完成")
+
+                # 校验哈希（在下载对话框中显示校验状态）
+                if sha256:
+                    p_label.setText('正在校验文件完整性...')
+                    p_bar.setRange(0, 0)  # 不确定进度
+                    QApplication.processEvents()
+
+                    self.logger.debug("更新校验：开始")
+                    actual = sha256_file(dest)
+                    if actual.lower() != sha256.lower():
+                        toast_error(self, f'更新失败: 文件校验失败')
+                        self.logger.error(f"更新校验：失败 expected={sha256} actual={actual}")
+                        try:
+                            dest.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        return
+                    self.logger.debug("更新校验：通过")
             finally:
                 progress_dialog.close()
-
-            # 校验哈希
-            if sha256:
-                self.logger.debug("更新校验：开始")
-                actual = sha256_file(dest)
-                if actual.lower() != sha256.lower():
-                    toast_error(self, f'更新失败: 文件校验失败')
-                    self.logger.error(f"更新校验：失败 expected={sha256} actual={actual}")
-                    try:
-                        dest.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    return
-                self.logger.debug("更新校验：通过")
 
             # 生成更新脚本，但不立即执行；由用户确认是否重启
             # 获取正确的exe路径（开发环境 vs 打包环境）
@@ -984,6 +1087,11 @@ class TabbedHelpDialog(QDialog):
             else:
                 self.logger.info("更新已准备：用户选择稍后安装，下次启动时继续提示")
                 toast_info(self, '已保存更新包，下次启动时继续提示')
+                # 用户选择稍后安装，显示红点持续提醒
+                if hasattr(self, 'check_btn_badge'):
+                    self.check_btn_badge.set_badge_visible(True)
+                if self.parent() and hasattr(self.parent(), 'help_button_badge'):
+                    self.parent().help_button_badge.set_badge_visible(True)
         except Exception as e:
             self.logger.error(f"检查/更新失败: {e}")
             toast_error(self, f'检查更新失败: {str(e)}')

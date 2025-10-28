@@ -27,6 +27,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush
 from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
                                 StatisticsPanel)
+from .components.widgets.badge_button import BadgeWidget
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
 from .components.styles.theme import default_theme
@@ -826,11 +827,14 @@ class ImageClassifier(QMainWindow):
                                                       self.toggle_theme)
         toolbar.addWidget(self.theme_button)
 
-        # 帮助按钮 - 使用统一样式
+        # 帮助按钮 - 使用统一样式，包装在BadgeWidget中以支持红点标记
         help_button = self.create_toolbar_button('?', 'help_button',
                                                 '查看使用指南和快捷键',
                                                 self.show_help_dialog)
-        toolbar.addWidget(help_button)
+        # 使用BadgeWidget包装帮助按钮
+        self.help_button_badge = BadgeWidget(help_button, self)
+        self.help_button_badge.set_badge_visible(False)  # 初始不显示红点
+        toolbar.addWidget(self.help_button_badge)
     
     def create_mode_button(self, toolbar):
         """创建图标化的模式选择按钮 - 直接点击切换"""
@@ -4621,28 +4625,28 @@ class ImageClassifier(QMainWindow):
             # 启动后5秒首次检查
             QTimer.singleShot(5000, self._auto_check_update_once)
 
-            # 启动定期检查定时器（每6小时）
+            # 启动定期检查定时器（每1小时）
             self._start_periodic_update_check()
         except Exception as e:
             self.logger.debug(f"调度自动检查更新失败: {e}")
 
     def _start_periodic_update_check(self):
-        """启动定期检查更新定时器（每6小时检查一次）"""
+        """启动定期检查更新定时器（每1小时检查一次）"""
         try:
             if not hasattr(self, 'config') or not getattr(self.config, 'auto_update_enabled', True):
                 return
 
-            # 创建定时器，每6小时（21600000毫秒）触发一次
+            # 创建定时器，每1小时（3600000毫秒）触发一次
             self.periodic_update_timer = QTimer(self)
             self.periodic_update_timer.timeout.connect(self._periodic_check_update)
-            self.periodic_update_timer.start(21600000)  # 6小时 = 6 * 60 * 60 * 1000ms
+            self.periodic_update_timer.start(3600000)  # 1小时 = 1 * 60 * 60 * 1000ms
 
-            self.logger.info("定期检查更新已启动：每6小时检查一次")
+            self.logger.info("定期检查更新已启动：每1小时检查一次")
         except Exception as e:
             self.logger.debug(f"启动定期检查更新定时器失败: {e}")
 
     def _periodic_check_update(self):
-        """定期检查更新（每6小时触发）"""
+        """定期检查更新（每1小时触发）"""
         try:
             self.logger.info("定期检查更新：开始执行")
             self._auto_check_update_once()
@@ -4686,6 +4690,9 @@ class ImageClassifier(QMainWindow):
                         local_batch_path = batch_files[0]
 
                     self.logger.info(f"检测到本地待安装更新: version={local_pending_version}, exe={local_download_path.name}, batch={local_batch_path}")
+                    # 显示红点标记
+                    if hasattr(self, 'help_button_badge'):
+                        self.help_button_badge.set_badge_visible(True)
         except Exception as e:
             self.logger.debug(f"检查本地更新目录失败: {e}")
 
@@ -4801,6 +4808,9 @@ class ImageClassifier(QMainWindow):
                     if reply == QMessageBox.StandardButton.Yes:
                         # 立即重启安装
                         try:
+                            # 隐藏红点（用户正在安装）
+                            if hasattr(self, 'help_button_badge'):
+                                self.help_button_badge.set_badge_visible(False)
                             self.logger.info(f"启动批处理脚本: {local_batch_path}")
                             subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
                             self.logger.info("用户选择立即重启安装更新")
@@ -4808,6 +4818,7 @@ class ImageClassifier(QMainWindow):
                         except Exception as e:
                             self.logger.error(f"启动批处理失败: {e}")
                     else:
+                        # 用户选择稍后安装，保留红点标记
                         self.logger.info("用户选择稍后安装待更新版本")
                 except Exception as e:
                     self.logger.debug(f"提示安装本地更新失败: {e}")

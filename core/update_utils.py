@@ -37,13 +37,25 @@ from urllib.request import Request, urlopen
 
 
 def sha256_file(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """计算文件的SHA256哈希值，在计算过程中保持UI响应"""
     hasher = hashlib.sha256()
+    chunk_count = 0
     with open(file_path, 'rb') as f:
         while True:
             chunk = f.read(chunk_size)
             if not chunk:
                 break
             hasher.update(chunk)
+
+            # 每处理5个chunk（约5MB）处理一次UI事件，避免界面卡顿
+            chunk_count += 1
+            if chunk_count % 5 == 0:
+                try:
+                    from PyQt6.QtWidgets import QApplication
+                    QApplication.processEvents()
+                except Exception:
+                    # 如果不在Qt环境中（如命令行），忽略错误
+                    pass
     return hasher.hexdigest()
 
 
@@ -77,20 +89,53 @@ def _build_request(url: str, token: Optional[str]) -> Request:
     return req
 
 
-def fetch_manifest(url: str, token: Optional[str] = None, timeout: int = 8) -> Dict:
+def fetch_manifest(url: str, token: Optional[str] = None, timeout: int = 8, retries: int = 3) -> Dict:
+    """拉取 manifest.json，支持自动重试机制
+
+    Args:
+        url: manifest URL
+        token: 访问令牌
+        timeout: 超时时间（秒）
+        retries: 最大重试次数，默认3次
+
+    Returns:
+        解析后的 manifest 字典
+
+    Raises:
+        RuntimeError: 拉取或解析失败
+    """
     token = resolve_token(token)
     req = _build_request(url, token)
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
-            return json.loads(data.decode('utf-8'))
-    except HTTPError as e:
-        # 401/403 代表需要鉴权
-        raise RuntimeError(f"拉取manifest失败: HTTP {e.code}")
-    except URLError as e:
-        raise RuntimeError(f"网络错误: {e}")
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"manifest解析失败: {e}")
+
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                data = resp.read()
+                return json.loads(data.decode('utf-8'))
+        except HTTPError as e:
+            # 对于临时性错误（502, 503, 504）进行重试
+            if e.code in (502, 503, 504) and attempt < retries:
+                wait_time = 0.5 * (2 ** attempt)  # 指数退避: 0.5s, 1s, 2s
+                time.sleep(wait_time)
+                last_error = f"HTTP {e.code}"
+                continue
+            # 永久性错误或重试耗尽，直接抛出
+            raise RuntimeError(f"拉取manifest失败: HTTP {e.code}")
+        except URLError as e:
+            # 网络错误也重试
+            if attempt < retries:
+                wait_time = 0.5 * (2 ** attempt)
+                time.sleep(wait_time)
+                last_error = str(e)
+                continue
+            raise RuntimeError(f"网络错误: {e}")
+        except json.JSONDecodeError as e:
+            # JSON 解析错误不重试
+            raise RuntimeError(f"manifest解析失败: {e}")
+
+    # 理论上不会到这里，但为了安全
+    raise RuntimeError(f"拉取manifest失败: {last_error}")
 
 
 def download_with_progress(url: str, dest: Path, token: Optional[str] = None,
@@ -180,15 +225,18 @@ def _escape_win_path(path: str) -> str:
 
 
 def ensure_persistent_updater(target_exe: Path) -> Path:
-    """在当前程序目录下创建/覆盖通用更新脚本 update/update.bat，并返回其路径。
+    """在用户目录下创建/覆盖通用更新脚本 update/update.bat，并返回其路径。
 
     统一一个脚本：
     - 无参数：自行从 update/ 目录寻找最新包；若不存在则联机下载 latest/manifest.json 并保存到 update/；完成后安装并删除安装包
     - 有参数：使用传入的新包路径进行安装（程序内调用），完成后删除该包
     """
+    from utils.paths import get_update_dir
+
     exe_path = target_exe.resolve()
     exe_dir = exe_path.parent
-    update_dir = exe_dir / "update"
+    # 使用统一的用户目录下的 update 目录
+    update_dir = get_update_dir()
     update_dir.mkdir(parents=True, exist_ok=True)
     batch_path = update_dir / "update.bat"
 

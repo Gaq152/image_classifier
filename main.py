@@ -37,17 +37,21 @@ def get_log_directory():
 
 
 def setup_logging():
-    """设置日志系统"""
+    """设置日志系统 - 支持日志轮转和自动清理"""
     try:
+        from logging.handlers import TimedRotatingFileHandler
+        import glob
+        import time
+
         # 清除现有handlers，避免冲突
         root_logger = logging.getLogger()
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
-        
+
         # 创建日志目录 - 智能选择位置
         log_dir = get_log_directory()
         log_dir.mkdir(exist_ok=True)
-        
+
         # 禁用第三方库的调试输出
         logging.getLogger('PIL').setLevel(logging.WARNING)
         logging.getLogger('PIL.Image').setLevel(logging.WARNING)
@@ -56,46 +60,85 @@ def setup_logging():
         logging.getLogger('PIL.TiffTags').setLevel(logging.WARNING)
         logging.getLogger('cv2').setLevel(logging.WARNING)
         logging.getLogger('numpy').setLevel(logging.WARNING)
-        
-        # 创建文件处理器
-        file_handler = logging.FileHandler(
-            log_dir / 'image_classifier.log', 
-            encoding='utf-8',
-            mode='a'
+
+        # 清理旧日志文件（保留7天）
+        try:
+            current_time = time.time()
+            retention_days = 7
+            retention_seconds = retention_days * 24 * 60 * 60
+
+            # 查找所有日志文件（包括轮转的日志）
+            log_files = glob.glob(str(log_dir / 'image_classifier*.log*'))
+            deleted_count = 0
+
+            for log_file in log_files:
+                try:
+                    file_path = Path(log_file)
+                    # 检查文件修改时间
+                    file_mtime = file_path.stat().st_mtime
+                    if current_time - file_mtime > retention_seconds:
+                        file_path.unlink()
+                        deleted_count += 1
+                except Exception:
+                    continue
+
+            if deleted_count > 0:
+                print(f"已清理 {deleted_count} 个超过 {retention_days} 天的旧日志文件")
+        except Exception as e:
+            print(f"清理旧日志文件时出错: {e}")
+
+        # 创建支持日志轮转的文件处理器
+        # when='midnight' - 每天午夜轮转
+        # interval=1 - 每1天轮转一次
+        # backupCount=6 - 保留6个备份文件（加上当前文件=7天日志）
+        # encoding='utf-8' - 使用UTF-8编码
+        file_handler = TimedRotatingFileHandler(
+            log_dir / 'image_classifier.log',
+            when='midnight',
+            interval=1,
+            backupCount=6,
+            encoding='utf-8'
         )
         file_handler.setLevel(logging.DEBUG)
-        
+
+        # 设置日志文件后缀格式（日期格式）
+        file_handler.suffix = '%Y-%m-%d'
+
         # 创建控制台处理器（用于重要信息）
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
-        
+
         # 设置格式 - 添加毫秒精度用于性能分析
         file_formatter = logging.Formatter(
-            '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s', 
+            '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_formatter = logging.Formatter(
             '%(asctime)s - %(levelname)s - %(message)s',
             datefmt='%H:%M:%S'
         )
-        
+
         file_handler.setFormatter(file_formatter)
         console_handler.setFormatter(console_formatter)
-        
+
         # 添加处理器到根日志器
         root_logger.addHandler(file_handler)
         root_logger.addHandler(console_handler)
         root_logger.setLevel(logging.DEBUG)
-        
+
         logger = logging.getLogger(__name__)
         logger.info("=" * 60)
         logger.info("图像分类工具启动")
+        logger.info(f"日志目录: {log_dir}")
+        logger.info(f"日志保留天数: 7天")
         logger.info("=" * 60)
-        
+
         return True
-        
+
     except Exception as e:
         print(f"日志设置失败: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
