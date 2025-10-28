@@ -157,25 +157,6 @@ class CategoryButton(QPushButton):
 
             menu.addSeparator()
 
-            # 排序模式选项
-            main_window = self.window()
-            if main_window and hasattr(main_window, 'config') and hasattr(main_window.config, 'category_sort_mode'):
-                current_mode = main_window.config.category_sort_mode
-
-                # 按名称排序
-                sort_by_name_action = menu.addAction("📝 按名称排序")
-                if current_mode == "name":
-                    sort_by_name_action.setText("✓ 📝 按名称排序")  # 标记当前选中
-                sort_by_name_action.triggered.connect(lambda: self.change_sort_mode("name"))
-
-                # 按快捷键排序
-                sort_by_shortcut_action = menu.addAction("⌨️ 按快捷键排序")
-                if current_mode == "shortcut":
-                    sort_by_shortcut_action.setText("✓ ⌨️ 按快捷键排序")  # 标记当前选中
-                sort_by_shortcut_action.triggered.connect(lambda: self.change_sort_mode("shortcut"))
-
-                menu.addSeparator()
-
             # 删除类别（如果不是移除按钮）
             if not self.is_remove:
                 delete_action = menu.addAction("🗑️ 删除类别")
