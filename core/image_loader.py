@@ -57,9 +57,10 @@ class HighPerformanceImageLoader(QThread):
         self.thumbnail_size = (400, 300)  # 缩略图尺寸
         
         # SMB/NAS 专项优化配置
+        from utils.paths import get_cache_dir
         self.smb_optimization = {
             'enable_local_cache': True,  # 启用本地临时缓存
-            'cache_dir': Path.home() / '.image_classifier_cache',  # 本地缓存目录
+            'cache_dir': get_cache_dir(),  # 本地缓存目录: C:\Users\<username>\image_classifier\cache
             'cache_max_size_gb': 5,  # 本地缓存最大5GB
             'batch_read_size': 32 * 1024,  # 32KB批量读取
             'connection_pool': {},  # SMB连接池
@@ -103,15 +104,59 @@ class HighPerformanceImageLoader(QThread):
                 cache_dir = self.smb_optimization['cache_dir']
                 cache_dir.mkdir(parents=True, exist_ok=True)
                 self.logger.info(f"[SMB优化] 本地缓存目录: {cache_dir}")
-                
+
+                # 迁移旧的隐藏缓存目录数据
+                self._migrate_old_cache()
+
                 # 清理过期缓存
                 self._cleanup_local_cache()
-            
+
             self.logger.info("[SMB优化] SMB/NAS专项优化已启用")
-            
+
         except Exception as e:
             self.logger.error(f"[SMB优化] 初始化失败: {e}")
             self.smb_optimization['enable_local_cache'] = False
+
+    def _migrate_old_cache(self):
+        """迁移旧的隐藏缓存目录数据到新位置"""
+        try:
+            from utils.paths import get_old_cache_dir, get_cache_dir
+            old_cache_dir = get_old_cache_dir()
+            new_cache_dir = get_cache_dir()
+
+            # 如果旧缓存目录存在且新目录为空，则迁移
+            if old_cache_dir.exists() and old_cache_dir.is_dir():
+                # 检查新目录是否已有缓存文件
+                new_cache_files = list(new_cache_dir.rglob('*'))
+                if len(new_cache_files) <= 1:  # 只有目录本身
+                    self.logger.info(f"[SMB缓存迁移] 发现旧缓存目录，开始迁移...")
+
+                    import shutil
+                    migrated_count = 0
+                    for old_file in old_cache_dir.rglob('*'):
+                        if old_file.is_file():
+                            try:
+                                # 保持相对路径结构
+                                rel_path = old_file.relative_to(old_cache_dir)
+                                new_file = new_cache_dir / rel_path
+                                new_file.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(old_file, new_file)
+                                migrated_count += 1
+                            except Exception as e:
+                                self.logger.debug(f"[SMB缓存迁移] 迁移文件失败 {old_file.name}: {e}")
+
+                    if migrated_count > 0:
+                        self.logger.info(f"[SMB缓存迁移] 成功迁移 {migrated_count} 个缓存文件")
+                        # 迁移成功后删除旧目录
+                        try:
+                            shutil.rmtree(old_cache_dir)
+                            self.logger.info(f"[SMB缓存迁移] 已删除旧缓存目录")
+                        except Exception as e:
+                            self.logger.warning(f"[SMB缓存迁移] 删除旧目录失败: {e}")
+                else:
+                    self.logger.debug("[SMB缓存迁移] 新缓存目录已有数据，跳过迁移")
+        except Exception as e:
+            self.logger.debug(f"[SMB缓存迁移] 迁移过程出错: {e}")
     
     def _cleanup_local_cache(self):
         """清理本地缓存"""
