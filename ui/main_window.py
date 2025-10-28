@@ -4651,33 +4651,175 @@ class ImageClassifier(QMainWindow):
 
     def _auto_check_update_once(self):
         """执行一次静默检查，有更新则弹窗提示"""
-        try:
-            self.logger.debug("自动检查更新：开始")
-            dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
-            # 复用对话框的检查逻辑，但不显示对话框：无更新时静默
-            dlg._handle_check_update(suppress_if_latest=True)
-            self.logger.debug("自动检查更新：完成")
-        except Exception as e:
-            self.logger.debug(f"自动检查更新失败: {e}")
+        from core.update_utils import fetch_manifest
+        from _version_ import get_manifest_url, __version__, compare_version
+        import re
 
-        # 若存在上次下载但未应用的更新，提示是否现在重启更新
+        # 检查 update 目录下是否有更新包
+        local_pending_version = None
+        local_download_path = None
+        local_batch_path = None
+
         try:
-            if hasattr(self, 'config') and getattr(self.config, 'pending_update', {}):
-                info = self.config.pending_update
-                ver = info.get('version')
-                batch_path = info.get('batch_path')
-                if batch_path and Path(batch_path).exists():
-                    if QMessageBox.question(self, '发现已下载更新', f'检测到待安装的更新 v{ver}，是否现在重启并完成更新？',
-                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            # 获取用户目录下的 update 文件夹
+            from ..utils.paths import get_update_dir
+            update_dir = get_update_dir()
+
+            self.logger.debug(f"检查本地更新目录: {update_dir}")
+
+            if update_dir.exists():
+                # 查找 update 目录下的 exe 文件
+                exe_files = list(update_dir.glob('*.exe'))
+                if exe_files:
+                    # 按修改时间排序，取最新的
+                    exe_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                    local_download_path = exe_files[0]
+
+                    # 从文件名提取版本号（例如：图像分类工具_v6.3.2.exe）
+                    match = re.search(r'v(\d+\.\d+\.\d+)', local_download_path.name)
+                    if match:
+                        local_pending_version = match.group(1)
+
+                    # 检查是否有对应的 batch 文件
+                    batch_files = list(update_dir.glob('update.bat'))
+                    if batch_files:
+                        local_batch_path = batch_files[0]
+
+                    self.logger.info(f"检测到本地待安装更新: version={local_pending_version}, exe={local_download_path.name}, batch={local_batch_path}")
+        except Exception as e:
+            self.logger.debug(f"检查本地更新目录失败: {e}")
+
+        # 检查线上最新版本
+        online_version = None
+        try:
+            self.logger.debug("检查线上更新：开始")
+            endpoint = None
+            token = ''
+            if self.config:
+                endpoint = getattr(self.config, 'update_endpoint', None)
+                token = getattr(self.config, 'update_token', '')
+            if not endpoint:
+                endpoint = get_manifest_url(latest=True)
+
+            manifest = fetch_manifest(endpoint, token or None)
+            online_version = str(manifest.get('version', '')).strip()
+            self.logger.info(f"检查线上更新：发现版本 v{online_version}")
+        except Exception as e:
+            self.logger.debug(f"检查线上更新失败: {e}")
+
+        # 判断是使用本地更新包还是下载新版本
+        if local_pending_version and local_download_path:
+            # 有本地更新包，比较版本
+            if online_version and compare_version(online_version, local_pending_version) > 0:
+                # 线上版本更新，清理旧更新包，下载新版本
+                self.logger.info(f"线上版本v{online_version}比本地v{local_pending_version}更新，清理旧包并下载新版本")
+                try:
+                    # 删除旧更新包
+                    if local_download_path.exists():
+                        local_download_path.unlink()
+                        self.logger.info(f"已删除旧更新包: {local_download_path}")
+                except Exception as e:
+                    self.logger.warning(f"清理旧更新包失败: {e}")
+
+                # 触发线上更新下载
+                try:
+                    dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
+                    dlg._handle_check_update(suppress_if_latest=True)
+                except Exception as e:
+                    self.logger.debug(f"触发线上更新失败: {e}")
+            else:
+                # 本地更新包是最新的或线上检查失败，提示安装本地包
+                self.logger.info(f"本地更新包v{local_pending_version}是最新的，提示安装")
+                try:
+                    # 如果批处理脚本不存在，需要重新生成
+                    if not local_batch_path or not local_batch_path.exists():
+                        self.logger.warning(f"批处理脚本不存在，重新生成")
+                        from core.update_utils import launch_self_update
+                        # 获取正确的exe路径（开发环境 vs 打包环境）
+                        if getattr(sys, 'frozen', False):
+                            # 打包环境：使用exe所在目录
+                            exe_path = Path(sys.executable)
+                        else:
+                            # 开发环境：使用当前工作目录下的模拟exe路径
+                            exe_path = Path.cwd() / "ImageClassifier.exe"
+                        local_batch_path = launch_self_update(exe_path, local_download_path)
+                        self.logger.info(f"已生成批处理脚本: {local_batch_path}")
+
+                    # 创建美化的消息框
+                    box = QMessageBox(self)
+                    box.setWindowTitle('发现已下载更新')
+                    box.setText(f'检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？')
+                    box.setIcon(QMessageBox.Icon.Question)
+
+                    # 设置程序图标
+                    try:
+                        icon_path = self._get_resource_path('assets/icon.ico')
+                        if icon_path and icon_path.exists():
+                            box.setWindowIcon(QIcon(str(icon_path)))
+                    except Exception:
+                        pass
+
+                    # 应用美化样式
+                    box.setStyleSheet("""
+                        QMessageBox {
+                            background-color: #F8F9FA;
+                            color: #2C3E50;
+                            border: 1px solid #BDC3C7;
+                            border-radius: 8px;
+                            font-size: 14px;
+                        }
+                        QMessageBox QLabel {
+                            color: #2C3E50;
+                            font-size: 14px;
+                            padding: 10px;
+                        }
+                        QPushButton {
+                            background-color: #3498DB;
+                            color: white;
+                            border: none;
+                            border-radius: 6px;
+                            padding: 8px 16px;
+                            font-size: 13px;
+                            font-weight: bold;
+                            min-width: 80px;
+                        }
+                        QPushButton:hover { background-color: #2980B9; }
+                        QPushButton:pressed { background-color: #21618C; }
+                    """)
+
+                    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+                    # 中文化按钮
+                    yes_btn = box.button(QMessageBox.StandardButton.Yes)
+                    no_btn = box.button(QMessageBox.StandardButton.No)
+                    if yes_btn:
+                        yes_btn.setText("立即重启")
+                    if no_btn:
+                        no_btn.setText("稍后安装")
+
+                    reply = box.exec()
+                    if reply == QMessageBox.StandardButton.Yes:
+                        # 立即重启安装
                         try:
-                            subprocess.Popen(["cmd", "/c", "start", "", str(batch_path)], shell=False)
+                            self.logger.info(f"启动批处理脚本: {local_batch_path}")
+                            subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
+                            self.logger.info("用户选择立即重启安装更新")
                             QApplication.quit()
                         except Exception as e:
                             self.logger.error(f"启动批处理失败: {e}")
                     else:
-                        self.logger.info("用户选择暂不重启安装待更新版本")
-        except Exception as e:
-            self.logger.debug(f"检查待安装更新失败: {e}")
+                        self.logger.info("用户选择稍后安装待更新版本")
+                except Exception as e:
+                    self.logger.debug(f"提示安装本地更新失败: {e}")
+        else:
+            # 没有本地更新包，正常检查线上更新
+            try:
+                self.logger.debug("自动检查更新：开始")
+                dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
+                dlg._handle_check_update(suppress_if_latest=True)
+                self.logger.debug("自动检查更新：完成")
+            except Exception as e:
+                self.logger.debug(f"自动检查更新失败: {e}")
     
     def keyPressEvent(self, event):
         """处理键盘事件 - 优化按键处理和日志记录"""

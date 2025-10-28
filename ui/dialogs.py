@@ -879,9 +879,9 @@ class TabbedHelpDialog(QDialog):
                 self.logger.info("检查更新：用户选择暂不更新")
                 return
 
-            # 下载到程序目录下的 update 子目录，确保有权限；失败则回退到 TEMP
-            exe_dir = Path(sys.executable).parent
-            update_dir = exe_dir / 'update'
+            # 下载到用户目录下的 update 子目录
+            from ..utils.paths import get_update_dir
+            update_dir = get_update_dir()
             try:
                 update_dir.mkdir(parents=True, exist_ok=True)
                 # 权限探测
@@ -943,27 +943,20 @@ class TabbedHelpDialog(QDialog):
                 self.logger.debug("更新校验：通过")
 
             # 生成更新脚本，但不立即执行；由用户确认是否重启
-            exe_path = Path(sys.executable)
+            # 获取正确的exe路径（开发环境 vs 打包环境）
+            if getattr(sys, 'frozen', False):
+                # 打包环境：使用exe所在目录
+                exe_path = Path(sys.executable)
+            else:
+                # 开发环境：使用当前工作目录下的模拟exe路径
+                exe_path = Path.cwd() / "ImageClassifier.exe"
             self.logger.debug("更新安装：准备安装脚本")
             batch_path = launch_self_update(exe_path, dest)
 
-            # 记录待更新信息到配置
-            if self.config:
-                self.config.pending_update = {
-                    'version': new_ver,
-                    'download_path': str(dest),
-                    'batch_path': str(batch_path),
-                    'sha256': sha256,
-                }
-                try:
-                    self.config.save_config()
-                except Exception as e:
-                    self.logger.debug(f"保存pending_update失败: {e}")
-
-            # 询问是否立即重启更新
+            # 询问是否立即重启更新（只有两个选项：立即重启、稍后）
             reply = self._ask_yes_no(
                 '更新下载完成',
-                '更新包已准备就绪，是否立即重启并完成更新？\n\n选择“取消”将暂不重启，下次启动会继续提示。'
+                f'更新包v{new_ver}已准备就绪，是否立即重启并完成更新？'
             )
             if reply == QMessageBox.StandardButton.Yes:
                 # 启动批处理并退出
@@ -989,8 +982,8 @@ class TabbedHelpDialog(QDialog):
                 except Exception:
                     QApplication.quit()
             else:
-                self.logger.info("更新已准备：用户选择稍后安装")
-                toast_info(self, '已保存更新包，稍后可在帮助中手动执行更新')
+                self.logger.info("更新已准备：用户选择稍后安装，下次启动时继续提示")
+                toast_info(self, '已保存更新包，下次启动时继续提示')
         except Exception as e:
             self.logger.error(f"检查/更新失败: {e}")
             toast_error(self, f'检查更新失败: {str(e)}')
@@ -998,10 +991,12 @@ class TabbedHelpDialog(QDialog):
     def clear_smb_cache(self):
         """清理SMB缓存"""
         try:
-            cache_dir = Path.home() / '.image_classifier_cache'
+            from ..utils.paths import get_cache_dir
+            cache_dir = get_cache_dir()
             if cache_dir.exists():
-
                 shutil.rmtree(cache_dir)
+                # 重新创建空目录
+                cache_dir.mkdir(parents=True, exist_ok=True)
                 toast_success(self, 'SMB缓存已清理完成')
             else:
                 toast_info(self, '未发现SMB缓存文件')
