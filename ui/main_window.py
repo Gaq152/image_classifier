@@ -2465,9 +2465,33 @@ class ImageClassifier(QMainWindow):
         action_shortcut.triggered.connect(lambda: self.change_category_sort_mode('shortcut'))
         menu.addAction(action_shortcut)
 
-        # 在排序按钮下方显示菜单 - 使用popup()让Qt自动处理边界
-        button_pos = self.sort_button.mapToGlobal(self.sort_button.rect().bottomLeft())
-        menu.popup(button_pos)
+        # 在排序按钮下方显示菜单 - 智能定位防止超出窗口
+        # 先让菜单调整大小以获得准确的尺寸
+        menu.adjustSize()
+
+        # 获取按钮的右下角位置（改为右对齐）
+        button_global_rect = self.sort_button.mapToGlobal(self.sort_button.rect().bottomRight())
+        menu_size = menu.sizeHint()
+
+        # 获取主窗口的实际可见区域
+        window_rect = self.rect()
+        window_global_pos = self.mapToGlobal(window_rect.topLeft())
+        window_right = window_global_pos.x() + window_rect.width()
+        window_bottom = window_global_pos.y() + window_rect.height()
+
+        # 初始位置：按钮右下角，菜单右对齐
+        x = button_global_rect.x() - menu_size.width()
+        y = button_global_rect.y()
+
+        # 确保菜单不超出窗口左边界
+        if x < window_global_pos.x():
+            x = window_global_pos.x() + 5
+
+        # 如果菜单超出窗口底部，显示在按钮上方
+        if y + menu_size.height() > window_bottom - 10:  # 留10px底部边距
+            y = self.sort_button.mapToGlobal(self.sort_button.rect().topRight()).y() - menu_size.height()
+
+        menu.exec(QPoint(x, y))
 
     def show_filter_menu(self):
         """显示筛选菜单"""
@@ -2507,9 +2531,33 @@ class ImageClassifier(QMainWindow):
                 action_result.setEnabled(False)
                 menu.addAction(action_result)
 
-        # 在筛选按钮下方显示菜单 - 使用popup()让Qt自动处理边界
-        button_pos = self.filter_button.mapToGlobal(self.filter_button.rect().bottomLeft())
-        menu.popup(button_pos)
+        # 在筛选按钮下方显示菜单 - 智能定位防止超出窗口
+        # 先让菜单调整大小以获得准确的尺寸
+        menu.adjustSize()
+
+        # 获取按钮的右下角位置（改为右对齐）
+        button_global_rect = self.filter_button.mapToGlobal(self.filter_button.rect().bottomRight())
+        menu_size = menu.sizeHint()
+
+        # 获取主窗口的实际可见区域
+        window_rect = self.rect()
+        window_global_pos = self.mapToGlobal(window_rect.topLeft())
+        window_right = window_global_pos.x() + window_rect.width()
+        window_bottom = window_global_pos.y() + window_rect.height()
+
+        # 初始位置：按钮右下角，菜单右对齐
+        x = button_global_rect.x() - menu_size.width()
+        y = button_global_rect.y()
+
+        # 确保菜单不超出窗口左边界
+        if x < window_global_pos.x():
+            x = window_global_pos.x() + 5
+
+        # 如果菜单超出窗口底部，显示在按钮上方
+        if y + menu_size.height() > window_bottom - 10:  # 留10px底部边距
+            y = self.filter_button.mapToGlobal(self.filter_button.rect().topRight()).y() - menu_size.height()
+
+        menu.exec(QPoint(x, y))
 
     def toggle_filter(self, filter_type):
         """切换过滤器状态"""
