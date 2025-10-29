@@ -20,11 +20,12 @@ class TutorialStep:
     """教程步骤数据类"""
     title: str  # 步骤标题
     content: str  # 步骤说明文本
-    target_widget_name: str  # 目标控件的对象名称
+    target_widget_name: str  # 目标控件的对象名称（用于定位气泡）
     arrow_position: ArrowPosition  # 箭头位置
     highlight_padding: int = 8  # 高亮区域内边距
     offset_x: int = 0  # 气泡X轴偏移
     offset_y: int = 0  # 气泡Y轴偏移
+    highlight_widget_names: Optional[List[str]] = None  # 需要高亮的控件列表，默认为None则使用target_widget_name
 
 
 class TutorialManager:
@@ -77,30 +78,31 @@ class TutorialManager:
                 title="图片列表",
                 content='点击工具栏的「打开文件夹」后，扫描的图片会显示在这个列表中。\n\n你可以点击图片进行预览和分类操作。',
                 target_widget_name="image_list",
-                arrow_position=ArrowPosition.LEFT,
-                offset_x=20
+                arrow_position=ArrowPosition.RIGHT,  # 改为RIGHT，气泡在左侧
+                offset_x=-20  # 向左偏移
             ),
             TutorialStep(
                 title="图片预览",
                 content='选中的图片会在左侧预览区域显示。\n\n你可以使用鼠标滚轮缩放图片，拖动查看细节。',
                 target_widget_name="image_preview_container",
-                arrow_position=ArrowPosition.RIGHT,
-                offset_x=-20
+                arrow_position=ArrowPosition.LEFT,
+                offset_x=20
             ),
             TutorialStep(
                 title="分类区域",
                 content='点击工具栏的「添加类别」可以创建新的分类目录。\n\n创建的类别会显示在这里。你可以为每个类别设置快捷键，方便快速分类。',
                 target_widget_name="category_list",
-                arrow_position=ArrowPosition.LEFT,
-                offset_x=20
+                arrow_position=ArrowPosition.RIGHT,  # 改为RIGHT，气泡在左侧
+                offset_x=-20  # 向左偏移
             ),
             TutorialStep(
                 title="操作模式",
-                content='这里可以切换复制/移动模式：\n\n• 复制模式(⧉)：保留原文件，复制到分类目录\n• 移动模式(⭆)：将文件移动到分类目录',
+                content='这里可以切换复制/移动模式和分类模式：\n\n• 复制/移动模式：保留原文件或移动文件\n• 单/多分类模式：一张图片分配到一个或多个类别',
                 target_widget_name="mode_button",
-                arrow_position=ArrowPosition.BOTTOM,  # 改回底部箭头，气泡在上方
+                arrow_position=ArrowPosition.TOP,  # 箭头在顶部，气泡在下方
                 highlight_padding=12,
-                offset_y=-200  # 大幅向上偏移，气泡完全在按钮上方
+                offset_y=20,  # 向下偏移，避免遮挡
+                highlight_widget_names=["mode_button", "category_mode_button"]  # 同时高亮两个按钮
             ),
             TutorialStep(
                 title="快捷键导航",
@@ -157,7 +159,7 @@ class TutorialManager:
 
         # 查找目标控件
         target_widget = self._find_widget_by_name(step.target_widget_name)
-        if not target_widget:
+        if target_widget is None:  # 使用 is None 而不是 not，避免空QListWidget被判断为False
             self.logger.error(f"未找到目标控件: {step.target_widget_name}")
             self.next_step()  # 跳过此步骤
             return
@@ -168,17 +170,60 @@ class TutorialManager:
             self.next_step()  # 跳过此步骤
             return
 
-        # 显示遮罩层并高亮目标
-        self.overlay.highlight_widget(target_widget, step.highlight_padding)
-        self.overlay.show_overlay()
+        try:
+            # 显示遮罩层并高亮目标
+            self.logger.debug(f"开始显示遮罩层，目标控件: {target_widget}")
 
-        # 设置气泡内容
-        self.bubble.set_content(f"<h3>{step.title}</h3><p>{step.content}</p>")
-        self.bubble.set_arrow_position(step.arrow_position)
-        self.bubble.set_step_info(self.current_step_index + 1, len(self.steps))
+            # 判断是否需要高亮多个控件
+            if step.highlight_widget_names:
+                # 查找所有需要高亮的控件
+                highlight_widgets = []
+                for widget_name in step.highlight_widget_names:
+                    widget = self._find_widget_by_name(widget_name)
+                    if widget is not None:
+                        highlight_widgets.append(widget)
+                        self.logger.debug(f"添加高亮控件: {widget_name}")
+                    else:
+                        self.logger.warning(f"未找到高亮控件: {widget_name}")
 
-        # 显示气泡
-        self.bubble.show_at(target_widget, step.offset_x, step.offset_y)
+                if highlight_widgets:
+                    self.overlay.highlight_widgets(highlight_widgets, step.highlight_padding)
+                else:
+                    self.logger.error("没有找到任何需要高亮的控件")
+                    self.next_step()
+                    return
+            else:
+                # 只高亮一个控件
+                self.overlay.highlight_widget(target_widget, step.highlight_padding)
+
+            self.overlay.show_overlay()
+            self.logger.debug("遮罩层显示完成")
+
+            # 设置气泡内容
+            self.logger.debug("开始设置气泡内容")
+            self.bubble.set_content(f"<h3>{step.title}</h3><p>{step.content}</p>")
+            self.bubble.set_arrow_position(step.arrow_position)
+            self.bubble.set_step_info(self.current_step_index + 1, len(self.steps))
+            self.logger.debug("气泡内容设置完成")
+
+            # 显示气泡
+            self.logger.debug(f"开始显示气泡，offset_x={step.offset_x}, offset_y={step.offset_y}")
+            self.logger.debug(f"目标控件geometry: {target_widget.geometry()}")
+            self.logger.debug(f"目标控件size: {target_widget.size()}")
+            self.bubble.show_at(target_widget, step.offset_x, step.offset_y)
+
+            # 确保气泡在遮罩层之上
+            self.bubble.raise_()
+
+            # 告诉overlay bubble的位置，避免拦截bubble的点击
+            from PyQt6.QtCore import QRect
+            bubble_rect = QRect(self.bubble.x(), self.bubble.y(), self.bubble.width(), self.bubble.height())
+            self.overlay.set_bubble_region(bubble_rect)
+
+            self.logger.debug(f"气泡显示完成，位置: ({self.bubble.x()}, {self.bubble.y()}), 大小: ({self.bubble.width()}, {self.bubble.height()}), 可见: {self.bubble.isVisible()}")
+        except Exception as e:
+            self.logger.error(f"显示教程步骤时出错: {e}", exc_info=True)
+            self.next_step()  # 出错则跳过此步骤
 
     def next_step(self):
         """前进到下一步"""
@@ -242,17 +287,33 @@ class TutorialManager:
         Returns:
             找到的控件，未找到返回None
         """
-        # 使用findChildren查找所有匹配的控件（不指定类型参数，查找所有QObject）
+        # 优先尝试直接通过属性访问（更可靠）
+        self.logger.debug(f"查找控件: {widget_name}")
+        self.logger.debug(f"hasattr结果: {hasattr(self.main_window, widget_name)}")
+
+        if hasattr(self.main_window, widget_name):
+            widget = getattr(self.main_window, widget_name)
+            self.logger.debug(f"获取到的对象类型: {type(widget).__name__}, 是否为QWidget: {isinstance(widget, QWidget)}")
+            if isinstance(widget, QWidget):
+                self.logger.info(f"[OK] 通过属性找到控件: {widget_name} (类型: {type(widget).__name__})")
+                self.logger.debug(f"即将return widget: {widget}, id={id(widget)}")
+                return widget
+            else:
+                self.logger.warning(f"对象不是QWidget: {widget_name}, 类型: {type(widget).__name__}")
+
+        # 回退到使用findChildren查找
         from PyQt6.QtCore import QObject
         widgets = self.main_window.findChildren(QObject, widget_name)
+        self.logger.debug(f"findChildren找到 {len(widgets)} 个对象")
 
         # 过滤出QWidget类型的控件
         for widget in widgets:
+            self.logger.debug(f"检查对象: {type(widget).__name__}, 是否为QWidget: {isinstance(widget, QWidget)}")
             if isinstance(widget, QWidget):
-                self.logger.debug(f"找到控件: {widget_name} (类型: {type(widget).__name__})")
+                self.logger.info(f"[OK] 通过findChildren找到控件: {widget_name} (类型: {type(widget).__name__})")
                 return widget
 
-        self.logger.warning(f"未找到控件: {widget_name}")
+        self.logger.error(f"[FAIL] 未找到控件: {widget_name}")
         return None
 
     def reset_tutorial(self):

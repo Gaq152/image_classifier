@@ -329,15 +329,34 @@ class TutorialBubble(QWidget):
             offset_x: X轴偏移量
             offset_y: Y轴偏移量
         """
-        if not target_widget or not self.parent():
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[Bubble.show_at] ENTER: target={target_widget}, offset_x={offset_x}, offset_y={offset_y}")
+
+        if target_widget is None or self.parent() is None:
+            logger.warning(f"[Bubble.show_at] 提前返回: target_widget={target_widget}, parent={self.parent()}")
             return
 
         # 调整气泡大小以适应内容
         self.adjustSize()
 
         # 计算目标控件的位置（相对于父窗口）
+        # 使用mapTo获取控件左上角在父窗口中的位置
+        target_pos_in_parent = target_widget.mapTo(self.parent(), target_widget.rect().topLeft())
         target_rect = target_widget.rect()
-        target_global_pos = target_widget.mapTo(self.parent(), target_rect.center())
+
+        # 计算目标控件中心点的全局位置
+        target_global_pos = QPoint(
+            target_pos_in_parent.x() + target_rect.width() // 2,
+            target_pos_in_parent.y() + target_rect.height() // 2
+        )
+
+        # DEBUG
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"[Bubble] target_pos_in_parent: {target_pos_in_parent}")
+        logger.debug(f"[Bubble] target_rect: {target_rect}")
+        logger.debug(f"[Bubble] target_global_pos: {target_global_pos}")
 
         # 根据箭头位置计算气泡位置
         bubble_width = self.width()
@@ -360,11 +379,16 @@ class TutorialBubble(QWidget):
             x = target_global_pos.x() - target_rect.width() // 2 - bubble_width - 10 + offset_x
             y = target_global_pos.y() - bubble_height // 2 + offset_y
 
+        # DEBUG：记录计算出来的气泡位置
+        logger.debug(f"[Bubble] 计算出的气泡位置(修正前): x={x}, y={y}")
+
         # 确保气泡不超出父窗口边界
         if self.parent():
             parent_rect = self.parent().rect()
             x = max(10, min(x, parent_rect.width() - bubble_width - 10))
             y = max(10, min(y, parent_rect.height() - bubble_height - 10))
+
+        logger.debug(f"[Bubble] 最终气泡位置(修正后): x={x}, y={y}")
 
         self.move(x, y)
         self.show()
