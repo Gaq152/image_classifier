@@ -804,12 +804,20 @@ class ImageClassifier(QMainWindow):
         open_action.triggered.connect(self.open_directory)
         open_action.setToolTip('选择包含图片的目录')
         toolbar.addAction(open_action)
+        # 获取toolbar中对应的widget并设置objectName
+        self.open_directory_toolbar_button = toolbar.widgetForAction(open_action)
+        if self.open_directory_toolbar_button:
+            self.open_directory_toolbar_button.setObjectName('open_directory_toolbar_button')
 
         # 添加类别
         add_category_action = QAction('➕ 添加类别', self)
         add_category_action.triggered.connect(self.add_category)
         add_category_action.setToolTip('批量添加分类类别')
         toolbar.addAction(add_category_action)
+        # 获取toolbar中对应的widget并设置objectName
+        self.add_category_toolbar_button = toolbar.widgetForAction(add_category_action)
+        if self.add_category_toolbar_button:
+            self.add_category_toolbar_button.setObjectName('add_category_toolbar_button')
 
         # 添加弹性空间 - 推送右侧按钮到最右边
         spacer = QWidget()

@@ -17,6 +17,7 @@ class ArrowPosition(Enum):
     BOTTOM = "bottom"  # 箭头在底部，气泡在上方
     LEFT = "left"  # 箭头在左侧，气泡在右侧
     RIGHT = "right"  # 箭头在右侧，气泡在左侧
+    LEFT_RIGHT = "left_right"  # 左右双箭头，气泡在中间
 
 
 class TutorialBubble(QWidget):
@@ -48,6 +49,10 @@ class TutorialBubble(QWidget):
         self._arrow_size = 16  # 箭头大小
         self._arrow_position = ArrowPosition.TOP
         self._padding = 20
+
+        # 双箭头模式的目标位置
+        self._left_target_pos = None
+        self._right_target_pos = None
 
         # 窗口设置
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -295,6 +300,18 @@ class TutorialBubble(QWidget):
             arrow_base_left = QPointF(self._arrow_size, rect.height() / 2 - self._arrow_size)
             arrow_base_right = QPointF(self._arrow_size, rect.height() / 2 + self._arrow_size)
 
+        elif self._arrow_position == ArrowPosition.LEFT_RIGHT:
+            # 双箭头模式：气泡主体不预留箭头空间，箭头在paintEvent中单独绘制
+            bubble_rect = QRect(
+                rect.left(),
+                rect.top(),
+                rect.width(),
+                rect.height()
+            )
+            # 创建圆角矩形
+            path.addRoundedRect(QRectF(bubble_rect), self._corner_radius, self._corner_radius)
+            return path
+
         else:  # RIGHT
             bubble_rect = QRect(
                 rect.left(),
@@ -321,17 +338,18 @@ class TutorialBubble(QWidget):
 
         return path
 
-    def show_at(self, target_widget: QWidget, offset_x: int = 0, offset_y: int = 0):
+    def show_at(self, target_widget: QWidget, offset_x: int = 0, offset_y: int = 0, secondary_target: Optional[QWidget] = None):
         """在指定控件附近显示气泡
 
         Args:
             target_widget: 目标控件
             offset_x: X轴偏移量
             offset_y: Y轴偏移量
+            secondary_target: 第二个目标控件（用于双箭头模式）
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"[Bubble.show_at] ENTER: target={target_widget}, offset_x={offset_x}, offset_y={offset_y}")
+        logger.info(f"[Bubble.show_at] ENTER: target={target_widget}, secondary={secondary_target}, offset_x={offset_x}, offset_y={offset_y}")
 
         if target_widget is None or self.parent() is None:
             logger.warning(f"[Bubble.show_at] 提前返回: target_widget={target_widget}, parent={self.parent()}")
@@ -351,9 +369,18 @@ class TutorialBubble(QWidget):
             target_pos_in_parent.y() + target_rect.height() // 2
         )
 
+        # 如果有第二个目标控件，计算其位置
+        secondary_global_pos = None
+        if secondary_target is not None and self._arrow_position == ArrowPosition.LEFT_RIGHT:
+            secondary_pos_in_parent = secondary_target.mapTo(self.parent(), secondary_target.rect().topLeft())
+            secondary_rect = secondary_target.rect()
+            secondary_global_pos = QPoint(
+                secondary_pos_in_parent.x() + secondary_rect.width() // 2,
+                secondary_pos_in_parent.y() + secondary_rect.height() // 2
+            )
+            logger.debug(f"[Bubble] secondary_global_pos: {secondary_global_pos}")
+
         # DEBUG
-        import logging
-        logger = logging.getLogger(__name__)
         logger.debug(f"[Bubble] target_pos_in_parent: {target_pos_in_parent}")
         logger.debug(f"[Bubble] target_rect: {target_rect}")
         logger.debug(f"[Bubble] target_global_pos: {target_global_pos}")
@@ -374,6 +401,21 @@ class TutorialBubble(QWidget):
             # 气泡在目标右侧，箭头指向左
             x = target_global_pos.x() + target_rect.width() // 2 + 10 + offset_x
             y = target_global_pos.y() - bubble_height // 2 + offset_y
+        elif self._arrow_position == ArrowPosition.LEFT_RIGHT:
+            # 双箭头模式：气泡在两个控件中间
+            if secondary_global_pos is not None:
+                # 计算两个控件的中间位置
+                mid_x = (target_global_pos.x() + secondary_global_pos.x()) // 2
+                mid_y = (target_global_pos.y() + secondary_global_pos.y()) // 2
+                x = mid_x - bubble_width // 2 + offset_x
+                y = mid_y - bubble_height // 2 + offset_y
+                # 保存两个目标位置供绘制箭头使用
+                self._left_target_pos = target_global_pos
+                self._right_target_pos = secondary_global_pos
+            else:
+                # 如果没有第二个目标，回退到居中显示
+                x = target_global_pos.x() - bubble_width // 2 + offset_x
+                y = target_global_pos.y() - bubble_height // 2 + offset_y
         else:  # RIGHT
             # 气泡在目标左侧，箭头指向右
             x = target_global_pos.x() - target_rect.width() // 2 - bubble_width - 10 + offset_x
@@ -393,3 +435,6 @@ class TutorialBubble(QWidget):
         self.move(x, y)
         self.show()
         self.raise_()
+
+        # 触发重绘，确保箭头显示（特别是双箭头模式）
+        self.update()
