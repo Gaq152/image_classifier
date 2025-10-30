@@ -77,7 +77,7 @@ class TutorialManager:
             TutorialStep(
                 title="欢迎使用图像分类工具",
                 content='欢迎使用图像分类工具！<br><br>这个工具可以帮助你快速整理和分类大量图片。<br><br>让我们通过详细教程了解所有功能。',
-                target_widget_name="central_widget",
+                target_widget_name="main_window",
                 arrow_position=ArrowPosition.TOP,
                 offset_y=100
             ),
@@ -137,7 +137,6 @@ class TutorialManager:
                 content='选中的图片会在这里大图显示。<br><br>'
                         '<b>缩放操作：</b><br>'
                         '• 鼠标滚轮：快速缩放<br>'
-                        '• <b>Ctrl + 滚轮</b>：精细缩放<br>'
                         '• <b>Ctrl + =/-</b>：放大/缩小<br>'
                         '• <b>Ctrl + 0</b>：重置缩放<br><br>'
                         '<b>查看操作：</b><br>'
@@ -175,7 +174,7 @@ class TutorialManager:
             TutorialStep(
                 title="分类类别列表",
                 content='创建的类别会显示在这里。<br><br>'
-                        '• 点击类别按钮：将当前图片分类到该类别<br>'
+                        '• 双击类别按钮：将当前图片分类到该类别<br>'
                         '• 按快捷键（<b>1-9, A-Z</b>）：快速分类<br>'
                         '• 右键点击类别：更多管理选项',
                 target_widget_name="category_list",
@@ -336,7 +335,7 @@ class TutorialManager:
                         '现在你已经掌握了图像分类工具的所有功能。<br><br>'
                         '开始整理你的图片吧！<br><br>'
                         '如需再次查看教程，可以在帮助对话框中点击<b>「重新开始教程」</b>按钮。',
-                target_widget_name="central_widget",
+                target_widget_name="main_window",
                 arrow_position=ArrowPosition.TOP,
                 offset_y=100
             )
@@ -714,6 +713,11 @@ class TutorialManager:
         Returns:
             找到的控件，未找到返回None
         """
+        # 特殊处理：如果要查找整个主窗口
+        if widget_name == "main_window":
+            self.logger.info(f"[OK] 返回主窗口: main_window")
+            return self.main_window
+
         # 优先尝试直接通过属性访问（更可靠）
         self.logger.debug(f"查找控件: {widget_name}")
         self.logger.debug(f"hasattr结果: {hasattr(self.main_window, widget_name)}")
