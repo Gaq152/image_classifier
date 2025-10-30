@@ -9,6 +9,7 @@ import logging
 import threading
 from pathlib import Path
 from ..utils.exceptions import ConfigError
+from ..utils.app_config import get_app_config
 
 
 class Config:
@@ -119,7 +120,7 @@ class Config:
         """加载配置"""
         if not self.config_file:
             return
-            
+
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
@@ -128,17 +129,9 @@ class Config:
                     self.category_shortcuts = config_data.get('category_shortcuts', {})
                     self.ignored_categories = config_data.get('ignored_categories', [])  # 忽略列表
                     self.category_sort_mode = config_data.get('category_sort_mode', 'name')  # 类别排序模式
-                    # 自动更新相关配置（默认值）
-                    self.auto_update_enabled = bool(config_data.get('auto_update_enabled', True))
-                    self.last_update_check_ts = int(config_data.get('last_update_check_ts', 0))
-                    # 默认读取 latest manifest
-                    from .._version_ import get_download_urls
-                    default_manifest = f"https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"
-                    self.update_endpoint = config_data.get('update_endpoint', default_manifest)
-                    # 私有仓库令牌（可为空）。建议使用只读 Project Access Token/Deploy Token
-                    self.update_token = config_data.get('update_token', '')
-                    # 待应用的本地更新包信息
-                    self.pending_update = config_data.get('pending_update', {})
+
+                    # 迁移逻辑：如果旧配置中有更新相关字段，迁移到全局配置
+                    self._migrate_update_config(config_data)
         except FileNotFoundError:
             with self._lock:
                 self.category_shortcuts = {}
@@ -150,18 +143,13 @@ class Config:
         """保存配置"""
         if not self.config_file:
             return
-            
+
         try:
             config = {
                 'category_order': self.category_order,
                 'category_shortcuts': self.category_shortcuts,
                 'ignored_categories': getattr(self, 'ignored_categories', []),  # 保存忽略列表
                 'category_sort_mode': getattr(self, 'category_sort_mode', 'name'),  # 保存排序模式
-                'auto_update_enabled': getattr(self, 'auto_update_enabled', True),
-                'last_update_check_ts': getattr(self, 'last_update_check_ts', 0),
-                'update_endpoint': getattr(self, 'update_endpoint', f"https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"),
-                'update_token': getattr(self, 'update_token', ''),
-                'pending_update': getattr(self, 'pending_update', {}),
             }
             # 确保配置文件目录存在
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +157,40 @@ class Config:
                 json.dump(config, f, ensure_ascii=False, indent=4)
         except (OSError, IOError) as e:
             raise ConfigError(f"保存配置文件失败: {e}")
+
+    def _migrate_update_config(self, config_data):
+        """迁移更新相关配置到全局配置
+
+        Args:
+            config_data: 从 config.json 加载的配置数据
+        """
+        # 检查是否有需要迁移的字段
+        update_fields = ['auto_update_enabled', 'last_update_check_ts', 'update_endpoint', 'update_token', 'pending_update']
+        has_update_config = any(field in config_data for field in update_fields)
+
+        if has_update_config:
+            try:
+                # 获取全局配置实例
+                app_config = get_app_config()
+
+                # 迁移数据到全局配置
+                if 'auto_update_enabled' in config_data:
+                    app_config.auto_update_enabled = bool(config_data['auto_update_enabled'])
+                if 'last_update_check_ts' in config_data:
+                    app_config.last_update_check_ts = int(config_data['last_update_check_ts'])
+                if 'update_endpoint' in config_data:
+                    app_config.update_endpoint = config_data['update_endpoint']
+                if 'update_token' in config_data:
+                    app_config.update_token = config_data['update_token']
+                if 'pending_update' in config_data:
+                    app_config.pending_update = config_data['pending_update']
+
+                # 保存本地配置（不再包含更新相关字段）
+                self.save_config()
+
+                logging.getLogger(__name__).info(f"已将更新配置从 {self.config_file} 迁移到全局配置")
+            except Exception as e:
+                logging.getLogger(__name__).error(f"迁移更新配置失败: {e}")
             
     def set_base_dir(self, base_dir):
         """设置基础目录并重新加载配置"""

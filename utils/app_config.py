@@ -27,7 +27,13 @@ class AppConfig:
             "theme": "light",  # 主题：light 或 dark
             "tutorial_completed": False,  # 是否完成教程
             "tutorial_skipped": False,  # 是否跳过教程
-            "version": "6.3.3"  # 配置文件版本
+            "version": "6.3.3",  # 配置文件版本
+            # 自动更新相关配置
+            "auto_update_enabled": True,  # 自动检查更新开关
+            "last_update_check_ts": 0,  # 最后检查更新的时间戳
+            "update_endpoint": "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json",  # 更新检查端点
+            "update_token": "",  # 更新令牌（可选）
+            "pending_update": {}  # 待处理的更新信息
         }
 
     def _load_config(self) -> Dict[str, Any]:
@@ -129,6 +135,66 @@ class AppConfig:
         else:
             self.tutorial_skipped = True
 
+    # ==================== 自动更新配置 ====================
+
+    @property
+    def auto_update_enabled(self) -> bool:
+        """获取自动更新开关"""
+        return self._config.get("auto_update_enabled", True)
+
+    @auto_update_enabled.setter
+    def auto_update_enabled(self, value: bool):
+        """设置自动更新开关"""
+        self._config["auto_update_enabled"] = value
+        self._save_config()
+        self.logger.info(f"自动更新已{'启用' if value else '禁用'}")
+
+    @property
+    def last_update_check_ts(self) -> int:
+        """获取最后检查更新的时间戳"""
+        return self._config.get("last_update_check_ts", 0)
+
+    @last_update_check_ts.setter
+    def last_update_check_ts(self, value: int):
+        """设置最后检查更新的时间戳"""
+        self._config["last_update_check_ts"] = value
+        self._save_config()
+
+    @property
+    def update_endpoint(self) -> str:
+        """获取更新检查端点"""
+        return self._config.get("update_endpoint",
+            "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json")
+
+    @update_endpoint.setter
+    def update_endpoint(self, value: str):
+        """设置更新检查端点"""
+        self._config["update_endpoint"] = value
+        self._save_config()
+        self.logger.info(f"更新端点已设置为: {value}")
+
+    @property
+    def update_token(self) -> str:
+        """获取更新令牌"""
+        return self._config.get("update_token", "")
+
+    @update_token.setter
+    def update_token(self, value: str):
+        """设置更新令牌"""
+        self._config["update_token"] = value
+        self._save_config()
+
+    @property
+    def pending_update(self) -> dict:
+        """获取待处理的更新信息"""
+        return self._config.get("pending_update", {})
+
+    @pending_update.setter
+    def pending_update(self, value: dict):
+        """设置待处理的更新信息"""
+        self._config["pending_update"] = value
+        self._save_config()
+
     # ==================== 其他方法 ====================
 
     def reset_tutorial(self):
@@ -141,6 +207,10 @@ class AppConfig:
     def get_all_config(self) -> Dict[str, Any]:
         """获取所有配置"""
         return self._config.copy()
+
+    def save_config(self):
+        """公开的保存配置方法"""
+        self._save_config()
 
     def __repr__(self):
         return f"AppConfig(theme={self.theme}, tutorial_completed={self.tutorial_completed}, tutorial_skipped={self.tutorial_skipped})"

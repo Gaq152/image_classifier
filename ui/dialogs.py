@@ -23,6 +23,7 @@ from .._version_ import compare_version, __version__
 from ..utils.exceptions import FileOperationError
 from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
+from ..utils.app_config import get_app_config
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles.theme import default_theme
 from .components.widgets.badge_button import BadgeWidget
@@ -269,6 +270,7 @@ class AddCategoriesDialog(QDialog):
         self.existing_categories = existing_categories
         self.added_categories = set()
         self.logger = logging.getLogger(__name__)
+        self._centered = False  # 标记是否已居中
         self.initUI()
         
     def initUI(self):
@@ -503,6 +505,29 @@ class AddCategoriesDialog(QDialog):
                 QApplication.processEvents()
         except Exception as e:
             self.logger.error(f"添加并继续失败: {e}")
+
+    def showEvent(self, event):
+        """对话框显示时居中"""
+        super().showEvent(event)
+        if not self._centered:
+            self._center_on_parent()
+            self._centered = True
+
+    def _center_on_parent(self):
+        """将对话框居中显示在父窗口上"""
+        try:
+            parent = self.parent()
+            if parent:
+                # 获取父窗口的几何信息
+                parent_geometry = parent.geometry()
+                # 计算对话框应该显示的位置（父窗口中心）
+                x = parent_geometry.x() + (parent_geometry.width() - self.width()) // 2
+                y = parent_geometry.y() + (parent_geometry.height() - self.height()) // 2
+                # 移动对话框到计算出的位置
+                self.move(x, y)
+                self.logger.debug(f"对话框已居中: x={x}, y={y}")
+        except Exception as e:
+            self.logger.error(f"居中对话框失败: {e}")
 
 
 class TabbedHelpDialog(QDialog):
@@ -784,17 +809,15 @@ class TabbedHelpDialog(QDialog):
             # 使用带流畅滑动动画的拨动开关
             auto_chk = AnimatedToggle()
             auto_chk.setToolTip('启动时自动检查更新')
-            auto_enabled = True
-            if self.config and hasattr(self.config, 'auto_update_enabled'):
-                auto_enabled = bool(self.config.auto_update_enabled)
+            # 从全局配置读取自动更新设置
+            app_config = get_app_config()
+            auto_enabled = bool(app_config.auto_update_enabled)
             auto_chk.setChecked(auto_enabled)
 
             def toggle_auto(checked):
-                if not self.config:
-                    return
-                self.config.auto_update_enabled = checked
                 try:
-                    self.config.save_config()
+                    app_config = get_app_config()
+                    app_config.auto_update_enabled = checked
                 except Exception as e:
                     self.logger.error(f"保存自动更新配置失败: {e}")
             auto_chk.clicked.connect(toggle_auto)
