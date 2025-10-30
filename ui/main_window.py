@@ -36,6 +36,7 @@ from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
                      TabbedHelpDialog, ProgressDialog)
 from .managers import FileStateManager
 from ..core.config import Config
+from ..utils.app_config import get_app_config
 from ..core.scanner import FileScannerThread
 from ..core.image_loader import HighPerformanceImageLoader
 from ..utils.exceptions import ImageClassifierError, FileOperationError
@@ -89,7 +90,8 @@ class ImageClassifier(QMainWindow):
 
         # 启动后自动检查更新（非阻塞，可配置开关）
         try:
-            if getattr(self.config, 'auto_update_enabled', True):
+            app_config = get_app_config()
+            if app_config.auto_update_enabled:
                 self._schedule_auto_update_check()
             else:
                 self.logger.info("自动检查更新：已关闭")
@@ -196,6 +198,7 @@ class ImageClassifier(QMainWindow):
         self.last_operation_category = None  # 上次操作的类别，用于保持选中状态
         self.selected_category = None
         self.last_move_time = 0
+        self.saved_last_index = -1  # 从状态文件加载的上次图片索引
         
         # 性能监控
         self.enable_performance_logging = True
@@ -286,8 +289,15 @@ class ImageClassifier(QMainWindow):
             # 创建状态栏
             self.create_status_bar()
 
+            # 应用主题到所有UI组件（在所有组件创建完成后）
+            try:
+                self.apply_theme()
+                self.logger.info(f"已应用主题: {default_theme.get_current_theme()}")
+            except Exception as e:
+                self.logger.error(f"应用主题失败: {e}")
+
             self.logger.info("用户界面初始化完成")
-            
+
         except Exception as e:
             self.logger.error(f"用户界面初始化失败: {e}")
             raise ImageClassifierError(f"用户界面初始化失败: {e}")
@@ -1591,10 +1601,128 @@ class ImageClassifier(QMainWindow):
 
         self.logger.info(f"🎯 后台扫描完成: 实际文件 {actual_count} 个")
 
+        # 检查是否需要提示用户跳转到上次位置
+        QTimer.singleShot(500, self._check_and_prompt_last_position)
+
+    def _check_and_prompt_last_position(self):
+        """检查并提示用户是否跳转到上次处理的位置"""
+        try:
+            # 检查是否有保存的索引
+            if not hasattr(self, 'saved_last_index'):
+                return
+
+            last_index = self.saved_last_index
+
+            # 检查索引是否有效（大于0且小于图片总数）
+            if last_index <= 0 or not self.image_files or last_index >= len(self.image_files):
+                self.logger.debug(f"last_index 无效或为初始值: {last_index}, 不提示跳转")
+                return
+
+            # 弹出确认对话框
+            from PyQt6.QtWidgets import QMessageBox
+            from .components.styles.theme import default_theme
+
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("恢复上次位置")
+            msg_box.setText(f"检测到上次处理到第 {last_index + 1} 张图片")
+            msg_box.setInformativeText("是否跳转到上次处理的位置继续工作？")
+            msg_box.setIcon(QMessageBox.Icon.Question)
+
+            # 设置程序图标
+            try:
+                icon_path = self._get_resource_path('assets/icon.ico')
+                if icon_path and icon_path.exists():
+                    msg_box.setWindowIcon(QIcon(str(icon_path)))
+            except Exception:
+                pass
+
+            # 添加按钮
+            yes_btn = msg_box.addButton("跳转", QMessageBox.ButtonRole.YesRole)
+            no_btn = msg_box.addButton("从头开始", QMessageBox.ButtonRole.NoRole)
+            msg_box.setDefaultButton(yes_btn)
+
+            # 应用主题样式（支持亮色和暗色主题）
+            c = default_theme.colors
+            msg_box.setStyleSheet(f"""
+                QMessageBox {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                    color: {c.TEXT_PRIMARY};
+                    border: 1px solid {c.BORDER_MEDIUM};
+                    border-radius: 8px;
+                    font-size: 14px;
+                }}
+                QMessageBox QLabel {{
+                    color: {c.TEXT_PRIMARY};
+                    font-size: 14px;
+                    padding: 10px;
+                    background: transparent;
+                }}
+                QPushButton {{
+                    background-color: {c.PRIMARY};
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 8px 16px;
+                    font-size: 13px;
+                    font-weight: bold;
+                    min-width: 80px;
+                }}
+                QPushButton:hover {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+                QPushButton:pressed {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+            """)
+
+            # 显示对话框并获取用户选择
+            msg_box.exec()
+            clicked_button = msg_box.clickedButton()
+
+            if clicked_button == yes_btn:
+                # 用户选择跳转
+                self.logger.info(f"用户选择跳转到上次位置: 索引 {last_index}")
+                self.jump_to_image(last_index)
+                toast_info(self, f"已跳转到第 {last_index + 1} 张图片")
+            else:
+                # 用户选择从头开始
+                self.logger.info("用户选择从头开始")
+
+        except Exception as e:
+            self.logger.error(f"检查上次位置失败: {e}")
+
+    def jump_to_image(self, index):
+        """跳转到指定索引的图片
+
+        Args:
+            index: 目标图片的索引（0-based）
+        """
+        try:
+            if not self.image_files or index < 0 or index >= len(self.image_files):
+                self.logger.warning(f"无效的图片索引: {index}, 总图片数: {len(self.image_files) if self.image_files else 0}")
+                return
+
+            # 设置当前索引
+            self.current_index = index
+            self.logger.info(f"跳转到图片索引: {index} / {len(self.image_files)}")
+
+            # 显示图片
+            self.show_current_image()
+
+            # 滚动图片列表到对应位置
+            if hasattr(self, 'image_list_widget') and self.image_list_widget:
+                self.image_list_widget.scrollToItem(
+                    self.image_list_widget.item(index),
+                    QAbstractItemView.ScrollHint.PositionAtCenter
+                )
+
+        except Exception as e:
+            self.logger.error(f"跳转到图片索引 {index} 失败: {e}")
+
     def on_scan_progress(self, message):
         """处理扫描进度"""
         self.statusBar.showMessage(message)
-    
+
     # ===== UI更新和显示方法 =====
     
     def schedule_ui_update(self, *components):
@@ -1862,49 +1990,55 @@ class ImageClassifier(QMainWindow):
         try:
             if not self.current_dir:
                 return
-                
+
             # 从图片目录的父目录加载状态文件
             parent_dir = self.current_dir.parent
             state_file = parent_dir / 'classification_state.json'
-            
+
             if state_file.exists():
                 with open(state_file, 'r', encoding='utf-8') as f:
                     state = json.load(f)
-                    
+
                 self.classified_images = state.get('classified_images', {})
                 self.removed_images = set(state.get('removed_images', []))
-                
+
+                # 恢复上次的图片索引
+                self.saved_last_index = state.get('last_index', -1)
+                self.logger.debug(f"加载的 last_index: {self.saved_last_index}")
+
                 # 恢复操作模式状态
                 saved_copy_mode = state.get('is_copy_mode', True)  # 默认为复制模式
                 self._set_mode_direct(saved_copy_mode)  # 直接设置模式，不触发迁移逻辑
-                
+
                 # 恢复分类模式状态
                 saved_multi_category = state.get('is_multi_category', False)  # 默认为单分类模式
                 self.is_multi_category = saved_multi_category
                 # 延迟更新按钮状态，确保UI组件已完全初始化
                 QTimer.singleShot(10, lambda: self._update_category_mode_button_state())
-                
+
                 modes = []
                 if saved_copy_mode:
                     modes.append("复制")
                 else:
                     modes.append("移动")
-                    
+
                 if saved_multi_category:
                     modes.append("多分类")
                 else:
                     modes.append("单分类")
-                    
+
                 self.logger.info(f"状态加载完成: {len(self.classified_images)} 个分类记录，操作模式: {' + '.join(modes)}")
                 self.logger.debug(f"状态文件路径: {state_file}")
             else:
                 self.logger.info("状态文件不存在，使用空状态")
+                self.saved_last_index = -1
                 # 确保按钮状态正确（默认单分类模式）
                 self.is_multi_category = False
                 QTimer.singleShot(10, lambda: self._update_category_mode_button_state())
-                
+
         except Exception as e:
             self.logger.error(f"加载状态失败: {e}")
+            self.saved_last_index = -1
     
     def _update_category_mode_button_state(self):
         """更新分类模式按钮状态 - 统一方法"""
@@ -4610,7 +4744,7 @@ class ImageClassifier(QMainWindow):
             if hasattr(self, 'category_buttons') and self.category_buttons:
                 self._update_category_buttons_internal()
                 # 更新所有类别按钮的标签颜色
-                for button in self.category_buttons.values():
+                for button in self.category_buttons:
                     if hasattr(button, 'update_label_colors'):
                         button.update_label_colors()
 
@@ -4670,7 +4804,8 @@ class ImageClassifier(QMainWindow):
     def _schedule_auto_update_check(self):
         """根据配置调度一次自动检查更新（应用启动后几秒执行）"""
         try:
-            if not hasattr(self, 'config') or not getattr(self.config, 'auto_update_enabled', True):
+            app_config = get_app_config()
+            if not app_config.auto_update_enabled:
                 self.logger.debug("自动检查更新已关闭")
                 return
 
@@ -4685,7 +4820,8 @@ class ImageClassifier(QMainWindow):
     def _start_periodic_update_check(self):
         """启动定期检查更新定时器（每1小时检查一次）"""
         try:
-            if not hasattr(self, 'config') or not getattr(self.config, 'auto_update_enabled', True):
+            app_config = get_app_config()
+            if not app_config.auto_update_enabled:
                 return
 
             # 创建定时器，每1小时（3600000毫秒）触发一次
