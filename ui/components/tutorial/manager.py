@@ -704,6 +704,11 @@ class TutorialManager:
 
         self.logger.info(f"教程已{'完成' if completed else '跳过'}")
 
+        # 教程结束后，延迟检查是否需要恢复上次目录
+        from PyQt6.QtCore import QTimer
+        if hasattr(self.main_window, '_check_and_restore_last_directory'):
+            QTimer.singleShot(500, self.main_window._check_and_restore_last_directory)
+
     def _find_widget_by_name(self, widget_name: str) -> Optional[QWidget]:
         """通过对象名称查找控件
 

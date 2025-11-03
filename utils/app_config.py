@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 from .paths import get_config_dir
+from _version_ import __version__
 
 
 class AppConfig:
@@ -27,7 +28,7 @@ class AppConfig:
             "theme": "light",  # 主题：light 或 dark
             "tutorial_completed": False,  # 是否完成教程
             "tutorial_skipped": False,  # 是否跳过教程
-            "version": "6.3.3",  # 配置文件版本
+            "version": __version__,  # 配置文件版本（自动同步程序版本）
             # 自动更新相关配置
             "auto_update_enabled": True,  # 自动检查更新开关
             "last_update_check_ts": 0,  # 最后检查更新的时间戳
@@ -51,6 +52,15 @@ class AppConfig:
                     for key, value in default_config.items():
                         if key not in config:
                             config[key] = value
+
+                    # 检查并更新版本号
+                    if config.get('version') != __version__:
+                        old_version = config.get('version', '未知')
+                        config['version'] = __version__
+                        self.logger.info(f"配置文件版本已更新: {old_version} -> {__version__}")
+                        # 立即保存更新后的配置
+                        with open(self._config_file, 'w', encoding='utf-8') as f:
+                            json.dump(config, f, ensure_ascii=False, indent=2)
 
                     return config
             else:

@@ -101,8 +101,7 @@ class ImageClassifier(QMainWindow):
         # 延迟检查是否显示教程（确保窗口已完全初始化）
         QTimer.singleShot(1000, self._check_and_show_tutorial)
 
-        # 延迟检查是否恢复上次打开的目录（在教程之后）
-        QTimer.singleShot(1500, self._check_and_restore_last_directory)
+        # 注意：恢复目录的检查会在教程完成/跳过后自动触发，不在这里直接调用
     
     def _get_resource_path(self, relative_path):
         """获取资源文件路径，兼容开发环境和打包环境"""
@@ -4417,6 +4416,10 @@ class ImageClassifier(QMainWindow):
             if self.tutorial_manager and self.tutorial_manager.should_show_tutorial():
                 self.logger.info("首次运行，显示教程引导")
                 self.tutorial_manager.start_tutorial()
+                # 教程显示时，不检查恢复目录（避免冲突）
+            else:
+                # 教程已完成或跳过，检查是否需要恢复上次目录
+                QTimer.singleShot(500, self._check_and_restore_last_directory)
         except Exception as e:
             self.logger.error(f"检查教程显示状态失败: {e}")
 
