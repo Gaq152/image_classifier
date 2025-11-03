@@ -33,7 +33,9 @@ class AppConfig:
             "last_update_check_ts": 0,  # 最后检查更新的时间戳
             "update_endpoint": "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json",  # 更新检查端点
             "update_token": "",  # 更新令牌（可选）
-            "pending_update": {}  # 待处理的更新信息
+            "pending_update": {},  # 待处理的更新信息
+            # 工作目录相关配置
+            "last_opened_directory": ""  # 最后打开的图片目录
         }
 
     def _load_config(self) -> Dict[str, Any]:
@@ -194,6 +196,20 @@ class AppConfig:
         """设置待处理的更新信息"""
         self._config["pending_update"] = value
         self._save_config()
+
+    # ==================== 工作目录配置 ====================
+
+    @property
+    def last_opened_directory(self) -> str:
+        """获取最后打开的目录"""
+        return self._config.get("last_opened_directory", "")
+
+    @last_opened_directory.setter
+    def last_opened_directory(self, value: str):
+        """设置最后打开的目录"""
+        self._config["last_opened_directory"] = value
+        self._save_config()
+        self.logger.info(f"最后打开的目录已设置为: {value}")
 
     # ==================== 其他方法 ====================
 
