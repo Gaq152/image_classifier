@@ -100,6 +100,9 @@ class ImageClassifier(QMainWindow):
 
         # 延迟检查是否显示教程（确保窗口已完全初始化）
         QTimer.singleShot(1000, self._check_and_show_tutorial)
+
+        # 延迟检查是否恢复上次打开的目录（在教程之后）
+        QTimer.singleShot(1500, self._check_and_restore_last_directory)
     
     def _get_resource_path(self, relative_path):
         """获取资源文件路径，兼容开发环境和打包环境"""
@@ -1153,11 +1156,11 @@ class ImageClassifier(QMainWindow):
         dir_path = QFileDialog.getExistingDirectory(self, '选择图片目录')
         if dir_path:
             self.current_dir = Path(dir_path)
-            
+
             # 检查是否为网络路径
             path_str = str(self.current_dir)
             is_network_path = path_str.startswith('\\\\')
-            
+
             if is_network_path:
                 # 网络路径提醒
                 toast_info(self,'🚀 SMB/NAS路径已启用专项优化')
@@ -1167,13 +1170,20 @@ class ImageClassifier(QMainWindow):
                 self.logger.info(f"用户选择本地路径: {self.current_dir}")
                 # 显示本地目录打开成功通知
                 toast_success(self,f"已打开目录：{self.current_dir.name}")
-            
+
+            # 保存最后打开的目录到全局配置
+            try:
+                app_config = get_app_config()
+                app_config.last_opened_directory = str(self.current_dir)
+            except Exception as e:
+                self.logger.error(f"保存最后打开的目录失败: {e}")
+
             # 设置配置文件路径为图片目录的父目录
             self.config.set_base_dir(str(self.current_dir.parent))
-            
+
             # 先启动图片扫描，让UI立即响应
             self.load_images()
-            
+
             # 延迟类别加载和同步操作
             QTimer.singleShot(100, self._delayed_load_categories)
 
@@ -4409,6 +4419,105 @@ class ImageClassifier(QMainWindow):
                 self.tutorial_manager.start_tutorial()
         except Exception as e:
             self.logger.error(f"检查教程显示状态失败: {e}")
+
+    def _check_and_restore_last_directory(self):
+        """检查并询问用户是否恢复上次打开的目录"""
+        try:
+            # 如果已经打开了目录，则不提示
+            if self.current_dir is not None:
+                return
+
+            # 获取上次打开的目录
+            app_config = get_app_config()
+            last_dir = app_config.last_opened_directory
+
+            # 如果没有记录或目录不存在，则不提示
+            if not last_dir or not Path(last_dir).exists():
+                return
+
+            # 创建询问对话框
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("恢复上次任务")
+            msg_box.setText(f"检测到上次打开的工作目录")
+            msg_box.setInformativeText(f"路径：{last_dir}\n\n是否继续上次的任务？")
+
+            # 应用主题样式
+            c = default_theme.colors
+            msg_box.setStyleSheet(f"""
+                QMessageBox {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                    color: {c.TEXT_PRIMARY};
+                }}
+                QMessageBox QLabel {{
+                    color: {c.TEXT_PRIMARY};
+                    font-size: 13px;
+                }}
+                QPushButton {{
+                    background-color: {c.PRIMARY};
+                    color: white;
+                    border: none;
+                    padding: 6px 16px;
+                    border-radius: 4px;
+                    font-size: 13px;
+                    min-width: 70px;
+                }}
+                QPushButton:hover {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+                QPushButton:pressed {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+            """)
+
+            # 添加按钮
+            yes_btn = msg_box.addButton("继续上次任务", QMessageBox.ButtonRole.YesRole)
+            no_btn = msg_box.addButton("重新选择", QMessageBox.ButtonRole.NoRole)
+            msg_box.setDefaultButton(yes_btn)
+
+            # 显示对话框并获取结果
+            msg_box.exec()
+            clicked_button = msg_box.clickedButton()
+
+            if clicked_button == yes_btn:
+                self.logger.info(f"用户选择恢复上次目录: {last_dir}")
+                # 直接设置目录并打开
+                self._open_directory_with_path(last_dir)
+            else:
+                self.logger.info("用户选择重新选择目录")
+
+        except Exception as e:
+            self.logger.error(f"检查恢复目录失败: {e}")
+
+    def _open_directory_with_path(self, dir_path: str):
+        """使用指定路径打开目录（内部方法，用于恢复上次目录）"""
+        try:
+            self.current_dir = Path(dir_path)
+
+            # 检查是否为网络路径
+            path_str = str(self.current_dir)
+            is_network_path = path_str.startswith('\\\\')
+
+            if is_network_path:
+                # 网络路径提醒
+                toast_info(self, '🚀 SMB/NAS路径已启用专项优化')
+                self.logger.info(f"恢复网络路径: {self.current_dir}")
+            else:
+                self.logger.info(f"恢复本地路径: {self.current_dir}")
+                # 显示本地目录打开成功通知
+                toast_success(self, f"已恢复目录：{self.current_dir.name}")
+
+            # 设置配置文件路径为图片目录的父目录
+            self.config.set_base_dir(str(self.current_dir.parent))
+
+            # 先启动图片扫描，让UI立即响应
+            self.load_images()
+
+            # 延迟类别加载和同步操作
+            QTimer.singleShot(100, self._delayed_load_categories)
+
+        except Exception as e:
+            self.logger.error(f"打开指定目录失败: {e}")
+            toast_error(self, f"打开目录失败: {str(e)}")
 
     def start_tutorial(self):
         """开始或重新开始教程（提供给菜单调用）"""
