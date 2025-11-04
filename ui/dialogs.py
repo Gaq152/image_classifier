@@ -788,49 +788,9 @@ class TabbedHelpDialog(QDialog):
             """
             
             layout = QVBoxLayout(self)
-            
+
             # 创建标签页控件
             tab_widget = QTabWidget()
-            
-            # 顶部操作区：更新相关
-            top_btn_bar = QHBoxLayout()
-            check_btn = QPushButton('检查更新')
-            check_btn.clicked.connect(self._handle_check_update)
-
-            # 使用BadgeWidget包装检查更新按钮，支持红点标记
-            self.check_btn_badge = BadgeWidget(check_btn, self)
-            # 从主窗口同步红点状态
-            if self.parent() and hasattr(self.parent(), 'help_button_badge'):
-                badge_visible = self.parent().help_button_badge.is_badge_visible()
-                self.check_btn_badge.set_badge_visible(badge_visible)
-            else:
-                self.check_btn_badge.set_badge_visible(False)
-
-            # 使用带流畅滑动动画的拨动开关
-            auto_chk = AnimatedToggle()
-            auto_chk.setToolTip('启动时自动检查更新')
-            # 从全局配置读取自动更新设置
-            app_config = get_app_config()
-            auto_enabled = bool(app_config.auto_update_enabled)
-            auto_chk.setChecked(auto_enabled)
-
-            def toggle_auto(checked):
-                try:
-                    app_config = get_app_config()
-                    app_config.auto_update_enabled = checked
-                except Exception as e:
-                    self.logger.error(f"保存自动更新配置失败: {e}")
-            auto_chk.clicked.connect(toggle_auto)
-
-            top_btn_bar.addWidget(self.check_btn_badge)
-            top_btn_bar.addStretch()
-
-            # 右侧显示自动更新开关
-            auto_label = QLabel('自动检查')
-            top_btn_bar.addWidget(auto_label)
-            top_btn_bar.addWidget(auto_chk)
-
-            layout.addLayout(top_btn_bar)
 
             # 添加快速入门标签页
             quick_start_tab = self.create_quick_start_tab()
@@ -853,308 +813,21 @@ class TabbedHelpDialog(QDialog):
             tab_widget.addTab(about_tab, '关于')
             
             layout.addWidget(tab_widget)
-            
-            # 添加底部按钮
-            button_layout = QHBoxLayout()
 
-            # 添加清理SMB缓存按钮
-            clear_cache_btn = QPushButton('🗑️ 清理SMB缓存')
-            clear_cache_btn.setObjectName("clearCacheBtn")
-            clear_cache_btn.clicked.connect(self.clear_smb_cache)
-            button_layout.addWidget(clear_cache_btn)
-
-            # 添加重新开始教程按钮
-            restart_tutorial_btn = QPushButton('📖 重新开始教程')
-            restart_tutorial_btn.setObjectName("restartTutorialBtn")
-            restart_tutorial_btn.clicked.connect(self.restart_tutorial)
-            button_layout.addWidget(restart_tutorial_btn)
-
-            button_layout.addStretch()
-
-            # 移除关闭按钮，窗口自带关闭按钮已足够
-
-            layout.addLayout(button_layout)
+            # 提示：更多设置请打开设置页面
+            hint_layout = QHBoxLayout()
+            hint_layout.addStretch()
+            hint_label = QLabel("💡 提示：更多设置请点击工具栏的 ⚙️ 设置按钮")
+            hint_label.setStyleSheet("color: #6B7280; font-size: 12px; padding: 10px;")
+            hint_layout.addWidget(hint_label)
+            hint_layout.addStretch()
+            layout.addLayout(hint_layout)
 
             # 应用当前主题
             self._apply_theme()
 
         except Exception as e:
             self.logger.error(f"初始化帮助对话框UI失败: {e}")
-
-    def _handle_check_update(self, suppress_if_latest: bool = False):
-        try:
-            # 先检查本地是否已有更新包
-            from ..utils.paths import get_update_dir
-            import re
-
-            local_pending_version = None
-            local_download_path = None
-            local_batch_path = None
-            update_dir = get_update_dir()
-
-            if update_dir.exists():
-                # 查找本地更新包
-                exe_files = list(update_dir.glob('*.exe'))
-                if exe_files:
-                    exe_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                    local_download_path = exe_files[0]
-                    match = re.search(r'v(\d+\.\d+\.\d+)', local_download_path.name)
-                    if match:
-                        local_pending_version = match.group(1)
-                    batch_files = list(update_dir.glob('update.bat'))
-                    if batch_files:
-                        local_batch_path = batch_files[0]
-                    self.logger.info(f"手动更新：发现本地更新包 v{local_pending_version}")
-
-            # 检查线上版本
-            endpoint = None
-            token = ''
-            if self.config:
-                endpoint = getattr(self.config, 'update_endpoint', None)
-                token = getattr(self.config, 'update_token', '')
-            if not endpoint:
-                endpoint = get_manifest_url(latest=True)
-
-            self.logger.debug(f"更新检查：开始，endpoint={endpoint}")
-            manifest = fetch_manifest(endpoint, token or None)
-            new_ver = str(manifest.get('version', '')).strip()
-            url = str(manifest.get('url', '')).strip()
-            sha256 = str(manifest.get('sha256', '')).strip()
-            size_bytes = int(manifest.get('size_bytes', 0) or 0)
-            notes = str(manifest.get('notes', '')).strip()
-            display_name = str(manifest.get('display_name', '')).strip()
-            self.logger.info(f"检查更新：发现线上版本 v{new_ver}")
-
-            # 如果本地已有相同或更新版本，直接提示安装
-            if local_pending_version and local_download_path:
-                if compare_version(local_pending_version, new_ver) >= 0:
-                    self.logger.info(f"手动更新：本地包v{local_pending_version}已是最新，提示安装")
-                    # 确保批处理脚本存在
-                    if not local_batch_path or not local_batch_path.exists():
-                        # launch_self_update 已在顶部导入，无需重复导入
-                        if getattr(sys, 'frozen', False):
-                            exe_path = Path(sys.executable)
-                        else:
-                            exe_path = Path.cwd() / "ImageClassifier.exe"
-                        local_batch_path = launch_self_update(exe_path, local_download_path)
-                        self.logger.info(f"已生成批处理脚本: {local_batch_path}")
-
-                    # 询问是否立即重启更新
-                    reply = self._ask_yes_no(
-                        '已下载更新',
-                        f'本地已有更新包 v{local_pending_version}，是否立即重启并完成更新？'
-                    )
-                    if reply == QMessageBox.StandardButton.Yes:
-                        try:
-                            subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
-                            self.logger.info("更新安装：已启动安装脚本")
-                        except Exception as e:
-                            toast_error(self, f'更新失败: 无法启动更新程序')
-                            self.logger.error(f"更新安装：启动脚本失败 {e}")
-                            return
-                        try:
-                            if self.parent():
-                                self.parent().close()
-                        except Exception:
-                            pass
-                        QApplication.processEvents()
-                        try:
-                            self.logger.debug("更新安装：应用即将退出以释放句柄")
-                            os._exit(0)
-                        except Exception:
-                            QApplication.quit()
-                    else:
-                        self.logger.info("更新已准备：用户选择稍后安装")
-                        toast_info(self, '已保存更新包，下次启动时继续提示')
-                        # 用户选择稍后安装，显示红点持续提醒
-                        if hasattr(self, 'check_btn_badge'):
-                            self.check_btn_badge.set_badge_visible(True)
-                        if self.parent() and hasattr(self.parent(), 'help_button_badge'):
-                            self.parent().help_button_badge.set_badge_visible(True)
-                    return
-                else:
-                    # 线上版本更新，清理旧包
-                    self.logger.info(f"手动更新：线上版本v{new_ver}更新，清理本地旧包v{local_pending_version}")
-                    try:
-                        if local_download_path.exists():
-                            local_download_path.unlink()
-                            self.logger.info(f"已删除旧更新包: {local_download_path}")
-                    except Exception as e:
-                        self.logger.warning(f"清理旧更新包失败: {e}")
-
-            if not new_ver or compare_version(new_ver, __version__) <= 0:
-                if not suppress_if_latest:
-                    toast_info(self, '当前已是最新版本')
-                # 当前已是最新版本，清除红点标记
-                if hasattr(self, 'check_btn_badge'):
-                    self.check_btn_badge.set_badge_visible(False)
-                if self.parent() and hasattr(self.parent(), 'help_button_badge'):
-                    self.parent().help_button_badge.set_badge_visible(False)
-                return
-
-            # 发现新版本，显示Toast通知
-            toast_warning(self, f'发现新版本 v{new_ver}')
-
-            size_mb = f"{size_bytes/1024/1024:.1f} MB" if size_bytes else "未知"
-            msg = f"发现新版本: v{new_ver}\n大小: {size_mb}\n\n更新说明:\n{notes or '无'}\n\n是否立即下载并更新？"
-            reply = self._ask_yes_no('发现新版本', msg)
-            if reply != QMessageBox.StandardButton.Yes:
-                self.logger.info("检查更新：用户选择暂不更新")
-                # 用户选择暂不更新，显示红点持续提醒
-                if hasattr(self, 'check_btn_badge'):
-                    self.check_btn_badge.set_badge_visible(True)
-                if self.parent() and hasattr(self.parent(), 'help_button_badge'):
-                    self.parent().help_button_badge.set_badge_visible(True)
-                return
-
-            # 下载到用户目录下的 update 子目录
-            from ..utils.paths import get_update_dir
-            update_dir = get_update_dir()
-            try:
-                update_dir.mkdir(parents=True, exist_ok=True)
-                # 权限探测
-                test_file = update_dir / '.perm_test'
-                test_file.write_text('ok', encoding='utf-8')
-                test_file.unlink(missing_ok=True)
-                dest_root = update_dir
-            except Exception:
-                dest_root = Path(os.getenv('TEMP') or Path.cwd())
-
-            # 优先使用 manifest.display_name（中文友好），否则从 URL 解码
-            try:
-                parsed = urlparse(url)
-                url_name = unquote(Path(parsed.path).name)
-            except Exception:
-                url_name = ''
-            fname = display_name or url_name or f"图像分类工具_v{new_ver}.exe"
-            dest = dest_root / fname
-
-            progress_dialog = QDialog(self)
-            progress_dialog.setWindowTitle('下载更新')
-            p_layout = QVBoxLayout(progress_dialog)
-            p_label = QLabel('正在下载更新包...')
-            p_bar = QProgressBar()
-            p_bar.setRange(0, 0)
-            p_layout.addWidget(p_label)
-            p_layout.addWidget(p_bar)
-            progress_dialog.setModal(True)
-            progress_dialog.show()
-            QApplication.processEvents()
-
-            def on_progress(done: int, total: Optional[int]):
-                if total and total > 0:
-                    p_bar.setRange(0, total)
-                    p_bar.setValue(done)
-                else:
-                    p_bar.setRange(0, 0)
-                QApplication.processEvents()
-
-            try:
-                self.logger.debug("更新下载：开始")
-                download_with_progress(url, dest, token or None, on_progress)
-                self.logger.info("更新下载：完成")
-
-                # 校验哈希（在下载对话框中显示校验状态）
-                if sha256:
-                    p_label.setText('正在校验文件完整性...')
-                    p_bar.setRange(0, 0)  # 不确定进度
-                    QApplication.processEvents()
-
-                    self.logger.debug("更新校验：开始")
-                    actual = sha256_file(dest)
-                    if actual.lower() != sha256.lower():
-                        toast_error(self, f'更新失败: 文件校验失败')
-                        self.logger.error(f"更新校验：失败 expected={sha256} actual={actual}")
-                        try:
-                            dest.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-                        return
-                    self.logger.debug("更新校验：通过")
-            finally:
-                progress_dialog.close()
-
-            # 生成更新脚本，但不立即执行；由用户确认是否重启
-            # 获取正确的exe路径（开发环境 vs 打包环境）
-            if getattr(sys, 'frozen', False):
-                # 打包环境：使用exe所在目录
-                exe_path = Path(sys.executable)
-            else:
-                # 开发环境：使用当前工作目录下的模拟exe路径
-                exe_path = Path.cwd() / "ImageClassifier.exe"
-            self.logger.debug("更新安装：准备安装脚本")
-            batch_path = launch_self_update(exe_path, dest)
-
-            # 询问是否立即重启更新（只有两个选项：立即重启、稍后）
-            reply = self._ask_yes_no(
-                '更新下载完成',
-                f'更新包v{new_ver}已准备就绪，是否立即重启并完成更新？'
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                # 启动批处理并退出
-                try:
-                    # 将已下载的新包绝对路径作为参数传递给 update.bat
-                    subprocess.Popen(["cmd", "/c", "start", "", str(batch_path), str(dest)], shell=False)
-                    self.logger.info("更新安装：已启动安装脚本")
-                except Exception as e:
-                    toast_error(self, f'更新失败: 无法启动更新程序')
-                    self.logger.error(f"更新安装：启动脚本失败 {e}")
-                    return
-                # 尝试关闭主窗口并处理事件，给批处理释放句柄的时间
-                try:
-                    if self.parent():
-                        self.parent().close()
-                except Exception:
-                    pass
-                QApplication.processEvents()
-                # 立即退出进程，确保释放可执行文件句柄
-                try:
-                    self.logger.debug("更新安装：应用即将退出以释放句柄")
-                    os._exit(0)
-                except Exception:
-                    QApplication.quit()
-            else:
-                self.logger.info("更新已准备：用户选择稍后安装，下次启动时继续提示")
-                toast_info(self, '已保存更新包，下次启动时继续提示')
-                # 用户选择稍后安装，显示红点持续提醒
-                if hasattr(self, 'check_btn_badge'):
-                    self.check_btn_badge.set_badge_visible(True)
-                if self.parent() and hasattr(self.parent(), 'help_button_badge'):
-                    self.parent().help_button_badge.set_badge_visible(True)
-        except Exception as e:
-            self.logger.error(f"检查/更新失败: {e}")
-            toast_error(self, f'检查更新失败: {str(e)}')
-        
-    def clear_smb_cache(self):
-        """清理SMB缓存"""
-        try:
-            from ..utils.paths import get_cache_dir
-            cache_dir = get_cache_dir()
-            if cache_dir.exists():
-                shutil.rmtree(cache_dir)
-                # 重新创建空目录
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                toast_success(self, 'SMB缓存已清理完成')
-            else:
-                toast_info(self, '未发现SMB缓存文件')
-        except Exception as e:
-            self.logger.error(f"清理SMB缓存失败: {e}")
-            toast_error(self, f'清理SMB缓存失败: {e}')
-
-    def restart_tutorial(self):
-        """重新开始教程"""
-        try:
-            if self.parent() and hasattr(self.parent(), 'start_tutorial'):
-                # 关闭帮助对话框
-                self.close()
-                # 调用主窗口的重新开始教程方法
-                self.parent().start_tutorial()
-            else:
-                toast_error(self, '教程系统不可用')
-                self.logger.error("主窗口未实现start_tutorial方法")
-        except Exception as e:
-            self.logger.error(f"重新开始教程失败: {e}")
-            toast_error(self, f'重新开始教程失败: {e}')
 
     def _handle_link_click(self, url):
         """处理链接点击事件"""
@@ -2400,5 +2073,679 @@ class ManageIgnoredCategoriesDialog(QDialog):
                 self.parent_window.load_categories()
 
         self.accept()
+
+
+class SettingsDialog(QDialog):
+    """设置对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
+        self.app_config = get_app_config()
+        self._centered = False
+
+        # 临时存储配置（用于取消操作）
+        self.temp_config = {}
+
+        self.initUI()
+
+    def initUI(self):
+        """初始化UI"""
+        self.setWindowTitle("设置")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(500)
+
+        # 主布局
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 标题
+        title_label = QLabel("⚙️ 应用设置")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                padding-bottom: 10px;
+            }
+        """)
+        layout.addWidget(title_label)
+
+        # 分隔线
+        line = QWidget()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background-color: #DEE2E6;")
+        layout.addWidget(line)
+
+        # 创建标签页
+        tab_widget = QTabWidget()
+        tab_widget.addTab(self.create_appearance_tab(), "🎨 外观")
+        tab_widget.addTab(self.create_tutorial_tab(), "🎓 教程")
+        tab_widget.addTab(self.create_update_tab(), "🔄 更新")
+        tab_widget.addTab(self.create_advanced_tab(), "⚙️ 高级")
+        layout.addWidget(tab_widget)
+
+        # 底部按钮
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        reset_btn = QPushButton("恢复默认")
+        reset_btn.clicked.connect(self.reset_to_defaults)
+        button_layout.addWidget(reset_btn)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        save_btn = QPushButton("保存")
+        save_btn.clicked.connect(self.save_settings)
+        save_btn.setDefault(True)
+        button_layout.addWidget(save_btn)
+
+        layout.addLayout(button_layout)
+
+        # 应用主题样式
+        self._apply_theme()
+
+    def create_appearance_tab(self) -> QWidget:
+        """创建外观设置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # 主题设置
+        theme_group = QWidget()
+        theme_layout = QVBoxLayout(theme_group)
+        theme_layout.setSpacing(10)
+
+        theme_title = QLabel("🌓 主题模式")
+        theme_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        theme_layout.addWidget(theme_title)
+
+        theme_desc = QLabel("选择应用程序的外观主题")
+        theme_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        theme_layout.addWidget(theme_desc)
+
+        # 主题选择按钮
+        theme_buttons_layout = QHBoxLayout()
+        theme_buttons_layout.setSpacing(15)
+
+        self.light_theme_btn = QPushButton("☀️ 亮色主题")
+        self.light_theme_btn.setCheckable(True)
+        self.light_theme_btn.setMinimumHeight(40)
+        self.light_theme_btn.clicked.connect(lambda: self.select_theme("light"))
+        theme_buttons_layout.addWidget(self.light_theme_btn)
+
+        self.dark_theme_btn = QPushButton("🌙 暗色主题")
+        self.dark_theme_btn.setCheckable(True)
+        self.dark_theme_btn.setMinimumHeight(40)
+        self.dark_theme_btn.clicked.connect(lambda: self.select_theme("dark"))
+        theme_buttons_layout.addWidget(self.dark_theme_btn)
+
+        theme_layout.addLayout(theme_buttons_layout)
+        layout.addWidget(theme_group)
+
+        # 根据当前主题设置按钮状态
+        current_theme = self.app_config.theme
+        if current_theme == "dark":
+            self.dark_theme_btn.setChecked(True)
+        else:
+            self.light_theme_btn.setChecked(True)
+
+        layout.addStretch()
+        return widget
+
+    def create_tutorial_tab(self) -> QWidget:
+        """创建教程设置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # 教程状态
+        status_group = QWidget()
+        status_layout = QVBoxLayout(status_group)
+        status_layout.setSpacing(10)
+
+        status_title = QLabel("📚 教程状态")
+        status_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        status_layout.addWidget(status_title)
+
+        # 显示当前状态
+        if self.app_config.tutorial_completed:
+            status_text = "✅ 教程已完成"
+            status_color = "#10B981"
+        elif self.app_config.tutorial_skipped:
+            status_text = "⏭️ 教程已跳过"
+            status_color = "#F59E0B"
+        else:
+            status_text = "⏸️ 教程未开始"
+            status_color = "#6B7280"
+
+        self.tutorial_status_label = QLabel(status_text)
+        self.tutorial_status_label.setStyleSheet(f"""
+            QLabel {{
+                color: {status_color};
+                font-size: 13px;
+                padding: 10px;
+                background-color: rgba(0, 0, 0, 0.05);
+                border-radius: 4px;
+            }}
+        """)
+        status_layout.addWidget(self.tutorial_status_label)
+
+        layout.addWidget(status_group)
+
+        # 重置教程按钮
+        reset_tutorial_group = QWidget()
+        reset_layout = QVBoxLayout(reset_tutorial_group)
+        reset_layout.setSpacing(10)
+
+        reset_title = QLabel("🔄 重新开始教程")
+        reset_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        reset_layout.addWidget(reset_title)
+
+        reset_desc = QLabel("重置教程状态，下次启动时将重新显示新手引导")
+        reset_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        reset_layout.addWidget(reset_desc)
+
+        reset_tutorial_btn = QPushButton("重置教程状态")
+        reset_tutorial_btn.clicked.connect(self.reset_tutorial)
+        reset_tutorial_btn.setMinimumHeight(36)
+        reset_layout.addWidget(reset_tutorial_btn)
+
+        layout.addWidget(reset_tutorial_group)
+
+        layout.addStretch()
+        return widget
+
+    def create_update_tab(self) -> QWidget:
+        """创建更新设置标签页"""
+        from .components.widgets import Switch
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # 更新检查设置组
+        update_group = QWidget()
+        update_layout = QVBoxLayout(update_group)
+        update_layout.setSpacing(15)
+
+        # 标题
+        update_title = QLabel("🔄 自动更新")
+        update_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        update_layout.addWidget(update_title)
+
+        # 自动检查开关（横向布局）
+        auto_check_widget = QWidget()
+        auto_check_layout = QHBoxLayout(auto_check_widget)
+        auto_check_layout.setContentsMargins(0, 0, 0, 0)
+        auto_check_layout.setSpacing(10)
+
+        auto_check_label = QLabel("启用自动检查更新")
+        auto_check_label.setStyleSheet("font-size: 13px;")
+        auto_check_layout.addWidget(auto_check_label)
+
+        auto_check_layout.addStretch()
+
+        self.auto_update_switch = Switch()
+        self.auto_update_switch.setChecked(self.app_config.auto_update_enabled)
+        auto_check_layout.addWidget(self.auto_update_switch)
+
+        update_layout.addWidget(auto_check_widget)
+
+        auto_update_desc = QLabel("程序启动时自动检查是否有新版本可用（推荐开启）")
+        auto_update_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        auto_update_desc.setWordWrap(True)
+        update_layout.addWidget(auto_update_desc)
+
+        # 分割线
+        line = QWidget()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background-color: #E5E7EB;")
+        update_layout.addWidget(line)
+
+        # 手动检查
+        check_label = QLabel("🔍 手动检查")
+        check_label.setStyleSheet("font-size: 13px; font-weight: bold; margin-top: 5px;")
+        update_layout.addWidget(check_label)
+
+        check_desc = QLabel("立即检查是否有新版本可用")
+        check_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        update_layout.addWidget(check_desc)
+
+        check_update_btn = QPushButton("检查更新")
+        check_update_btn.clicked.connect(self.check_for_updates)
+        check_update_btn.setMinimumHeight(36)
+        update_layout.addWidget(check_update_btn)
+
+        layout.addWidget(update_group)
+
+        # 更新服务器设置
+        endpoint_group = QWidget()
+        endpoint_layout = QVBoxLayout(endpoint_group)
+        endpoint_layout.setSpacing(10)
+
+        endpoint_title = QLabel("🌐 更新服务器")
+        endpoint_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        endpoint_layout.addWidget(endpoint_title)
+
+        endpoint_desc = QLabel("更新检查的服务器地址（通常无需修改）")
+        endpoint_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        endpoint_layout.addWidget(endpoint_desc)
+
+        self.endpoint_input = QLineEdit()
+        self.endpoint_input.setText(self.app_config.update_endpoint)
+        self.endpoint_input.setPlaceholderText("https://...")
+        self.endpoint_input.setMinimumHeight(32)
+        endpoint_layout.addWidget(self.endpoint_input)
+
+        layout.addWidget(endpoint_group)
+
+        # 访问令牌设置
+        token_group = QWidget()
+        token_layout = QVBoxLayout(token_group)
+        token_layout.setSpacing(10)
+
+        token_title = QLabel("🔑 访问令牌")
+        token_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        token_layout.addWidget(token_title)
+
+        token_desc = QLabel("用于访问私有更新服务器的令牌（可选）")
+        token_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        token_layout.addWidget(token_desc)
+
+        self.token_input = QLineEdit()
+        self.token_input.setText(self.app_config.update_token)
+        self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.token_input.setPlaceholderText("留空表示不使用令牌")
+        self.token_input.setMinimumHeight(32)
+        token_layout.addWidget(self.token_input)
+
+        show_token_btn = QPushButton("👁️ 显示/隐藏")
+        show_token_btn.setCheckable(True)
+        show_token_btn.setMaximumWidth(100)
+        show_token_btn.clicked.connect(self.toggle_token_visibility)
+        token_layout.addWidget(show_token_btn)
+
+        layout.addWidget(token_group)
+
+        layout.addStretch()
+        return widget
+
+    def create_advanced_tab(self) -> QWidget:
+        """创建高级设置标签页"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # 工作目录历史
+        dir_group = QWidget()
+        dir_layout = QVBoxLayout(dir_group)
+        dir_layout.setSpacing(10)
+
+        dir_title = QLabel("📁 工作目录")
+        dir_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        dir_layout.addWidget(dir_title)
+
+        dir_desc = QLabel("最后打开的工作目录")
+        dir_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        dir_layout.addWidget(dir_desc)
+
+        last_dir = self.app_config.last_opened_directory
+        self.last_dir_label = QLabel(last_dir if last_dir else "（无）")
+        self.last_dir_label.setStyleSheet("""
+            QLabel {
+                padding: 10px;
+                background-color: rgba(0, 0, 0, 0.05);
+                border-radius: 4px;
+                font-size: 12px;
+                font-family: monospace;
+            }
+        """)
+        self.last_dir_label.setWordWrap(True)
+        dir_layout.addWidget(self.last_dir_label)
+
+        clear_dir_btn = QPushButton("清除历史记录")
+        clear_dir_btn.clicked.connect(self.clear_directory_history)
+        clear_dir_btn.setMinimumHeight(32)
+        dir_layout.addWidget(clear_dir_btn)
+
+        layout.addWidget(dir_group)
+
+        # 配置文件信息
+        info_group = QWidget()
+        info_layout = QVBoxLayout(info_group)
+        info_layout.setSpacing(10)
+
+        info_title = QLabel("ℹ️ 配置信息")
+        info_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        info_layout.addWidget(info_title)
+
+        version_label = QLabel(f"配置文件版本：{self.app_config._config.get('version', '未知')}")
+        version_label.setStyleSheet("font-size: 12px; color: #6B7280;")
+        info_layout.addWidget(version_label)
+
+        config_path_label = QLabel(f"配置文件路径：{self.app_config._config_file}")
+        config_path_label.setStyleSheet("font-size: 12px; color: #6B7280;")
+        config_path_label.setWordWrap(True)
+        info_layout.addWidget(config_path_label)
+
+        layout.addWidget(info_group)
+
+        # SMB缓存管理
+        smb_group = QWidget()
+        smb_layout = QVBoxLayout(smb_group)
+        smb_layout.setSpacing(10)
+
+        smb_title = QLabel("🌐 网络缓存")
+        smb_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        smb_layout.addWidget(smb_title)
+
+        smb_desc = QLabel("清除SMB/NAS网络路径的图片缓存（如果遇到缓存问题可尝试清除）")
+        smb_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
+        smb_desc.setWordWrap(True)
+        smb_layout.addWidget(smb_desc)
+
+        clear_smb_btn = QPushButton("清除SMB缓存")
+        clear_smb_btn.clicked.connect(self.clear_smb_cache)
+        clear_smb_btn.setMinimumHeight(32)
+        smb_layout.addWidget(clear_smb_btn)
+
+        layout.addWidget(smb_group)
+
+        layout.addStretch()
+        return widget
+
+    def select_theme(self, theme: str):
+        """选择主题"""
+        if theme == "light":
+            self.light_theme_btn.setChecked(True)
+            self.dark_theme_btn.setChecked(False)
+        else:
+            self.light_theme_btn.setChecked(False)
+            self.dark_theme_btn.setChecked(True)
+
+    def toggle_token_visibility(self):
+        """切换令牌显示/隐藏"""
+        if self.token_input.echoMode() == QLineEdit.EchoMode.Password:
+            self.token_input.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
+
+    def reset_tutorial(self):
+        """重置教程状态"""
+        msgBox = QMessageBox(self)
+        msgBox.setWindowTitle("确认重置")
+        msgBox.setText("确定要重置教程状态吗？\n下次启动程序时将重新显示新手引导。")
+        msgBox.setIcon(QMessageBox.Icon.Question)
+        yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
+        no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
+        msgBox.setDefaultButton(no_btn)
+        msgBox.exec()
+
+        if msgBox.clickedButton() == yes_btn:
+            self.app_config.reset_tutorial()
+            toast_success(self, "教程状态已重置")
+
+            # 更新状态显示
+            self.tutorial_status_label.setText("⏸️ 教程未开始")
+            self.tutorial_status_label.setStyleSheet("""
+                QLabel {
+                    color: #6B7280;
+                    font-size: 13px;
+                    padding: 10px;
+                    background-color: rgba(0, 0, 0, 0.05);
+                    border-radius: 4px;
+                }
+            """)
+
+    def clear_directory_history(self):
+        """清除目录历史"""
+        msgBox = QMessageBox(self)
+        msgBox.setWindowTitle("确认清除")
+        msgBox.setText("确定要清除工作目录历史记录吗？")
+        msgBox.setIcon(QMessageBox.Icon.Question)
+        yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
+        no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
+        msgBox.setDefaultButton(no_btn)
+        msgBox.exec()
+
+        if msgBox.clickedButton() == yes_btn:
+            self.app_config.last_opened_directory = ""
+            self.last_dir_label.setText("（无）")
+            toast_success(self, "历史记录已清除")
+
+    def check_for_updates(self):
+        """检查更新"""
+        try:
+            toast_info(self, "正在检查更新...")
+
+            # 获取manifest
+            manifest_url = get_manifest_url(latest=True)
+            endpoint = self.app_config.update_endpoint
+            token = self.app_config.update_token
+
+            manifest = fetch_manifest(manifest_url, token)
+            if not manifest:
+                toast_warning(self, "无法获取更新信息")
+                return
+
+            new_ver = manifest.get('version')
+            if not new_ver:
+                toast_warning(self, "更新信息格式错误")
+                return
+
+            # 比较版本
+            from .._version_ import compare_version, __version__
+            cmp_result = compare_version(new_ver, __version__)
+
+            if cmp_result > 0:
+                # 有新版本
+                msgBox = QMessageBox(self)
+                msgBox.setWindowTitle("发现新版本")
+                msgBox.setText(f"检测到新版本 v{new_ver}\n\n当前版本: v{__version__}\n\n是否立即下载更新？")
+                msgBox.setIcon(QMessageBox.Icon.Question)
+                yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
+                no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
+                msgBox.setDefaultButton(yes_btn)
+                msgBox.exec()
+
+                if msgBox.clickedButton() == yes_btn:
+                    # 创建下载对话框
+                    download_dialog = DownloadProgressDialog(
+                        manifest=manifest,
+                        token=token,
+                        parent=self
+                    )
+                    download_dialog.exec()
+                else:
+                    toast_info(self, "已取消更新")
+            elif cmp_result == 0:
+                toast_success(self, f"当前已是最新版本 v{__version__}")
+            else:
+                toast_info(self, f"当前版本 v{__version__} 高于线上版本 v{new_ver}")
+
+        except Exception as e:
+            self.logger.error(f"检查更新失败: {e}")
+            toast_error(self, f"检查更新失败: {str(e)}")
+
+    def clear_smb_cache(self):
+        """清除SMB缓存"""
+        msgBox = QMessageBox(self)
+        msgBox.setWindowTitle("确认清除")
+        msgBox.setText("确定要清除SMB/NAS网络路径的图片缓存吗？")
+        msgBox.setIcon(QMessageBox.Icon.Question)
+        yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
+        no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
+        msgBox.setDefaultButton(no_btn)
+        msgBox.exec()
+
+        if msgBox.clickedButton() == yes_btn:
+            try:
+                # 调用主窗口的图片加载器清除缓存
+                if self.parent() and hasattr(self.parent(), 'image_loader'):
+                    self.parent().image_loader.clear_cache()
+                    toast_success(self, "SMB缓存已清除")
+                    self.logger.info("用户手动清除了SMB缓存")
+                else:
+                    toast_warning(self, "无法访问图片加载器")
+            except Exception as e:
+                self.logger.error(f"清除SMB缓存失败: {e}")
+                toast_error(self, f"清除缓存失败: {str(e)}")
+
+    def reset_to_defaults(self):
+        """恢复默认设置"""
+        msgBox = QMessageBox(self)
+        msgBox.setWindowTitle("确认恢复默认")
+        msgBox.setText("确定要恢复所有设置到默认值吗？\n此操作不可撤销。")
+        msgBox.setIcon(QMessageBox.Icon.Warning)
+        yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
+        no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
+        msgBox.setDefaultButton(no_btn)
+        msgBox.exec()
+
+        if msgBox.clickedButton() == yes_btn:
+            # 恢复默认值
+            self.light_theme_btn.setChecked(True)
+            self.dark_theme_btn.setChecked(False)
+            self.auto_update_switch.setChecked(True)
+            self.endpoint_input.setText("https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json")
+            self.token_input.setText("")
+
+            toast_info(self, "已恢复默认设置，请点击保存应用")
+
+    def save_settings(self):
+        """保存设置"""
+        try:
+            # 保存主题
+            selected_theme = "dark" if self.dark_theme_btn.isChecked() else "light"
+            if selected_theme != self.app_config.theme:
+                self.app_config.theme = selected_theme
+                # 通知主窗口应用主题
+                if self.parent():
+                    if hasattr(self.parent(), 'apply_theme'):
+                        default_theme.set_theme(selected_theme)
+                        self.parent().apply_theme()
+
+            # 保存自动更新设置
+            self.app_config.auto_update_enabled = self.auto_update_switch.isChecked()
+
+            # 保存更新端点
+            endpoint = self.endpoint_input.text().strip()
+            if endpoint:
+                self.app_config.update_endpoint = endpoint
+
+            # 保存令牌
+            token = self.token_input.text().strip()
+            self.app_config.update_token = token
+
+            toast_success(self, "设置已保存")
+            self.accept()
+
+        except Exception as e:
+            self.logger.error(f"保存设置失败: {e}")
+            toast_error(self, f"保存失败: {str(e)}")
+
+    def _apply_theme(self):
+        """应用主题样式"""
+        c = default_theme.colors
+
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QLabel {{
+                color: {c.TEXT_PRIMARY};
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: 4px;
+                background-color: {c.BACKGROUND_CARD};
+            }}
+            QTabBar::tab {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_SECONDARY};
+                padding: 8px 16px;
+                border: 1px solid {c.BORDER_LIGHT};
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-right: 2px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {c.BACKGROUND_CARD};
+                color: {c.TEXT_PRIMARY};
+                border-bottom: 2px solid {c.PRIMARY};
+            }}
+            QTabBar::tab:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+            }}
+            QPushButton {{
+                background-color: {c.PRIMARY};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 13px;
+                min-height: 32px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.PRIMARY_DARK};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.PRIMARY_DARK};
+            }}
+            QPushButton:checked {{
+                background-color: {c.PRIMARY};
+                border: 2px solid {c.PRIMARY_DARK};
+            }}
+            QPushButton[text="取消"] {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QPushButton[text="取消"]:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+            }}
+            QLineEdit {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_PRIMARY};
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: 4px;
+                padding: 6px 10px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {c.PRIMARY};
+            }}
+            QCheckBox {{
+                color: {c.TEXT_PRIMARY};
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {c.BORDER_MEDIUM};
+                border-radius: 3px;
+                background-color: {c.BACKGROUND_SECONDARY};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {c.PRIMARY};
+                border-color: {c.PRIMARY};
+            }}
+        """)
+
+    def showEvent(self, event):
+        """对话框显示时居中"""
+        super().showEvent(event)
+        if not self._centered and self.parent():
+            parent_geometry = self.parent().geometry()
+            x = parent_geometry.x() + (parent_geometry.width() - self.width()) // 2
+            y = parent_geometry.y() + (parent_geometry.height() - self.height()) // 2
+            self.move(x, y)
+            self._centered = True
 
 

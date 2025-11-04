@@ -25,6 +25,7 @@ from .category_button import CategoryButton
 from .image_list_item import ImageListItem
 from .enhanced_image_label import EnhancedImageLabel
 from .statistics_panel import StatisticsPanel
+from .switch import Switch
 
 # 定义公共接口
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     'ImageListItem',
     'EnhancedImageLabel',
     'StatisticsPanel',
+    'Switch',
 ]
 
 # 版本信息
