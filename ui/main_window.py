@@ -869,6 +869,12 @@ class ImageClassifier(QMainWindow):
                                                       self.toggle_theme)
         toolbar.addWidget(self.theme_button)
 
+        # 设置按钮 - 使用齿轮图标
+        settings_button = self.create_toolbar_button('⚙', 'settings_button',
+                                                     '打开设置',
+                                                     self.show_settings_dialog)
+        toolbar.addWidget(settings_button)
+
         # 帮助按钮 - 使用统一样式，包装在BadgeWidget中以支持红点标记
         help_button = self.create_toolbar_button('?', 'help_button',
                                                 '查看使用指南和快捷键',
@@ -4409,6 +4415,16 @@ class ImageClassifier(QMainWindow):
         if hasattr(dialog, '_apply_theme'):
             dialog._apply_theme()
         dialog.exec()
+
+    def show_settings_dialog(self):
+        """显示设置对话框"""
+        try:
+            from .dialogs import SettingsDialog
+            dialog = SettingsDialog(self)
+            dialog.exec()
+        except Exception as e:
+            self.logger.error(f"打开设置对话框失败: {e}")
+            toast_error(self, f"打开设置失败: {str(e)}")
 
     def _check_and_show_tutorial(self):
         """检查是否需要显示教程"""
