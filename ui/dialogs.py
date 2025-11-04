@@ -2721,8 +2721,21 @@ class SettingsDialog(QDialog):
         self.app_config.theme = theme
         default_theme.set_theme(theme)
 
-        # 应用主题样式（和初始化时完全一样的逻辑，不触碰主窗口）
+        # 先应用设置面板的主题样式（和初始化时完全一样的逻辑）
         self._apply_theme()
+
+        # 再同步更新主窗口（在设置面板样式稳定后进行）
+        if self.parent():
+            # 更新主窗口样式
+            if hasattr(self.parent(), 'apply_theme'):
+                self.parent().apply_theme()
+
+            # 更新主题按钮图标
+            if hasattr(self.parent(), 'theme_button'):
+                theme_icon = '☾' if theme == "light" else '☼'  # ☾ 月亮(暗色) ☼ 太阳(亮色)
+                theme_tooltip = '切换到暗色主题' if theme == "light" else '切换到亮色主题'
+                self.parent().theme_button.setText(theme_icon)
+                self.parent().theme_button.setToolTip(theme_tooltip)
 
         # 提示用户已应用
         toast_success(self, f"已切换到{'亮色' if theme == 'light' else '暗色'}主题")
