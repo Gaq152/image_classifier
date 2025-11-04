@@ -2134,7 +2134,7 @@ class SettingsDialog(QDialog):
         button_layout.addWidget(reset_btn)
 
         cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
+        cancel_btn.clicked.connect(self.cancel_settings)
         button_layout.addWidget(cancel_btn)
 
         save_btn = QPushButton("保存")
@@ -2173,13 +2173,53 @@ class SettingsDialog(QDialog):
 
         self.light_theme_btn = QPushButton("☀️ 亮色主题")
         self.light_theme_btn.setCheckable(True)
-        self.light_theme_btn.setMinimumHeight(40)
+        self.light_theme_btn.setMinimumHeight(50)
+        self.light_theme_btn.setObjectName("themeButton")
+        self.light_theme_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F3F4F6;
+                color: #1F2937;
+                border: 2px solid #E5E7EB;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #E5E7EB;
+                border-color: #D1D5DB;
+            }
+            QPushButton:checked {
+                background-color: #3B82F6;
+                color: white;
+                border: 3px solid #2563EB;
+            }
+        """)
         self.light_theme_btn.clicked.connect(lambda: self.select_theme("light"))
         theme_buttons_layout.addWidget(self.light_theme_btn)
 
         self.dark_theme_btn = QPushButton("🌙 暗色主题")
         self.dark_theme_btn.setCheckable(True)
-        self.dark_theme_btn.setMinimumHeight(40)
+        self.dark_theme_btn.setMinimumHeight(50)
+        self.dark_theme_btn.setObjectName("themeButton")
+        self.dark_theme_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #374151;
+                color: #F3F4F6;
+                border: 2px solid #4B5563;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+                border-color: #6B7280;
+            }
+            QPushButton:checked {
+                background-color: #3B82F6;
+                color: white;
+                border: 3px solid #2563EB;
+            }
+        """)
         self.dark_theme_btn.clicked.connect(lambda: self.select_theme("dark"))
         theme_buttons_layout.addWidget(self.dark_theme_btn)
 
@@ -2224,12 +2264,23 @@ class SettingsDialog(QDialog):
             status_color = "#6B7280"
 
         self.tutorial_status_label = QLabel(status_text)
+        self.tutorial_status_label.setObjectName("tutorialStatusLabel")  # 设置ObjectName便于样式控制
+        # 保存状态颜色，用于主题切换时更新
+        self.tutorial_status_color = status_color
+
+        # 立即应用初始样式
+        if default_theme.is_dark:
+            bg_color = "rgba(255, 255, 255, 0.08)"
+        else:
+            bg_color = "rgba(0, 0, 0, 0.05)"
+
         self.tutorial_status_label.setStyleSheet(f"""
-            QLabel {{
-                color: {status_color};
+            QLabel#tutorialStatusLabel {{
+                color: {status_color} !important;
                 font-size: 13px;
+                font-weight: normal;
                 padding: 10px;
-                background-color: rgba(0, 0, 0, 0.05);
+                background-color: {bg_color};
                 border-radius: 4px;
             }}
         """)
@@ -2658,13 +2709,23 @@ class SettingsDialog(QDialog):
         return widget
 
     def select_theme(self, theme: str):
-        """选择主题"""
+        """选择主题并立即应用"""
         if theme == "light":
             self.light_theme_btn.setChecked(True)
             self.dark_theme_btn.setChecked(False)
         else:
             self.light_theme_btn.setChecked(False)
             self.dark_theme_btn.setChecked(True)
+
+        # 保存并修改全局主题
+        self.app_config.theme = theme
+        default_theme.set_theme(theme)
+
+        # 应用主题样式（和初始化时完全一样的逻辑，不触碰主窗口）
+        self._apply_theme()
+
+        # 提示用户已应用
+        toast_success(self, f"已切换到{'亮色' if theme == 'light' else '暗色'}主题")
 
     def toggle_token_visibility(self):
         """切换令牌显示/隐藏"""
@@ -2906,18 +2967,15 @@ class SettingsDialog(QDialog):
 
             toast_info(self, "已恢复默认设置，请点击保存应用")
 
+    def cancel_settings(self):
+        """取消设置"""
+        # 主题已经实时保存，直接关闭即可
+        self.reject()
+
     def save_settings(self):
         """保存设置"""
         try:
-            # 保存主题
-            selected_theme = "dark" if self.dark_theme_btn.isChecked() else "light"
-            if selected_theme != self.app_config.theme:
-                self.app_config.theme = selected_theme
-                # 通知主窗口应用主题
-                if self.parent():
-                    if hasattr(self.parent(), 'apply_theme'):
-                        default_theme.set_theme(selected_theme)
-                        self.parent().apply_theme()
+            # 主题已通过select_theme实时保存，这里只保存其他设置
 
             # 保存自动更新设置
             self.app_config.auto_update_enabled = self.auto_update_switch.isChecked()
@@ -3017,6 +3075,24 @@ class SettingsDialog(QDialog):
                 border-color: {c.PRIMARY};
             }}
         """)
+
+        # 单独更新教程状态标签的样式（使用内联样式确保优先级）
+        if hasattr(self, 'tutorial_status_label') and hasattr(self, 'tutorial_status_color'):
+            if default_theme.is_dark:
+                bg_color = "rgba(255, 255, 255, 0.08)"
+            else:
+                bg_color = "rgba(0, 0, 0, 0.05)"
+
+            self.tutorial_status_label.setStyleSheet(f"""
+                QLabel#tutorialStatusLabel {{
+                    color: {self.tutorial_status_color} !important;
+                    font-size: 13px;
+                    font-weight: normal !important;
+                    padding: 10px;
+                    background-color: {bg_color};
+                    border-radius: 4px;
+                }}
+            """)
 
     def showEvent(self, event):
         """对话框显示时居中"""
