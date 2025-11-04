@@ -2337,10 +2337,97 @@ class SettingsDialog(QDialog):
         endpoint_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
         endpoint_layout.addWidget(endpoint_desc)
 
+        # 按钮组（横向布局）
+        endpoint_btn_widget = QWidget()
+        endpoint_btn_layout = QHBoxLayout(endpoint_btn_widget)
+        endpoint_btn_layout.setContentsMargins(0, 0, 0, 0)
+        endpoint_btn_layout.setSpacing(8)
+
+        # 编辑按钮
+        self.endpoint_edit_btn = QPushButton("✏️ 编辑")
+        self.endpoint_edit_btn.setFixedHeight(32)
+        self.endpoint_edit_btn.setObjectName("iconButton")
+        self.endpoint_edit_btn.setToolTip("编辑更新地址")
+        self.endpoint_edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                font-size: 13px;
+                border: none;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #374151;
+            }
+        """)
+        self.endpoint_edit_btn.clicked.connect(self.edit_endpoint)
+        endpoint_btn_layout.addWidget(self.endpoint_edit_btn)
+
+        # 保存按钮（初始隐藏）
+        self.endpoint_save_btn = QPushButton("✓ 保存")
+        self.endpoint_save_btn.setFixedHeight(32)
+        self.endpoint_save_btn.setObjectName("iconButton")
+        self.endpoint_save_btn.setToolTip("保存更新地址")
+        self.endpoint_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:pressed {
+                background-color: #047857;
+            }
+        """)
+        self.endpoint_save_btn.clicked.connect(self.save_endpoint)
+        self.endpoint_save_btn.hide()
+        endpoint_btn_layout.addWidget(self.endpoint_save_btn)
+
+        # 取消按钮（初始隐藏）
+        self.endpoint_cancel_btn = QPushButton("✕ 取消")
+        self.endpoint_cancel_btn.setFixedHeight(32)
+        self.endpoint_cancel_btn.setObjectName("iconButton")
+        self.endpoint_cancel_btn.setToolTip("取消编辑")
+        self.endpoint_cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+            QPushButton:pressed {
+                background-color: #B91C1C;
+            }
+        """)
+        self.endpoint_cancel_btn.clicked.connect(self.cancel_endpoint_edit)
+        self.endpoint_cancel_btn.hide()
+        endpoint_btn_layout.addWidget(self.endpoint_cancel_btn)
+
+        endpoint_btn_layout.addStretch()
+        endpoint_layout.addWidget(endpoint_btn_widget)
+
+        # 输入框
         self.endpoint_input = QLineEdit()
         self.endpoint_input.setText(self.app_config.update_endpoint)
         self.endpoint_input.setPlaceholderText("https://...")
         self.endpoint_input.setMinimumHeight(32)
+        self.endpoint_input.setReadOnly(True)  # 默认只读
         endpoint_layout.addWidget(self.endpoint_input)
 
         layout.addWidget(endpoint_group)
@@ -2358,18 +2445,127 @@ class SettingsDialog(QDialog):
         token_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
         token_layout.addWidget(token_desc)
 
+        # 按钮组（横向布局）
+        token_btn_widget = QWidget()
+        token_btn_layout = QHBoxLayout(token_btn_widget)
+        token_btn_layout.setContentsMargins(0, 0, 0, 0)
+        token_btn_layout.setSpacing(8)
+
+        # 显示/隐藏按钮
+        self.show_token_btn = QPushButton("👁️ 显示")
+        self.show_token_btn.setFixedHeight(32)
+        self.show_token_btn.setCheckable(True)
+        self.show_token_btn.setObjectName("iconButton")
+        self.show_token_btn.setToolTip("显示/隐藏令牌")
+        self.show_token_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                font-size: 13px;
+                border: none;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #374151;
+            }
+            QPushButton:checked {
+                background-color: #3B82F6;
+            }
+        """)
+        self.show_token_btn.clicked.connect(self.toggle_token_visibility)
+        token_btn_layout.addWidget(self.show_token_btn)
+
+        # 编辑按钮
+        self.token_edit_btn = QPushButton("✏️ 编辑")
+        self.token_edit_btn.setFixedHeight(32)
+        self.token_edit_btn.setObjectName("iconButton")
+        self.token_edit_btn.setToolTip("编辑令牌")
+        self.token_edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                font-size: 13px;
+                border: none;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #374151;
+            }
+        """)
+        self.token_edit_btn.clicked.connect(self.edit_token)
+        token_btn_layout.addWidget(self.token_edit_btn)
+
+        # 保存按钮（初始隐藏）
+        self.token_save_btn = QPushButton("✓ 保存")
+        self.token_save_btn.setFixedHeight(32)
+        self.token_save_btn.setObjectName("iconButton")
+        self.token_save_btn.setToolTip("保存令牌")
+        self.token_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:pressed {
+                background-color: #047857;
+            }
+        """)
+        self.token_save_btn.clicked.connect(self.save_token)
+        self.token_save_btn.hide()
+        token_btn_layout.addWidget(self.token_save_btn)
+
+        # 取消按钮（初始隐藏）
+        self.token_cancel_btn = QPushButton("✕ 取消")
+        self.token_cancel_btn.setFixedHeight(32)
+        self.token_cancel_btn.setObjectName("iconButton")
+        self.token_cancel_btn.setToolTip("取消编辑")
+        self.token_cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+            QPushButton:pressed {
+                background-color: #B91C1C;
+            }
+        """)
+        self.token_cancel_btn.clicked.connect(self.cancel_token_edit)
+        self.token_cancel_btn.hide()
+        token_btn_layout.addWidget(self.token_cancel_btn)
+
+        token_btn_layout.addStretch()
+        token_layout.addWidget(token_btn_widget)
+
+        # 输入框
         self.token_input = QLineEdit()
         self.token_input.setText(self.app_config.update_token)
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.token_input.setPlaceholderText("留空表示不使用令牌")
         self.token_input.setMinimumHeight(32)
+        self.token_input.setReadOnly(True)  # 默认只读
         token_layout.addWidget(self.token_input)
-
-        show_token_btn = QPushButton("👁️ 显示/隐藏")
-        show_token_btn.setCheckable(True)
-        show_token_btn.setMaximumWidth(100)
-        show_token_btn.clicked.connect(self.toggle_token_visibility)
-        token_layout.addWidget(show_token_btn)
 
         layout.addWidget(token_group)
 
@@ -2474,8 +2670,99 @@ class SettingsDialog(QDialog):
         """切换令牌显示/隐藏"""
         if self.token_input.echoMode() == QLineEdit.EchoMode.Password:
             self.token_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.show_token_btn.setText("👁️ 隐藏")
         else:
             self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.show_token_btn.setText("👁️ 显示")
+
+    def edit_endpoint(self):
+        """进入更新地址编辑模式"""
+        # 保存当前值，以便取消时恢复
+        self._endpoint_backup = self.endpoint_input.text()
+
+        # 解锁输入框
+        self.endpoint_input.setReadOnly(False)
+        self.endpoint_input.setFocus()
+
+        # 切换按钮显示
+        self.endpoint_edit_btn.hide()
+        self.endpoint_save_btn.show()
+        self.endpoint_cancel_btn.show()
+
+    def save_endpoint(self):
+        """保存更新地址"""
+        endpoint = self.endpoint_input.text().strip()
+        if not endpoint:
+            toast_warning(self, "更新地址不能为空")
+            return
+
+        # 保存到配置
+        self.app_config.update_endpoint = endpoint
+        toast_success(self, "更新地址已保存")
+
+        # 锁定输入框
+        self.endpoint_input.setReadOnly(True)
+
+        # 切换按钮显示
+        self.endpoint_save_btn.hide()
+        self.endpoint_cancel_btn.hide()
+        self.endpoint_edit_btn.show()
+
+    def cancel_endpoint_edit(self):
+        """取消更新地址编辑"""
+        # 恢复原值
+        self.endpoint_input.setText(self._endpoint_backup)
+
+        # 锁定输入框
+        self.endpoint_input.setReadOnly(True)
+
+        # 切换按钮显示
+        self.endpoint_save_btn.hide()
+        self.endpoint_cancel_btn.hide()
+        self.endpoint_edit_btn.show()
+
+    def edit_token(self):
+        """进入访问令牌编辑模式"""
+        # 保存当前值，以便取消时恢复
+        self._token_backup = self.token_input.text()
+
+        # 解锁输入框
+        self.token_input.setReadOnly(False)
+        self.token_input.setFocus()
+
+        # 切换按钮显示
+        self.token_edit_btn.hide()
+        self.token_save_btn.show()
+        self.token_cancel_btn.show()
+
+    def save_token(self):
+        """保存访问令牌"""
+        token = self.token_input.text().strip()
+
+        # 保存到配置
+        self.app_config.update_token = token
+        toast_success(self, "访问令牌已保存")
+
+        # 锁定输入框
+        self.token_input.setReadOnly(True)
+
+        # 切换按钮显示
+        self.token_save_btn.hide()
+        self.token_cancel_btn.hide()
+        self.token_edit_btn.show()
+
+    def cancel_token_edit(self):
+        """取消访问令牌编辑"""
+        # 恢复原值
+        self.token_input.setText(self._token_backup)
+
+        # 锁定输入框
+        self.token_input.setReadOnly(True)
+
+        # 切换按钮显示
+        self.token_save_btn.hide()
+        self.token_cancel_btn.hide()
+        self.token_edit_btn.show()
 
     def reset_tutorial(self):
         """重置教程状态"""
@@ -2635,14 +2922,7 @@ class SettingsDialog(QDialog):
             # 保存自动更新设置
             self.app_config.auto_update_enabled = self.auto_update_switch.isChecked()
 
-            # 保存更新端点
-            endpoint = self.endpoint_input.text().strip()
-            if endpoint:
-                self.app_config.update_endpoint = endpoint
-
-            # 保存令牌
-            token = self.token_input.text().strip()
-            self.app_config.update_token = token
+            # 注意：更新端点和令牌现在通过独立的编辑按钮保存，不在这里处理
 
             toast_success(self, "设置已保存")
             self.accept()
