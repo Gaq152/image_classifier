@@ -26,6 +26,7 @@ class AppConfig:
         """获取默认配置"""
         return {
             "theme": "light",  # 主题：light 或 dark
+            "theme_mode": "manual",  # 主题模式：manual(手动), auto(自动跟随时间), system(跟随系统)
             "tutorial_completed": False,  # 是否完成教程
             "tutorial_skipped": False,  # 是否跳过教程
             "version": __version__,  # 配置文件版本（自动同步程序版本）
@@ -104,6 +105,72 @@ class AppConfig:
     def is_dark_theme(self) -> bool:
         """是否为暗色主题"""
         return self.theme == "dark"
+
+    @property
+    def theme_mode(self) -> str:
+        """获取主题模式"""
+        return self._config.get("theme_mode", "manual")
+
+    @theme_mode.setter
+    def theme_mode(self, value: str):
+        """设置主题模式"""
+        if value in ("manual", "auto", "system"):
+            self._config["theme_mode"] = value
+            self._save_config()
+            self.logger.info(f"主题模式已设置为: {value}")
+        else:
+            self.logger.warning(f"无效的主题模式值: {value}，应为 'manual', 'auto' 或 'system'")
+
+    def get_auto_theme_by_time(self) -> str:
+        """
+        根据当前时间自动判断应该使用的主题
+
+        Returns:
+            str: "light" 或 "dark"
+        """
+        from datetime import datetime
+        current_hour = datetime.now().hour
+
+        # 8:00-18:00 使用亮色主题，其他时间使用暗色主题
+        if 8 <= current_hour < 18:
+            return "light"
+        else:
+            return "dark"
+
+    def get_system_theme(self) -> str:
+        """
+        获取系统主题设置
+
+        Returns:
+            str: "light" 或 "dark"
+        """
+        try:
+            import winreg
+            # Windows 10/11 系统主题设置位置
+            registry = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
+            key = winreg.OpenKey(registry, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            winreg.CloseKey(key)
+
+            # 0 = 暗色主题, 1 = 亮色主题
+            return "light" if value == 1 else "dark"
+        except Exception as e:
+            self.logger.warning(f"无法获取系统主题设置: {e}，使用默认亮色主题")
+            return "light"
+
+    def should_use_dark_theme(self) -> bool:
+        """
+        判断当前是否应该使用暗色主题（考虑自动模式和系统模式）
+
+        Returns:
+            bool: True 表示应该使用暗色主题
+        """
+        if self.theme_mode == "auto":
+            return self.get_auto_theme_by_time() == "dark"
+        elif self.theme_mode == "system":
+            return self.get_system_theme() == "dark"
+        else:
+            return self.theme == "dark"
 
     # ==================== 教程配置 ====================
 
@@ -233,6 +300,24 @@ class AppConfig:
     def get_all_config(self) -> Dict[str, Any]:
         """获取所有配置"""
         return self._config.copy()
+
+    def reload_config(self):
+        """重新加载配置文件（用于确保配置同步）"""
+        try:
+            if self._config_file.exists():
+                with open(self._config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # 合并默认配置
+                    default_config = self._get_default_config()
+                    for key, value in default_config.items():
+                        if key not in config:
+                            config[key] = value
+                    self._config = config
+                    self.logger.info("配置已重新加载")
+                    return True
+        except Exception as e:
+            self.logger.error(f"重新加载配置失败: {e}")
+            return False
 
     def save_config(self):
         """公开的保存配置方法"""
