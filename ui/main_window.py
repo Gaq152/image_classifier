@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                             , QSizePolicy, QFileDialog,
                             QMessageBox, QApplication, QListWidget,
                             QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush
 from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
                                 StatisticsPanel)
@@ -44,6 +44,40 @@ from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..core.file_manager import FileOperationManager
 from ..utils.performance import performance_monitor
 from .._version_ import __version__
+
+
+class DisabledButtonEventFilter(QObject):
+    """禁用按钮的事件过滤器，用于捕获禁用按钮的点击事件"""
+
+    def __init__(self, parent_window):
+        super().__init__(parent_window)
+        self.parent_window = parent_window
+
+    def eventFilter(self, obj, event):
+        """过滤事件，捕获禁用按钮的鼠标点击"""
+        if event.type() == QEvent.Type.MouseButtonPress:
+            # 检查按钮是否被禁用
+            if not obj.isEnabled():
+                # 获取当前主题模式 - 重新加载配置确保同步
+                try:
+                    from utils.app_config import get_app_config
+                    app_config = get_app_config()
+                    # 重新加载配置文件，确保获取最新值
+                    app_config.reload_config()
+                    theme_mode = app_config.theme_mode
+
+                    if theme_mode == "auto":
+                        toast_warning(self.parent_window, "当前为自动切换模式，请在设置中切换到手动模式")
+                    elif theme_mode == "system":
+                        toast_warning(self.parent_window, "当前为跟随系统模式，请在设置中切换到手动模式")
+                except Exception as e:
+                    self.parent_window.logger.error(f"获取主题模式失败: {e}")
+
+                # 返回True表示事件已处理，不再传递
+                return True
+
+        # 对于其他事件，继续传递
+        return super().eventFilter(obj, event)
 
 
 class ImageClassifier(QMainWindow):
@@ -97,6 +131,18 @@ class ImageClassifier(QMainWindow):
                 self.logger.info("自动检查更新：已关闭")
         except Exception as e:
             self.logger.debug(f"启动自动检查更新调度失败: {e}")
+
+        # 初始化自动主题定时器
+        self._auto_theme_timer = QTimer()
+        self._auto_theme_timer.timeout.connect(self._check_and_apply_auto_theme)
+        # 如果配置了自动模式，启动定时器（每1分钟检查一次）
+        try:
+            app_config = get_app_config()
+            if app_config.theme_mode == "auto":
+                self.start_auto_theme_timer()
+                self.logger.info("自动主题模式已启用")
+        except Exception as e:
+            self.logger.debug(f"自动主题定时器初始化失败: {e}")
 
         # 延迟检查是否显示教程（确保窗口已完全初始化）
         QTimer.singleShot(1000, self._check_and_show_tutorial)
@@ -868,6 +914,20 @@ class ImageClassifier(QMainWindow):
                                                       theme_tooltip,
                                                       self.toggle_theme)
         toolbar.addWidget(self.theme_button)
+
+        # 安装事件过滤器，使禁用的按钮也能响应点击
+        self.theme_button_filter = DisabledButtonEventFilter(self)
+        self.theme_button.installEventFilter(self.theme_button_filter)
+
+        # 根据theme_mode设置主题按钮的启用状态
+        try:
+            theme_mode = app_config.theme_mode
+            if theme_mode in ("auto", "system"):
+                self.theme_button.setEnabled(False)
+                mode_name = "自动切换" if theme_mode == "auto" else "跟随系统"
+                self.theme_button.setToolTip(f"已启用{mode_name}，点击查看提示")
+        except Exception as e:
+            self.logger.warning(f"设置主题按钮状态失败: {e}")
 
         # 设置按钮 - 使用齿轮图标
         settings_button = self.create_toolbar_button('⚙', 'settings_button',
@@ -4553,19 +4613,31 @@ class ImageClassifier(QMainWindow):
     def toggle_theme(self):
         """切换主题"""
         try:
+            # 检查是否启用了自动切换
+            from utils.app_config import get_app_config
+            app_config = get_app_config()
+
+            # 重新加载配置确保使用最新值（防止缓存不一致）
+            app_config.reload_config()
+
+            # 如果启用了自动模式，禁止手动切换
+            if app_config.theme_mode == "auto":
+                toast_warning(self, "已启用自动切换，请先在设置中关闭")
+                return
+
+            # 如果启用了系统模式，也禁止手动切换
+            if app_config.theme_mode == "system":
+                toast_warning(self, "已启用跟随系统，请先在设置中关闭")
+                return
+
             # 获取当前主题并切换
             current_theme = default_theme.get_current_theme()
             new_theme = "dark" if current_theme == "light" else "light"
             default_theme.set_theme(new_theme)
 
             # 保存到应用配置（app_config.json）
-            try:
-                from utils.app_config import get_app_config
-                app_config = get_app_config()
-                app_config.theme = new_theme
-                self.logger.info(f"主题已保存到应用配置: {new_theme}")
-            except Exception as e:
-                self.logger.error(f"保存主题到应用配置失败: {e}")
+            app_config.theme = new_theme
+            self.logger.info(f"主题已切换到: {new_theme}")
 
             # 应用主题到主窗口和所有组件
             self.apply_theme()
@@ -4579,7 +4651,7 @@ class ImageClassifier(QMainWindow):
 
             toast_success(self, f'已切换到{"暗色" if new_theme == "dark" else "亮色"}主题')
         except Exception as e:
-            self.logger.error(f"切换主题失败: {e}")
+            self.logger.error(f"切换主题失败: {e}", exc_info=True)
             toast_error(self, f'主题切换失败: {str(e)}')
 
     def apply_theme(self):
@@ -4884,6 +4956,55 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"应用主题失败: {e}")
 
+    def start_auto_theme_timer(self):
+        """启动自动主题定时器"""
+        if not self._auto_theme_timer.isActive():
+            self._auto_theme_timer.start(60000)  # 每60秒（1分钟）检查一次
+            self.logger.info("自动主题定时器已启动")
+
+    def stop_auto_theme_timer(self):
+        """停止自动主题定时器"""
+        if self._auto_theme_timer.isActive():
+            self._auto_theme_timer.stop()
+            self.logger.info("自动主题定时器已停止")
+
+    def _check_and_apply_auto_theme(self):
+        """检查并应用自动主题（定时器回调）"""
+        try:
+            app_config = get_app_config()
+
+            # 重新加载配置确保检测到模式变化（防止缓存不一致）
+            app_config.reload_config()
+
+            # 只有在自动模式下才进行检查
+            if app_config.theme_mode != "auto":
+                return
+
+            # 根据时间获取应该使用的主题
+            expected_theme = app_config.get_auto_theme_by_time()
+            current_theme = app_config.theme
+
+            # 如果主题需要切换
+            if expected_theme != current_theme:
+                self.logger.info(f"自动主题切换: {current_theme} -> {expected_theme}")
+
+                # 更新配置
+                app_config.theme = expected_theme
+                default_theme.set_theme(expected_theme)
+
+                # 应用主题到界面
+                self.apply_theme()
+
+                # 更新主题按钮图标
+                if hasattr(self, 'theme_button'):
+                    theme_icon = '☾' if expected_theme == "light" else '☼'
+                    theme_tooltip = '切换到暗色主题' if expected_theme == "light" else '切换到亮色主题'
+                    self.theme_button.setText(theme_icon)
+                    self.theme_button.setToolTip(theme_tooltip)
+
+        except Exception as e:
+            self.logger.error(f"自动主题检查失败: {e}")
+
     def focusInEvent(self, event):
         """窗口获得焦点时的处理"""
         try:
@@ -5044,12 +5165,8 @@ class ImageClassifier(QMainWindow):
                 except Exception as e:
                     self.logger.warning(f"清理旧更新包失败: {e}")
 
-                # 触发线上更新下载
-                try:
-                    dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
-                    dlg._handle_check_update(suppress_if_latest=True)
-                except Exception as e:
-                    self.logger.debug(f"触发线上更新失败: {e}")
+                # 触发线上更新下载（已移除无效的调用）
+                self.logger.debug("线上更新检查已跳过")
             else:
                 # 本地更新包是最新的或线上检查失败，提示安装本地包
                 self.logger.info(f"本地更新包v{local_pending_version}是最新的，提示安装")
@@ -5140,13 +5257,8 @@ class ImageClassifier(QMainWindow):
                     self.logger.debug(f"提示安装本地更新失败: {e}")
         else:
             # 没有本地更新包，正常检查线上更新
-            try:
-                self.logger.debug("自动检查更新：开始")
-                dlg = TabbedHelpDialog(self.version, self, config=getattr(self, 'config', None))
-                dlg._handle_check_update(suppress_if_latest=True)
-                self.logger.debug("自动检查更新：完成")
-            except Exception as e:
-                self.logger.debug(f"自动检查更新失败: {e}")
+            # 自动检查更新（已移除无效的调用）
+            self.logger.debug("自动检查更新已跳过")
     
     def keyPressEvent(self, event):
         """处理键盘事件 - 优化按键处理和日志记录"""

@@ -15,7 +15,7 @@ from urllib.parse import urlparse, unquote
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                             QPushButton, QTextEdit, QListWidget, QListWidgetItem,
                             QMessageBox, QTabWidget, QProgressBar, QApplication,
-                            QWidget, QTextBrowser,QCheckBox)
+                            QWidget, QTextBrowser, QCheckBox, QGroupBox, QScrollArea, QComboBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty
 from PyQt6.QtGui import QKeySequence, QIcon, QDesktopServices, QPainter, QColor, QPen
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
@@ -818,7 +818,7 @@ class TabbedHelpDialog(QDialog):
             hint_layout = QHBoxLayout()
             hint_layout.addStretch()
             hint_label = QLabel("💡 提示：更多设置请点击工具栏的 ⚙️ 设置按钮")
-            hint_label.setStyleSheet("color: #6B7280; font-size: 12px; padding: 10px;")
+            hint_label.setStyleSheet("font-size: 12px; padding: 10px;")
             hint_layout.addWidget(hint_label)
             hint_layout.addStretch()
             layout.addLayout(hint_layout)
@@ -2092,38 +2092,26 @@ class SettingsDialog(QDialog):
     def initUI(self):
         """初始化UI"""
         self.setWindowTitle("设置")
-        self.setMinimumWidth(600)
-        self.setMinimumHeight(500)
+        self.setMinimumWidth(700)
+        self.setMinimumHeight(650)
 
         # 主布局
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
-        # 标题
-        title_label = QLabel("⚙️ 应用设置")
-        title_label.setStyleSheet("""
-            QLabel {
-                font-size: 18px;
-                font-weight: bold;
-                padding-bottom: 10px;
-            }
-        """)
-        layout.addWidget(title_label)
+        # 创建Tab控件
+        self.tab_widget = QTabWidget()
 
-        # 分隔线
-        line = QWidget()
-        line.setFixedHeight(1)
-        line.setStyleSheet("background-color: #DEE2E6;")
-        layout.addWidget(line)
+        # 基本设置Tab
+        basic_tab = self.create_basic_tab()
+        self.tab_widget.addTab(basic_tab, "⚙️ 基本设置")
 
-        # 创建标签页
-        tab_widget = QTabWidget()
-        tab_widget.addTab(self.create_appearance_tab(), "🎨 外观")
-        tab_widget.addTab(self.create_tutorial_tab(), "🎓 教程")
-        tab_widget.addTab(self.create_update_tab(), "🔄 更新")
-        tab_widget.addTab(self.create_advanced_tab(), "⚙️ 高级")
-        layout.addWidget(tab_widget)
+        # 高级设置Tab
+        advanced_tab = self.create_advanced_tab()
+        self.tab_widget.addTab(advanced_tab, "🔧 高级设置")
+
+        layout.addWidget(self.tab_widget)
 
         # 底部按钮
         button_layout = QHBoxLayout()
@@ -2133,113 +2121,96 @@ class SettingsDialog(QDialog):
         reset_btn.clicked.connect(self.reset_to_defaults)
         button_layout.addWidget(reset_btn)
 
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.cancel_settings)
-        button_layout.addWidget(cancel_btn)
-
-        save_btn = QPushButton("保存")
-        save_btn.clicked.connect(self.save_settings)
-        save_btn.setDefault(True)
-        button_layout.addWidget(save_btn)
-
         layout.addLayout(button_layout)
 
         # 应用主题样式
         self._apply_theme()
 
-    def create_appearance_tab(self) -> QWidget:
-        """创建外观设置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+    def create_appearance_section(self) -> QGroupBox:
+        """创建外观设置区域"""
+        from .components.widgets import Switch
+
+        group = QGroupBox("🎨 外观设置")
+        layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(20)
+        layout.setSpacing(15)
 
         # 主题设置
         theme_group = QWidget()
         theme_layout = QVBoxLayout(theme_group)
-        theme_layout.setSpacing(10)
+        theme_layout.setSpacing(8)
 
         theme_title = QLabel("🌓 主题模式")
         theme_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         theme_layout.addWidget(theme_title)
 
-        theme_desc = QLabel("选择应用程序的外观主题")
-        theme_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        theme_layout.addWidget(theme_desc)
+        # 主题选择下拉列表和自动切换开关（横向布局）
+        theme_select_layout = QHBoxLayout()
+        theme_select_layout.setSpacing(10)
 
-        # 主题选择按钮
-        theme_buttons_layout = QHBoxLayout()
-        theme_buttons_layout.setSpacing(15)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("☀️  浅色主题", "light")
+        self.theme_combo.addItem("🌙  深色主题", "dark")
+        self.theme_combo.addItem("💻  跟随系统", "system")
+        self.theme_combo.setMinimumHeight(40)
+        # 禁用滚轮切换
+        self.theme_combo.wheelEvent = lambda event: None
+        self.theme_combo.currentIndexChanged.connect(self.on_theme_combo_changed)
+        theme_select_layout.addWidget(self.theme_combo)
 
-        self.light_theme_btn = QPushButton("☀️ 亮色主题")
-        self.light_theme_btn.setCheckable(True)
-        self.light_theme_btn.setMinimumHeight(50)
-        self.light_theme_btn.setObjectName("themeButton")
-        self.light_theme_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #F3F4F6;
-                color: #1F2937;
-                border: 2px solid #E5E7EB;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #E5E7EB;
-                border-color: #D1D5DB;
-            }
-            QPushButton:checked {
-                background-color: #3B82F6;
-                color: white;
-                border: 3px solid #2563EB;
-            }
-        """)
-        self.light_theme_btn.clicked.connect(lambda: self.select_theme("light"))
-        theme_buttons_layout.addWidget(self.light_theme_btn)
+        theme_select_layout.addStretch()
 
-        self.dark_theme_btn = QPushButton("🌙 暗色主题")
-        self.dark_theme_btn.setCheckable(True)
-        self.dark_theme_btn.setMinimumHeight(50)
-        self.dark_theme_btn.setObjectName("themeButton")
-        self.dark_theme_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #374151;
-                color: #F3F4F6;
-                border: 2px solid #4B5563;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-                border-color: #6B7280;
-            }
-            QPushButton:checked {
-                background-color: #3B82F6;
-                color: white;
-                border: 3px solid #2563EB;
-            }
-        """)
-        self.dark_theme_btn.clicked.connect(lambda: self.select_theme("dark"))
-        theme_buttons_layout.addWidget(self.dark_theme_btn)
+        # 自动切换标签和Switch
+        auto_label = QLabel("⏰ 自动切换")
+        auto_label.setStyleSheet("font-size: 13px;")
+        auto_label.setToolTip("8:00-18:00亮色，其他时间暗色")
+        theme_select_layout.addWidget(auto_label)
 
-        theme_layout.addLayout(theme_buttons_layout)
+        self.auto_theme_switch = Switch()
+        self.auto_theme_switch.toggled.connect(self.on_auto_theme_toggled)
+        theme_select_layout.addWidget(self.auto_theme_switch)
+
+        theme_layout.addLayout(theme_select_layout)
         layout.addWidget(theme_group)
 
-        # 根据当前主题设置按钮状态
-        current_theme = self.app_config.theme
-        if current_theme == "dark":
-            self.dark_theme_btn.setChecked(True)
+        # 根据当前主题模式设置下拉列表状态（阻止信号避免触发theme_mode重置）
+        current_theme_mode = self.app_config.theme_mode
+
+        # 阻止信号触发
+        self.theme_combo.blockSignals(True)
+
+        if current_theme_mode == "auto":
+            # 启用自动切换
+            self.auto_theme_switch.blockSignals(True)
+            self.auto_theme_switch.setChecked(True)
+            self.auto_theme_switch.blockSignals(False)
+            # 禁用主题下拉列表
+            self.theme_combo.setEnabled(False)
+            # 设置为当前实际主题
+            if self.app_config.theme == "dark":
+                self.theme_combo.setCurrentIndex(1)
+            else:
+                self.theme_combo.setCurrentIndex(0)
+        elif current_theme_mode == "system":
+            # 设置为跟随系统
+            self.theme_combo.setCurrentIndex(2)
+        elif self.app_config.theme == "dark":
+            # 设置为暗色
+            self.theme_combo.setCurrentIndex(1)
         else:
-            self.light_theme_btn.setChecked(True)
+            # 设置为亮色
+            self.theme_combo.setCurrentIndex(0)
+
+        # 恢复信号
+        self.theme_combo.blockSignals(False)
 
         layout.addStretch()
-        return widget
+        return group
 
-    def create_tutorial_tab(self) -> QWidget:
-        """创建教程设置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+    def create_tutorial_section(self) -> QGroupBox:
+        """创建教程设置区域"""
+        group = QGroupBox("🎓 教程设置")
+        layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(20)
 
@@ -2248,11 +2219,15 @@ class SettingsDialog(QDialog):
         status_layout = QVBoxLayout(status_group)
         status_layout.setSpacing(10)
 
+        # 标题
         status_title = QLabel("📚 教程状态")
         status_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         status_layout.addWidget(status_title)
 
-        # 显示当前状态
+        # 重新加载配置以获取最新状态
+        self.app_config.reload_config()
+
+        # 确定当前状态
         if self.app_config.tutorial_completed:
             status_text = "✅ 教程已完成"
             status_color = "#10B981"
@@ -2263,12 +2238,17 @@ class SettingsDialog(QDialog):
             status_text = "⏸️ 教程未开始"
             status_color = "#6B7280"
 
+        # 状态显示和按钮（横向布局）
+        control_widget = QWidget()
+        control_layout = QHBoxLayout(control_widget)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.setSpacing(15)
+
+        # 状态标签（左侧）
         self.tutorial_status_label = QLabel(status_text)
-        self.tutorial_status_label.setObjectName("tutorialStatusLabel")  # 设置ObjectName便于样式控制
-        # 保存状态颜色，用于主题切换时更新
+        self.tutorial_status_label.setObjectName("tutorialStatusLabel")
         self.tutorial_status_color = status_color
 
-        # 立即应用初始样式
         if default_theme.is_dark:
             bg_color = "rgba(255, 255, 255, 0.08)"
         else:
@@ -2279,134 +2259,182 @@ class SettingsDialog(QDialog):
                 color: {status_color} !important;
                 font-size: 13px;
                 font-weight: normal;
-                padding: 10px;
+                padding: 8px 12px;
                 background-color: {bg_color};
                 border-radius: 4px;
             }}
         """)
-        status_layout.addWidget(self.tutorial_status_label)
+        control_layout.addWidget(self.tutorial_status_label)
+
+        control_layout.addStretch()
+
+        # 重新开始教程按钮（右侧）
+        start_tutorial_btn = QPushButton("重新开始教程")
+        start_tutorial_btn.clicked.connect(self.start_tutorial)
+        start_tutorial_btn.setMinimumHeight(36)
+        start_tutorial_btn.setMinimumWidth(120)
+        control_layout.addWidget(start_tutorial_btn)
+
+        status_layout.addWidget(control_widget)
 
         layout.addWidget(status_group)
 
-        # 重置教程按钮
-        reset_tutorial_group = QWidget()
-        reset_layout = QVBoxLayout(reset_tutorial_group)
-        reset_layout.setSpacing(10)
-
-        reset_title = QLabel("🔄 重新开始教程")
-        reset_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        reset_layout.addWidget(reset_title)
-
-        reset_desc = QLabel("重置教程状态，下次启动时将重新显示新手引导")
-        reset_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        reset_layout.addWidget(reset_desc)
-
-        reset_tutorial_btn = QPushButton("重置教程状态")
-        reset_tutorial_btn.clicked.connect(self.reset_tutorial)
-        reset_tutorial_btn.setMinimumHeight(36)
-        reset_layout.addWidget(reset_tutorial_btn)
-
-        layout.addWidget(reset_tutorial_group)
-
         layout.addStretch()
-        return widget
+        return group
 
-    def create_update_tab(self) -> QWidget:
-        """创建更新设置标签页"""
+    def create_basic_tab(self) -> QWidget:
+        """创建基本设置Tab"""
+        tab = QWidget()
+
+        # 创建可滚动区域
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        # 滚动内容容器
+        scroll_content = QWidget()
+        scroll_content.setObjectName("scrollContent")
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setSpacing(20)
+        content_layout.setContentsMargins(0, 0, 10, 0)
+
+        # 添加各个设置组
+        content_layout.addWidget(self.create_appearance_section())
+        content_layout.addWidget(self.create_tutorial_section())
+        content_layout.addWidget(self.create_basic_update_section())
+        content_layout.addStretch()
+
+        scroll_area.setWidget(scroll_content)
+
+        # Tab布局
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll_area)
+
+        return tab
+
+    def create_advanced_tab(self) -> QWidget:
+        """创建高级设置Tab"""
+        tab = QWidget()
+
+        # 创建可滚动区域
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        # 滚动内容容器
+        scroll_content = QWidget()
+        scroll_content.setObjectName("scrollContent")
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setSpacing(20)
+        content_layout.setContentsMargins(0, 0, 10, 0)
+
+        # 添加各个设置组
+        content_layout.addWidget(self.create_advanced_update_section())
+        content_layout.addWidget(self.create_directory_section())
+        content_layout.addWidget(self.create_smb_section())
+        content_layout.addStretch()
+
+        scroll_area.setWidget(scroll_content)
+
+        # Tab布局
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll_area)
+
+        return tab
+
+    def create_basic_update_section(self) -> QGroupBox:
+        """创建基本更新设置区域（仅包含开关和手动检查）"""
         from .components.widgets import Switch
 
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+        group = QGroupBox("🔄 更新设置")
+        layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(20)
 
         # 更新检查设置组
         update_group = QWidget()
         update_layout = QVBoxLayout(update_group)
-        update_layout.setSpacing(15)
+        update_layout.setSpacing(10)
 
         # 标题
-        update_title = QLabel("🔄 自动更新")
+        update_title = QLabel("🔄 更新设置")
         update_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         update_layout.addWidget(update_title)
 
-        # 自动检查开关（横向布局）
-        auto_check_widget = QWidget()
-        auto_check_layout = QHBoxLayout(auto_check_widget)
-        auto_check_layout.setContentsMargins(0, 0, 0, 0)
-        auto_check_layout.setSpacing(10)
+        # 描述
+        update_desc = QLabel("立即检查是否有新版本可用，启用自动检查更新（推荐开启）")
+        update_desc.setWordWrap(True)
+        update_layout.addWidget(update_desc)
 
-        auto_check_label = QLabel("启用自动检查更新")
-        auto_check_label.setStyleSheet("font-size: 13px;")
-        auto_check_layout.addWidget(auto_check_label)
+        # 检查更新按钮和自动更新开关（横向布局）
+        control_widget = QWidget()
+        control_layout = QHBoxLayout(control_widget)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.setSpacing(15)
 
-        auto_check_layout.addStretch()
-
-        self.auto_update_switch = Switch()
-        self.auto_update_switch.setChecked(self.app_config.auto_update_enabled)
-        auto_check_layout.addWidget(self.auto_update_switch)
-
-        update_layout.addWidget(auto_check_widget)
-
-        auto_update_desc = QLabel("程序启动时自动检查是否有新版本可用（推荐开启）")
-        auto_update_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        auto_update_desc.setWordWrap(True)
-        update_layout.addWidget(auto_update_desc)
-
-        # 分割线
-        line = QWidget()
-        line.setFixedHeight(1)
-        line.setStyleSheet("background-color: #E5E7EB;")
-        update_layout.addWidget(line)
-
-        # 手动检查
-        check_label = QLabel("🔍 手动检查")
-        check_label.setStyleSheet("font-size: 13px; font-weight: bold; margin-top: 5px;")
-        update_layout.addWidget(check_label)
-
-        check_desc = QLabel("立即检查是否有新版本可用")
-        check_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        update_layout.addWidget(check_desc)
-
+        # 检查更新按钮（主要功能）
         check_update_btn = QPushButton("检查更新")
         check_update_btn.clicked.connect(self.check_for_updates)
         check_update_btn.setMinimumHeight(36)
-        update_layout.addWidget(check_update_btn)
+        check_update_btn.setMinimumWidth(120)
+        control_layout.addWidget(check_update_btn)
+
+        control_layout.addStretch()
+
+        # 自动检查开关（辅助功能）
+        auto_check_label = QLabel("启用自动检查")
+        auto_check_label.setStyleSheet("font-size: 13px;")
+        control_layout.addWidget(auto_check_label)
+
+        self.auto_update_switch = Switch()
+        self.auto_update_switch.setChecked(self.app_config.auto_update_enabled)
+        control_layout.addWidget(self.auto_update_switch)
+
+        update_layout.addWidget(control_widget)
 
         layout.addWidget(update_group)
+        layout.addStretch()
+        return group
+
+    def create_advanced_update_section(self) -> QGroupBox:
+        """创建高级更新设置区域（包含更新地址和令牌）"""
+        group = QGroupBox("🔄 更新设置")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
 
         # 更新服务器设置
         endpoint_group = QWidget()
         endpoint_layout = QVBoxLayout(endpoint_group)
         endpoint_layout.setSpacing(10)
 
+        # 标题和按钮（横向布局）
+        endpoint_header = QWidget()
+        endpoint_header_layout = QHBoxLayout(endpoint_header)
+        endpoint_header_layout.setContentsMargins(0, 0, 0, 0)
+        endpoint_header_layout.setSpacing(10)
+
         endpoint_title = QLabel("🌐 更新服务器")
         endpoint_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        endpoint_layout.addWidget(endpoint_title)
+        endpoint_header_layout.addWidget(endpoint_title)
 
-        endpoint_desc = QLabel("更新检查的服务器地址（通常无需修改）")
-        endpoint_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        endpoint_layout.addWidget(endpoint_desc)
-
-        # 按钮组（横向布局）
-        endpoint_btn_widget = QWidget()
-        endpoint_btn_layout = QHBoxLayout(endpoint_btn_widget)
-        endpoint_btn_layout.setContentsMargins(0, 0, 0, 0)
-        endpoint_btn_layout.setSpacing(8)
+        endpoint_header_layout.addStretch()
 
         # 编辑按钮
         self.endpoint_edit_btn = QPushButton("✏️ 编辑")
-        self.endpoint_edit_btn.setFixedHeight(32)
+        self.endpoint_edit_btn.setFixedHeight(28)
         self.endpoint_edit_btn.setObjectName("iconButton")
-        self.endpoint_edit_btn.setToolTip("编辑更新地址")
+        self.endpoint_edit_btn.setToolTip("编辑更新服务器地址（通常无需修改）")
         self.endpoint_edit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #6B7280;
                 color: white;
-                font-size: 13px;
+                font-size: 12px;
                 border: none;
                 border-radius: 4px;
-                padding: 0 12px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #4B5563;
@@ -2416,22 +2444,22 @@ class SettingsDialog(QDialog):
             }
         """)
         self.endpoint_edit_btn.clicked.connect(self.edit_endpoint)
-        endpoint_btn_layout.addWidget(self.endpoint_edit_btn)
+        endpoint_header_layout.addWidget(self.endpoint_edit_btn)
 
         # 保存按钮（初始隐藏）
         self.endpoint_save_btn = QPushButton("✓ 保存")
-        self.endpoint_save_btn.setFixedHeight(32)
+        self.endpoint_save_btn.setFixedHeight(28)
         self.endpoint_save_btn.setObjectName("iconButton")
         self.endpoint_save_btn.setToolTip("保存更新地址")
         self.endpoint_save_btn.setStyleSheet("""
             QPushButton {
                 background-color: #10B981;
                 color: white;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: bold;
                 border: none;
                 border-radius: 4px;
-                padding: 0 12px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #059669;
@@ -2442,22 +2470,22 @@ class SettingsDialog(QDialog):
         """)
         self.endpoint_save_btn.clicked.connect(self.save_endpoint)
         self.endpoint_save_btn.hide()
-        endpoint_btn_layout.addWidget(self.endpoint_save_btn)
+        endpoint_header_layout.addWidget(self.endpoint_save_btn)
 
         # 取消按钮（初始隐藏）
         self.endpoint_cancel_btn = QPushButton("✕ 取消")
-        self.endpoint_cancel_btn.setFixedHeight(32)
+        self.endpoint_cancel_btn.setFixedHeight(28)
         self.endpoint_cancel_btn.setObjectName("iconButton")
         self.endpoint_cancel_btn.setToolTip("取消编辑")
         self.endpoint_cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #EF4444;
                 color: white;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: bold;
                 border: none;
                 border-radius: 4px;
-                padding: 0 12px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #DC2626;
@@ -2468,14 +2496,14 @@ class SettingsDialog(QDialog):
         """)
         self.endpoint_cancel_btn.clicked.connect(self.cancel_endpoint_edit)
         self.endpoint_cancel_btn.hide()
-        endpoint_btn_layout.addWidget(self.endpoint_cancel_btn)
+        endpoint_header_layout.addWidget(self.endpoint_cancel_btn)
 
-        endpoint_btn_layout.addStretch()
-        endpoint_layout.addWidget(endpoint_btn_widget)
+        endpoint_layout.addWidget(endpoint_header)
 
         # 输入框
         self.endpoint_input = QLineEdit()
         self.endpoint_input.setText(self.app_config.update_endpoint)
+        self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
         self.endpoint_input.setPlaceholderText("https://...")
         self.endpoint_input.setMinimumHeight(32)
         self.endpoint_input.setReadOnly(True)  # 默认只读
@@ -2488,34 +2516,32 @@ class SettingsDialog(QDialog):
         token_layout = QVBoxLayout(token_group)
         token_layout.setSpacing(10)
 
+        # 标题和按钮（横向布局）
+        token_header = QWidget()
+        token_header_layout = QHBoxLayout(token_header)
+        token_header_layout.setContentsMargins(0, 0, 0, 0)
+        token_header_layout.setSpacing(8)
+
         token_title = QLabel("🔑 访问令牌")
         token_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        token_layout.addWidget(token_title)
+        token_header_layout.addWidget(token_title)
 
-        token_desc = QLabel("用于访问私有更新服务器的令牌（可选）")
-        token_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        token_layout.addWidget(token_desc)
-
-        # 按钮组（横向布局）
-        token_btn_widget = QWidget()
-        token_btn_layout = QHBoxLayout(token_btn_widget)
-        token_btn_layout.setContentsMargins(0, 0, 0, 0)
-        token_btn_layout.setSpacing(8)
+        token_header_layout.addStretch()
 
         # 显示/隐藏按钮
         self.show_token_btn = QPushButton("👁️ 显示")
-        self.show_token_btn.setFixedHeight(32)
+        self.show_token_btn.setFixedHeight(28)
         self.show_token_btn.setCheckable(True)
         self.show_token_btn.setObjectName("iconButton")
-        self.show_token_btn.setToolTip("显示/隐藏令牌")
+        self.show_token_btn.setToolTip("显示/隐藏令牌内容")
         self.show_token_btn.setStyleSheet("""
             QPushButton {
                 background-color: #6B7280;
                 color: white;
-                font-size: 13px;
+                font-size: 12px;
                 border: none;
                 border-radius: 4px;
-                padding: 0 12px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #4B5563;
@@ -2528,21 +2554,21 @@ class SettingsDialog(QDialog):
             }
         """)
         self.show_token_btn.clicked.connect(self.toggle_token_visibility)
-        token_btn_layout.addWidget(self.show_token_btn)
+        token_header_layout.addWidget(self.show_token_btn)
 
         # 编辑按钮
         self.token_edit_btn = QPushButton("✏️ 编辑")
-        self.token_edit_btn.setFixedHeight(32)
+        self.token_edit_btn.setFixedHeight(28)
         self.token_edit_btn.setObjectName("iconButton")
-        self.token_edit_btn.setToolTip("编辑令牌")
+        self.token_edit_btn.setToolTip("编辑访问私有更新服务器的令牌（可选）")
         self.token_edit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #6B7280;
                 color: white;
-                font-size: 13px;
+                font-size: 12px;
                 border: none;
                 border-radius: 4px;
-                padding: 0 12px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #4B5563;
@@ -2552,22 +2578,22 @@ class SettingsDialog(QDialog):
             }
         """)
         self.token_edit_btn.clicked.connect(self.edit_token)
-        token_btn_layout.addWidget(self.token_edit_btn)
+        token_header_layout.addWidget(self.token_edit_btn)
 
         # 保存按钮（初始隐藏）
         self.token_save_btn = QPushButton("✓ 保存")
-        self.token_save_btn.setFixedHeight(32)
+        self.token_save_btn.setFixedHeight(28)
         self.token_save_btn.setObjectName("iconButton")
         self.token_save_btn.setToolTip("保存令牌")
         self.token_save_btn.setStyleSheet("""
             QPushButton {
                 background-color: #10B981;
                 color: white;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: bold;
                 border: none;
                 border-radius: 4px;
-                padding: 0 12px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #059669;
@@ -2578,22 +2604,22 @@ class SettingsDialog(QDialog):
         """)
         self.token_save_btn.clicked.connect(self.save_token)
         self.token_save_btn.hide()
-        token_btn_layout.addWidget(self.token_save_btn)
+        token_header_layout.addWidget(self.token_save_btn)
 
         # 取消按钮（初始隐藏）
         self.token_cancel_btn = QPushButton("✕ 取消")
-        self.token_cancel_btn.setFixedHeight(32)
+        self.token_cancel_btn.setFixedHeight(28)
         self.token_cancel_btn.setObjectName("iconButton")
         self.token_cancel_btn.setToolTip("取消编辑")
         self.token_cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #EF4444;
                 color: white;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: bold;
                 border: none;
                 border-radius: 4px;
-                padding: 0 12px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #DC2626;
@@ -2604,14 +2630,14 @@ class SettingsDialog(QDialog):
         """)
         self.token_cancel_btn.clicked.connect(self.cancel_token_edit)
         self.token_cancel_btn.hide()
-        token_btn_layout.addWidget(self.token_cancel_btn)
+        token_header_layout.addWidget(self.token_cancel_btn)
 
-        token_btn_layout.addStretch()
-        token_layout.addWidget(token_btn_widget)
+        token_layout.addWidget(token_header)
 
         # 输入框
         self.token_input = QLineEdit()
         self.token_input.setText(self.app_config.update_token)
+        self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.token_input.setPlaceholderText("留空表示不使用令牌")
         self.token_input.setMinimumHeight(32)
@@ -2619,14 +2645,13 @@ class SettingsDialog(QDialog):
         token_layout.addWidget(self.token_input)
 
         layout.addWidget(token_group)
-
         layout.addStretch()
-        return widget
+        return group
 
-    def create_advanced_tab(self) -> QWidget:
-        """创建高级设置标签页"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+    def create_directory_section(self) -> QGroupBox:
+        """创建工作目录设置区域"""
+        group = QGroupBox("📁 工作目录")
+        layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(20)
 
@@ -2635,34 +2660,99 @@ class SettingsDialog(QDialog):
         dir_layout = QVBoxLayout(dir_group)
         dir_layout.setSpacing(10)
 
-        dir_title = QLabel("📁 工作目录")
+        # 标题和按钮（横向布局）
+        dir_header = QWidget()
+        dir_header_layout = QHBoxLayout(dir_header)
+        dir_header_layout.setContentsMargins(0, 0, 0, 0)
+        dir_header_layout.setSpacing(10)
+
+        dir_title = QLabel("📁 最后打开的目录")
         dir_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        dir_layout.addWidget(dir_title)
+        dir_header_layout.addWidget(dir_title)
 
-        dir_desc = QLabel("最后打开的工作目录")
-        dir_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        dir_layout.addWidget(dir_desc)
+        dir_header_layout.addStretch()
 
+        clear_dir_btn = QPushButton("清除历史记录")
+        clear_dir_btn.clicked.connect(self.clear_directory_history)
+        clear_dir_btn.setMinimumHeight(28)
+        clear_dir_btn.setToolTip("清除最后打开的工作目录路径")
+        dir_header_layout.addWidget(clear_dir_btn)
+
+        dir_layout.addWidget(dir_header)
+
+        # 路径显示
         last_dir = self.app_config.last_opened_directory
         self.last_dir_label = QLabel(last_dir if last_dir else "（无）")
-        self.last_dir_label.setStyleSheet("""
-            QLabel {
-                padding: 10px;
-                background-color: rgba(0, 0, 0, 0.05);
-                border-radius: 4px;
-                font-size: 12px;
-                font-family: monospace;
-            }
+        self.last_dir_label.setObjectName("lastDirLabel")
+        self.last_dir_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        c = default_theme.colors
+        self.last_dir_label.setStyleSheet(f"""
+            color: {c.TEXT_PRIMARY};
+            padding: 10px;
+            background-color: {c.BACKGROUND_SECONDARY};
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
         """)
         self.last_dir_label.setWordWrap(True)
         dir_layout.addWidget(self.last_dir_label)
 
-        clear_dir_btn = QPushButton("清除历史记录")
-        clear_dir_btn.clicked.connect(self.clear_directory_history)
-        clear_dir_btn.setMinimumHeight(32)
-        dir_layout.addWidget(clear_dir_btn)
-
         layout.addWidget(dir_group)
+        layout.addStretch()
+        return group
+
+    def create_smb_section(self) -> QGroupBox:
+        """创建SMB缓存设置区域"""
+        from utils.paths import get_cache_dir
+
+        group = QGroupBox("🌐 网络缓存")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # SMB缓存管理
+        smb_group = QWidget()
+        smb_layout = QVBoxLayout(smb_group)
+        smb_layout.setSpacing(10)
+
+        # 标题和按钮（横向布局）
+        smb_header = QWidget()
+        smb_header_layout = QHBoxLayout(smb_header)
+        smb_header_layout.setContentsMargins(0, 0, 0, 0)
+        smb_header_layout.setSpacing(10)
+
+        smb_title = QLabel("🌐 SMB/NAS 缓存")
+        smb_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        smb_header_layout.addWidget(smb_title)
+
+        smb_header_layout.addStretch()
+
+        clear_smb_btn = QPushButton("清除SMB缓存")
+        clear_smb_btn.clicked.connect(self.clear_smb_cache)
+        clear_smb_btn.setMinimumHeight(28)
+        clear_smb_btn.setToolTip("清除SMB/NAS网络路径的图片缓存（如果遇到缓存问题可尝试清除）")
+        smb_header_layout.addWidget(clear_smb_btn)
+
+        smb_layout.addWidget(smb_header)
+
+        # 缓存路径显示
+        cache_dir = get_cache_dir()
+        self.cache_path_label = QLabel(str(cache_dir))
+        self.cache_path_label.setObjectName("cacheDirLabel")
+        self.cache_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        c = default_theme.colors
+        self.cache_path_label.setStyleSheet(f"""
+            color: {c.TEXT_PRIMARY};
+            padding: 10px;
+            background-color: {c.BACKGROUND_SECONDARY};
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        """)
+        self.cache_path_label.setWordWrap(True)
+        smb_layout.addWidget(self.cache_path_label)
+
+        layout.addWidget(smb_group)
 
         # 配置文件信息
         info_group = QWidget()
@@ -2674,71 +2764,584 @@ class SettingsDialog(QDialog):
         info_layout.addWidget(info_title)
 
         version_label = QLabel(f"配置文件版本：{self.app_config._config.get('version', '未知')}")
-        version_label.setStyleSheet("font-size: 12px; color: #6B7280;")
         info_layout.addWidget(version_label)
 
-        config_path_label = QLabel(f"配置文件路径：{self.app_config._config_file}")
-        config_path_label.setStyleSheet("font-size: 12px; color: #6B7280;")
-        config_path_label.setWordWrap(True)
-        info_layout.addWidget(config_path_label)
+        self.config_path_label = QLabel(f"配置文件路径：{self.app_config._config_file}")
+        self.config_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.config_path_label.setWordWrap(True)
+        info_layout.addWidget(self.config_path_label)
 
         layout.addWidget(info_group)
+
+        layout.addStretch()
+        return group
+
+    def create_update_section(self) -> QGroupBox:
+        """创建更新设置区域"""
+        from .components.widgets import Switch
+
+        group = QGroupBox("🔄 更新设置")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # 更新检查设置组
+        update_group = QWidget()
+        update_layout = QVBoxLayout(update_group)
+        update_layout.setSpacing(10)
+
+        # 标题
+        update_title = QLabel("🔄 更新设置")
+        update_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        update_layout.addWidget(update_title)
+
+        # 描述
+        update_desc = QLabel("立即检查是否有新版本可用，启用自动检查更新（推荐开启）")
+        update_desc.setWordWrap(True)
+        update_layout.addWidget(update_desc)
+
+        # 检查更新按钮和自动更新开关（横向布局）
+        control_widget = QWidget()
+        control_layout = QHBoxLayout(control_widget)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.setSpacing(15)
+
+        # 检查更新按钮（主要功能）
+        check_update_btn = QPushButton("检查更新")
+        check_update_btn.clicked.connect(self.check_for_updates)
+        check_update_btn.setMinimumHeight(36)
+        check_update_btn.setMinimumWidth(120)
+        control_layout.addWidget(check_update_btn)
+
+        control_layout.addStretch()
+
+        # 自动检查开关（辅助功能）
+        auto_check_label = QLabel("启用自动检查")
+        auto_check_label.setStyleSheet("font-size: 13px;")
+        control_layout.addWidget(auto_check_label)
+
+        self.auto_update_switch = Switch()
+        self.auto_update_switch.setChecked(self.app_config.auto_update_enabled)
+        control_layout.addWidget(self.auto_update_switch)
+
+        update_layout.addWidget(control_widget)
+
+        layout.addWidget(update_group)
+
+        # 更新服务器设置
+        endpoint_group = QWidget()
+        endpoint_layout = QVBoxLayout(endpoint_group)
+        endpoint_layout.setSpacing(10)
+
+        # 标题和按钮（横向布局）
+        endpoint_header = QWidget()
+        endpoint_header_layout = QHBoxLayout(endpoint_header)
+        endpoint_header_layout.setContentsMargins(0, 0, 0, 0)
+        endpoint_header_layout.setSpacing(10)
+
+        endpoint_title = QLabel("🌐 更新服务器")
+        endpoint_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        endpoint_header_layout.addWidget(endpoint_title)
+
+        endpoint_header_layout.addStretch()
+
+        # 编辑按钮
+        self.endpoint_edit_btn = QPushButton("✏️ 编辑")
+        self.endpoint_edit_btn.setFixedHeight(28)
+        self.endpoint_edit_btn.setObjectName("iconButton")
+        self.endpoint_edit_btn.setToolTip("编辑更新服务器地址（通常无需修改）")
+        self.endpoint_edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                font-size: 12px;
+                border: none;
+                border-radius: 4px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #374151;
+            }
+        """)
+        self.endpoint_edit_btn.clicked.connect(self.edit_endpoint)
+        endpoint_header_layout.addWidget(self.endpoint_edit_btn)
+
+        # 保存按钮（初始隐藏）
+        self.endpoint_save_btn = QPushButton("✓ 保存")
+        self.endpoint_save_btn.setFixedHeight(28)
+        self.endpoint_save_btn.setObjectName("iconButton")
+        self.endpoint_save_btn.setToolTip("保存更新地址")
+        self.endpoint_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:pressed {
+                background-color: #047857;
+            }
+        """)
+        self.endpoint_save_btn.clicked.connect(self.save_endpoint)
+        self.endpoint_save_btn.hide()
+        endpoint_header_layout.addWidget(self.endpoint_save_btn)
+
+        # 取消按钮（初始隐藏）
+        self.endpoint_cancel_btn = QPushButton("✕ 取消")
+        self.endpoint_cancel_btn.setFixedHeight(28)
+        self.endpoint_cancel_btn.setObjectName("iconButton")
+        self.endpoint_cancel_btn.setToolTip("取消编辑")
+        self.endpoint_cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+            QPushButton:pressed {
+                background-color: #B91C1C;
+            }
+        """)
+        self.endpoint_cancel_btn.clicked.connect(self.cancel_endpoint_edit)
+        self.endpoint_cancel_btn.hide()
+        endpoint_header_layout.addWidget(self.endpoint_cancel_btn)
+
+        endpoint_layout.addWidget(endpoint_header)
+
+        # 输入框
+        self.endpoint_input = QLineEdit()
+        self.endpoint_input.setText(self.app_config.update_endpoint)
+        self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
+        self.endpoint_input.setPlaceholderText("https://...")
+        self.endpoint_input.setMinimumHeight(32)
+        self.endpoint_input.setReadOnly(True)  # 默认只读
+        endpoint_layout.addWidget(self.endpoint_input)
+
+        layout.addWidget(endpoint_group)
+
+        # 访问令牌设置
+        token_group = QWidget()
+        token_layout = QVBoxLayout(token_group)
+        token_layout.setSpacing(10)
+
+        # 标题和按钮（横向布局）
+        token_header = QWidget()
+        token_header_layout = QHBoxLayout(token_header)
+        token_header_layout.setContentsMargins(0, 0, 0, 0)
+        token_header_layout.setSpacing(8)
+
+        token_title = QLabel("🔑 访问令牌")
+        token_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        token_header_layout.addWidget(token_title)
+
+        token_header_layout.addStretch()
+
+        # 显示/隐藏按钮
+        self.show_token_btn = QPushButton("👁️ 显示")
+        self.show_token_btn.setFixedHeight(28)
+        self.show_token_btn.setCheckable(True)
+        self.show_token_btn.setObjectName("iconButton")
+        self.show_token_btn.setToolTip("显示/隐藏令牌内容")
+        self.show_token_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                font-size: 12px;
+                border: none;
+                border-radius: 4px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #374151;
+            }
+            QPushButton:checked {
+                background-color: #3B82F6;
+            }
+        """)
+        self.show_token_btn.clicked.connect(self.toggle_token_visibility)
+        token_header_layout.addWidget(self.show_token_btn)
+
+        # 编辑按钮
+        self.token_edit_btn = QPushButton("✏️ 编辑")
+        self.token_edit_btn.setFixedHeight(28)
+        self.token_edit_btn.setObjectName("iconButton")
+        self.token_edit_btn.setToolTip("编辑访问私有更新服务器的令牌（可选）")
+        self.token_edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                font-size: 12px;
+                border: none;
+                border-radius: 4px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:pressed {
+                background-color: #374151;
+            }
+        """)
+        self.token_edit_btn.clicked.connect(self.edit_token)
+        token_header_layout.addWidget(self.token_edit_btn)
+
+        # 保存按钮（初始隐藏）
+        self.token_save_btn = QPushButton("✓ 保存")
+        self.token_save_btn.setFixedHeight(28)
+        self.token_save_btn.setObjectName("iconButton")
+        self.token_save_btn.setToolTip("保存令牌")
+        self.token_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:pressed {
+                background-color: #047857;
+            }
+        """)
+        self.token_save_btn.clicked.connect(self.save_token)
+        self.token_save_btn.hide()
+        token_header_layout.addWidget(self.token_save_btn)
+
+        # 取消按钮（初始隐藏）
+        self.token_cancel_btn = QPushButton("✕ 取消")
+        self.token_cancel_btn.setFixedHeight(28)
+        self.token_cancel_btn.setObjectName("iconButton")
+        self.token_cancel_btn.setToolTip("取消编辑")
+        self.token_cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+            QPushButton:pressed {
+                background-color: #B91C1C;
+            }
+        """)
+        self.token_cancel_btn.clicked.connect(self.cancel_token_edit)
+        self.token_cancel_btn.hide()
+        token_header_layout.addWidget(self.token_cancel_btn)
+
+        token_layout.addWidget(token_header)
+
+        # 输入框
+        self.token_input = QLineEdit()
+        self.token_input.setText(self.app_config.update_token)
+        self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
+        self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.token_input.setPlaceholderText("留空表示不使用令牌")
+        self.token_input.setMinimumHeight(32)
+        self.token_input.setReadOnly(True)  # 默认只读
+        token_layout.addWidget(self.token_input)
+
+        layout.addWidget(token_group)
+
+        layout.addStretch()
+        return group
+
+    def create_advanced_section(self) -> QGroupBox:
+        """创建高级设置区域"""
+        from utils.paths import get_cache_dir
+
+        group = QGroupBox("⚙️ 高级设置")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # 工作目录历史
+        dir_group = QWidget()
+        dir_layout = QVBoxLayout(dir_group)
+        dir_layout.setSpacing(10)
+
+        # 标题和按钮（横向布局）
+        dir_header = QWidget()
+        dir_header_layout = QHBoxLayout(dir_header)
+        dir_header_layout.setContentsMargins(0, 0, 0, 0)
+        dir_header_layout.setSpacing(10)
+
+        dir_title = QLabel("📁 最后打开的目录")
+        dir_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        dir_header_layout.addWidget(dir_title)
+
+        dir_header_layout.addStretch()
+
+        clear_dir_btn = QPushButton("清除历史记录")
+        clear_dir_btn.clicked.connect(self.clear_directory_history)
+        clear_dir_btn.setMinimumHeight(28)
+        clear_dir_btn.setToolTip("清除最后打开的工作目录路径")
+        dir_header_layout.addWidget(clear_dir_btn)
+
+        dir_layout.addWidget(dir_header)
+
+        # 路径显示
+        last_dir = self.app_config.last_opened_directory
+        last_dir_label_adv = QLabel(last_dir if last_dir else "（无）")
+        last_dir_label_adv.setObjectName("lastDirLabel")
+        last_dir_label_adv.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        c = default_theme.colors
+        last_dir_label_adv.setStyleSheet(f"""
+            color: {c.TEXT_PRIMARY};
+            padding: 10px;
+            background-color: {c.BACKGROUND_SECONDARY};
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        """)
+        last_dir_label_adv.setWordWrap(True)
+        dir_layout.addWidget(last_dir_label_adv)
+
+        layout.addWidget(dir_group)
 
         # SMB缓存管理
         smb_group = QWidget()
         smb_layout = QVBoxLayout(smb_group)
         smb_layout.setSpacing(10)
 
-        smb_title = QLabel("🌐 网络缓存")
-        smb_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        smb_layout.addWidget(smb_title)
+        # 标题和按钮（横向布局）
+        smb_header = QWidget()
+        smb_header_layout = QHBoxLayout(smb_header)
+        smb_header_layout.setContentsMargins(0, 0, 0, 0)
+        smb_header_layout.setSpacing(10)
 
-        smb_desc = QLabel("清除SMB/NAS网络路径的图片缓存（如果遇到缓存问题可尝试清除）")
-        smb_desc.setStyleSheet("color: #6B7280; font-size: 12px;")
-        smb_desc.setWordWrap(True)
-        smb_layout.addWidget(smb_desc)
+        smb_title = QLabel("🌐 SMB/NAS 缓存")
+        smb_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        smb_header_layout.addWidget(smb_title)
+
+        smb_header_layout.addStretch()
 
         clear_smb_btn = QPushButton("清除SMB缓存")
         clear_smb_btn.clicked.connect(self.clear_smb_cache)
-        clear_smb_btn.setMinimumHeight(32)
-        smb_layout.addWidget(clear_smb_btn)
+        clear_smb_btn.setMinimumHeight(28)
+        clear_smb_btn.setToolTip("清除SMB/NAS网络路径的图片缓存（如果遇到缓存问题可尝试清除）")
+        smb_header_layout.addWidget(clear_smb_btn)
+
+        smb_layout.addWidget(smb_header)
+
+        # 缓存路径显示
+        cache_dir = get_cache_dir()
+        cache_path_label_adv = QLabel(str(cache_dir))
+        cache_path_label_adv.setObjectName("cacheDirLabel")
+        cache_path_label_adv.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        cache_path_label_adv.setStyleSheet(f"""
+            color: {c.TEXT_PRIMARY};
+            padding: 10px;
+            background-color: {c.BACKGROUND_SECONDARY};
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        """)
+        cache_path_label_adv.setWordWrap(True)
+        smb_layout.addWidget(cache_path_label_adv)
 
         layout.addWidget(smb_group)
 
+        # 配置文件信息
+        info_group = QWidget()
+        info_layout = QVBoxLayout(info_group)
+        info_layout.setSpacing(10)
+
+        info_title = QLabel("ℹ️ 配置信息")
+        info_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        info_layout.addWidget(info_title)
+
+        version_label = QLabel(f"配置文件版本：{self.app_config._config.get('version', '未知')}")
+        info_layout.addWidget(version_label)
+
+        self.config_path_label = QLabel(f"配置文件路径：{self.app_config._config_file}")
+        self.config_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.config_path_label.setWordWrap(True)
+        info_layout.addWidget(self.config_path_label)
+
+        layout.addWidget(info_group)
+
         layout.addStretch()
-        return widget
+        return group
 
-    def select_theme(self, theme: str):
-        """选择主题并立即应用"""
-        if theme == "light":
-            self.light_theme_btn.setChecked(True)
-            self.dark_theme_btn.setChecked(False)
+    def on_theme_combo_changed(self, index: int):
+        """主题下拉列表变化处理"""
+        if not hasattr(self, 'auto_theme_switch'):
+            return
+
+        # 如果自动切换已启用，下拉列表应该是禁用的，不应触发此事件
+        # 但为了安全起见，还是检查一下
+        if self.auto_theme_switch.isChecked():
+            return
+
+        # 获取选中的主题模式
+        mode = self.theme_combo.currentData()
+        if mode:
+            self.select_theme(mode)
+
+    def on_theme_button_clicked(self, mode: str):
+        """主题按钮点击处理（已废弃，保留以兼容旧代码）"""
+        if not hasattr(self, 'auto_theme_switch'):
+            return
+
+        # 如果自动切换已启用，显示提示
+        if self.auto_theme_switch.isChecked():
+            toast_warning(self, "请先关闭自动切换")
+            return
+
+        # 否则正常切换主题
+        self.select_theme(mode)
+
+    def on_auto_theme_toggled(self, checked: bool):
+        """自动切换复选框状态变化"""
+        if checked:
+            # 启用自动模式
+            self.app_config.theme_mode = "auto"
+            actual_theme = self.app_config.get_auto_theme_by_time()
+            self.app_config.theme = actual_theme
+            default_theme.set_theme(actual_theme)
+
+            # 禁用主题下拉列表
+            self.theme_combo.setEnabled(False)
+
+            # 更新下拉列表显示当前主题（阻止信号触发）
+            self.theme_combo.blockSignals(True)
+            if actual_theme == "dark":
+                self.theme_combo.setCurrentIndex(1)  # 深色主题
+            else:
+                self.theme_combo.setCurrentIndex(0)  # 浅色主题
+            self.theme_combo.blockSignals(False)
+
+            # 应用主题
+            self._apply_theme()
+            if self.parent():
+                if hasattr(self.parent(), 'apply_theme'):
+                    self.parent().apply_theme()
+                if hasattr(self.parent(), 'theme_button'):
+                    theme_icon = '☾' if actual_theme == "light" else '☼'
+                    self.parent().theme_button.setText(theme_icon)
+                    # 禁用主窗口的主题按钮
+                    self.parent().theme_button.setEnabled(False)
+                    self.parent().theme_button.setToolTip("已启用自动切换，点击查看提示")
+                # 启动主窗口的自动主题定时器
+                if hasattr(self.parent(), 'start_auto_theme_timer'):
+                    self.parent().start_auto_theme_timer()
+
+            toast_success(self, f"已启用自动切换（当前: {'亮色' if actual_theme == 'light' else '暗色'}主题）")
         else:
-            self.light_theme_btn.setChecked(False)
-            self.dark_theme_btn.setChecked(True)
+            # 禁用自动模式，恢复手动模式
+            self.app_config.theme_mode = "manual"
 
-        # 保存并修改全局主题
-        self.app_config.theme = theme
-        default_theme.set_theme(theme)
+            # 启用主题下拉列表
+            self.theme_combo.setEnabled(True)
 
-        # 先应用设置面板的主题样式（和初始化时完全一样的逻辑）
+            # 根据当前主题设置下拉列表（阻止信号触发）
+            current_theme = self.app_config.theme
+            self.theme_combo.blockSignals(True)
+            if current_theme == "dark":
+                self.theme_combo.setCurrentIndex(1)  # 深色主题
+            else:
+                self.theme_combo.setCurrentIndex(0)  # 浅色主题
+            self.theme_combo.blockSignals(False)
+
+            # 停止主窗口的自动主题定时器，并重新启用主题按钮
+            if self.parent():
+                if hasattr(self.parent(), 'stop_auto_theme_timer'):
+                    self.parent().stop_auto_theme_timer()
+                if hasattr(self.parent(), 'theme_button'):
+                    # 重新启用主窗口的主题按钮
+                    self.parent().theme_button.setEnabled(True)
+                    # 恢复正确的tooltip
+                    current_theme = self.app_config.theme
+                    theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
+                    self.parent().theme_button.setToolTip(theme_tooltip)
+
+            toast_info(self, "已关闭自动切换")
+
+    def select_theme(self, mode: str):
+        """选择主题模式并立即应用
+
+        Args:
+            mode: "light"(亮色), "dark"(暗色), "system"(跟随系统)
+        """
+        # 更新下拉列表状态（阻止信号触发）
+        self.theme_combo.blockSignals(True)
+        if mode == "system":
+            self.theme_combo.setCurrentIndex(2)  # 跟随系统
+            # 设置为系统模式
+            self.app_config.theme_mode = "system"
+            # 获取系统主题
+            actual_theme = self.app_config.get_system_theme()
+            self.app_config.theme = actual_theme
+            default_theme.set_theme(actual_theme)
+            toast_message = f"已切换到系统模式（当前: {'亮色' if actual_theme == 'light' else '暗色'}主题）"
+        else:
+            # 手动选择亮色或暗色
+            if mode == "light":
+                self.theme_combo.setCurrentIndex(0)  # 浅色主题
+            else:
+                self.theme_combo.setCurrentIndex(1)  # 深色主题
+
+            # 设置为手动模式
+            self.app_config.theme_mode = "manual"
+            self.app_config.theme = mode
+            default_theme.set_theme(mode)
+            toast_message = f"已切换到{'亮色' if mode == 'light' else '暗色'}主题"
+        self.theme_combo.blockSignals(False)
+
+        # 先应用设置面板的主题样式
         self._apply_theme()
 
-        # 再同步更新主窗口（在设置面板样式稳定后进行）
+        # 再同步更新主窗口
         if self.parent():
             # 更新主窗口样式
             if hasattr(self.parent(), 'apply_theme'):
                 self.parent().apply_theme()
 
-            # 更新主题按钮图标
+            # 更新主题按钮图标和启用状态
             if hasattr(self.parent(), 'theme_button'):
-                theme_icon = '☾' if theme == "light" else '☼'  # ☾ 月亮(暗色) ☼ 太阳(亮色)
-                theme_tooltip = '切换到暗色主题' if theme == "light" else '切换到亮色主题'
+                current_theme = self.app_config.theme
+                theme_icon = '☾' if current_theme == "light" else '☼'
                 self.parent().theme_button.setText(theme_icon)
-                self.parent().theme_button.setToolTip(theme_tooltip)
+
+                if mode == "system":
+                    # 跟随系统模式：禁用主窗口按钮
+                    self.parent().theme_button.setEnabled(False)
+                    self.parent().theme_button.setToolTip("已启用跟随系统，点击查看提示")
+                else:
+                    # 手动模式：启用主窗口按钮
+                    self.parent().theme_button.setEnabled(True)
+                    theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
+                    self.parent().theme_button.setToolTip(theme_tooltip)
 
         # 提示用户已应用
-        toast_success(self, f"已切换到{'亮色' if theme == 'light' else '暗色'}主题")
+        toast_success(self, toast_message)
 
     def toggle_token_visibility(self):
         """切换令牌显示/隐藏"""
@@ -2786,6 +3389,7 @@ class SettingsDialog(QDialog):
         """取消更新地址编辑"""
         # 恢复原值
         self.endpoint_input.setText(self._endpoint_backup)
+        self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
 
         # 锁定输入框
         self.endpoint_input.setReadOnly(True)
@@ -2829,6 +3433,7 @@ class SettingsDialog(QDialog):
         """取消访问令牌编辑"""
         # 恢复原值
         self.token_input.setText(self._token_backup)
+        self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
 
         # 锁定输入框
         self.token_input.setReadOnly(True)
@@ -2855,15 +3460,28 @@ class SettingsDialog(QDialog):
 
             # 更新状态显示
             self.tutorial_status_label.setText("⏸️ 教程未开始")
-            self.tutorial_status_label.setStyleSheet("""
-                QLabel {
-                    color: #6B7280;
+            c = default_theme.colors
+            self.tutorial_status_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {c.TEXT_SECONDARY};
                     font-size: 13px;
                     padding: 10px;
-                    background-color: rgba(0, 0, 0, 0.05);
+                    background-color: {c.BACKGROUND_SECONDARY};
                     border-radius: 4px;
-                }
+                }}
             """)
+
+    def start_tutorial(self):
+        """关闭设置面板并立即开始教程"""
+        # 重置教程状态
+        self.app_config.reset_tutorial()
+
+        # 关闭设置对话框
+        self.accept()
+
+        # 触发主窗口的教程
+        if hasattr(self.parent(), 'start_tutorial'):
+            self.parent().start_tutorial()
 
     def clear_directory_history(self):
         """清除目录历史"""
@@ -2972,35 +3590,47 @@ class SettingsDialog(QDialog):
 
         if msgBox.clickedButton() == yes_btn:
             # 恢复默认值
-            self.light_theme_btn.setChecked(True)
-            self.dark_theme_btn.setChecked(False)
+            self.theme_combo.setCurrentIndex(0)  # 默认浅色主题
+            self.auto_theme_switch.setChecked(False)  # 默认关闭自动切换
+            self.theme_combo.setEnabled(True)  # 确保下拉列表可用
             self.auto_update_switch.setChecked(True)
             self.endpoint_input.setText("https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json")
+            self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
             self.token_input.setText("")
+            self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
 
-            toast_info(self, "已恢复默认设置，请点击保存应用")
+            # 保存配置（实时保存）
+            self.app_config.auto_update_enabled = True
 
-    def cancel_settings(self):
-        """取消设置"""
-        # 主题已经实时保存，直接关闭即可
-        self.reject()
+            toast_success(self, "已恢复默认设置")
 
-    def save_settings(self):
-        """保存设置"""
+    def _sync_main_window_theme_button(self):
+        """同步主窗口主题按钮状态（防止缓存不一致）"""
         try:
-            # 主题已通过select_theme实时保存，这里只保存其他设置
+            if not self.parent() or not hasattr(self.parent(), 'theme_button'):
+                return
 
-            # 保存自动更新设置
-            self.app_config.auto_update_enabled = self.auto_update_switch.isChecked()
+            # 重新加载配置确保同步
+            self.app_config.reload_config()
+            theme_mode = self.app_config.theme_mode
+            current_theme = self.app_config.theme
 
-            # 注意：更新端点和令牌现在通过独立的编辑按钮保存，不在这里处理
+            # 更新按钮启用状态
+            if theme_mode in ("auto", "system"):
+                self.parent().theme_button.setEnabled(False)
+                mode_name = "自动切换" if theme_mode == "auto" else "跟随系统"
+                self.parent().theme_button.setToolTip(f"已启用{mode_name}，点击查看提示")
+            else:
+                self.parent().theme_button.setEnabled(True)
+                theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
+                self.parent().theme_button.setToolTip(theme_tooltip)
 
-            toast_success(self, "设置已保存")
-            self.accept()
-
+            # 更新按钮图标
+            theme_icon = '☾' if current_theme == "light" else '☼'
+            self.parent().theme_button.setText(theme_icon)
         except Exception as e:
-            self.logger.error(f"保存设置失败: {e}")
-            toast_error(self, f"保存失败: {str(e)}")
+            self.logger.error(f"同步主窗口状态失败: {e}")
+
 
     def _apply_theme(self):
         """应用主题样式"""
@@ -3056,13 +3686,6 @@ class SettingsDialog(QDialog):
                 background-color: {c.PRIMARY};
                 border: 2px solid {c.PRIMARY_DARK};
             }}
-            QPushButton[text="取消"] {{
-                background-color: {c.BACKGROUND_SECONDARY};
-                color: {c.TEXT_PRIMARY};
-            }}
-            QPushButton[text="取消"]:hover {{
-                background-color: {c.BACKGROUND_HOVER};
-            }}
             QLineEdit {{
                 background-color: {c.BACKGROUND_SECONDARY};
                 color: {c.TEXT_PRIMARY};
@@ -3087,6 +3710,127 @@ class SettingsDialog(QDialog):
                 background-color: {c.PRIMARY};
                 border-color: {c.PRIMARY};
             }}
+            QGroupBox {{
+                color: {c.TEXT_PRIMARY};
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: 6px;
+                margin-top: 12px;
+                font-weight: bold;
+                padding-top: 8px;
+                background-color: {c.BACKGROUND_CARD};
+            }}
+            QGroupBox::title {{
+                color: {c.TEXT_PRIMARY};
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 8px;
+                background-color: {c.BACKGROUND_CARD};
+            }}
+            QScrollArea {{
+                background-color: {c.BACKGROUND_CARD};
+                border: none;
+            }}
+            QWidget#scrollContent {{
+                background-color: {c.BACKGROUND_CARD};
+            }}
+            QTabWidget > QWidget {{
+                background-color: {c.BACKGROUND_CARD};
+            }}
+            QScrollBar:vertical {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                width: 12px;
+                border-radius: 6px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {c.BORDER_MEDIUM};
+                border-radius: 6px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {c.TEXT_SECONDARY};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            QScrollBar:horizontal {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                height: 12px;
+                border-radius: 6px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background-color: {c.BORDER_MEDIUM};
+                border-radius: 6px;
+                min-width: 20px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background-color: {c.TEXT_SECONDARY};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+                background: none;
+            }}
+            QComboBox {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_PRIMARY};
+                border: 2px solid {c.BORDER_MEDIUM};
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QComboBox:hover {{
+                border-color: {c.PRIMARY};
+            }}
+            QComboBox:disabled {{
+                background-color: {c.GRAY_100};
+                color: {c.TEXT_DISABLED};
+                border-color: {c.BORDER_LIGHT};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 0px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                width: 0;
+                height: 0;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {c.BACKGROUND_CARD};
+                border: 2px solid {c.BORDER_MEDIUM};
+                border-radius: 6px;
+                selection-background-color: {c.PRIMARY};
+                selection-color: white;
+                padding: 4px;
+                color: {c.TEXT_PRIMARY};
+                min-width: 180px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                padding: 8px 12px;
+                min-height: 32px;
+                color: {c.TEXT_PRIMARY};
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: {c.PRIMARY};
+                color: white;
+            }}
+            QWidget#separator_line {{
+                background-color: {c.BORDER_MEDIUM};
+            }}
+            QLabel {{
+                color: {c.TEXT_PRIMARY};
+            }}
         """)
 
         # 单独更新教程状态标签的样式（使用内联样式确保优先级）
@@ -3107,14 +3851,149 @@ class SettingsDialog(QDialog):
                 }}
             """)
 
+        # 强制刷新所有子组件的样式（防止缓存导致颜色不更新）
+        # 参考主窗口的实现，确保主题切换时所有组件都能正确渲染新颜色
+        self._refresh_all_widgets()
+
+    def _refresh_all_widgets(self):
+        """强制刷新所有子组件的样式渲染
+
+        Qt的样式系统存在缓存机制，当通过父容器的setStyleSheet更改样式时，
+        某些已渲染的子组件可能不会自动更新。这个方法通过unpolish/polish
+        强制Qt重新计算和应用所有组件的样式。
+
+        同时，对于所有QLabel和QCheckBox，明确设置它们的颜色以确保正确渲染。
+        """
+        from PyQt6.QtWidgets import QLabel, QCheckBox
+        import re
+        c = default_theme.colors
+
+        # 获取所有QLabel和QCheckBox
+        all_labels = self.findChildren(QLabel)
+        all_checkboxes = self.findChildren(QCheckBox)
+
+        # 手动更新特殊标签
+        if hasattr(self, 'last_dir_label') and self.last_dir_label:
+            self.last_dir_label.setStyleSheet(f"""
+                color: {c.TEXT_PRIMARY};
+                padding: 10px;
+                background-color: {c.BACKGROUND_SECONDARY};
+                border-radius: 4px;
+                font-size: 12px;
+                font-family: monospace;
+            """)
+
+        # 手动更新所有缓存路径标签（基础Tab和高级Tab）
+        cache_labels = [label for label in all_labels if label.objectName() == "cacheDirLabel"]
+        for cache_label in cache_labels:
+            cache_label.setStyleSheet(f"""
+                color: {c.TEXT_PRIMARY};
+                padding: 10px;
+                background-color: {c.BACKGROUND_SECONDARY};
+                border-radius: 4px;
+                font-size: 12px;
+                font-family: monospace;
+            """)
+
+        # 处理所有QLabel
+        for label in all_labels:
+            # 跳过特殊的状态标签（它有自己的颜色处理）
+            if label.objectName() in ("tutorialStatusLabel", "lastDirLabel", "cacheDirLabel"):
+                continue
+
+            current_style = label.styleSheet()
+
+            if current_style:
+                # 有inline样式的情况
+                if 'color:' in current_style:
+                    # 替换现有颜色
+                    new_style = re.sub(r'color:\s*[^;]+', f'color: {c.TEXT_PRIMARY}', current_style)
+                    label.setStyleSheet(new_style)
+                else:
+                    # 添加颜色
+                    new_style = current_style.rstrip(';') + f'; color: {c.TEXT_PRIMARY};'
+                    label.setStyleSheet(new_style)
+            else:
+                # 没有inline样式，明确设置颜色以避免缓存问题
+                label.setStyleSheet(f'color: {c.TEXT_PRIMARY};')
+
+        # 处理所有QCheckBox
+        for checkbox in all_checkboxes:
+            current_style = checkbox.styleSheet()
+
+            if current_style:
+                if 'color:' in current_style:
+                    new_style = re.sub(r'color:\s*[^;]+', f'color: {c.TEXT_PRIMARY}', current_style)
+                    checkbox.setStyleSheet(new_style)
+                else:
+                    new_style = current_style.rstrip(';') + f'; color: {c.TEXT_PRIMARY};'
+                    checkbox.setStyleSheet(new_style)
+            else:
+                checkbox.setStyleSheet(f'color: {c.TEXT_PRIMARY};')
+
+        # 获取所有子组件（递归）
+        all_widgets = self.findChildren(QWidget)
+
+        # 对每个组件强制重新应用样式
+        for widget in all_widgets:
+            # unpolish 移除当前样式，polish 重新应用样式
+            # 这会强制Qt重新计算组件的外观
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+            # 触发重绘
+            widget.update()
+
+        # 同时刷新对话框本身
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
     def showEvent(self, event):
-        """对话框显示时居中"""
+        """对话框显示时居中并同步配置"""
         super().showEvent(event)
+
+        # 居中对话框
         if not self._centered and self.parent():
             parent_geometry = self.parent().geometry()
             x = parent_geometry.x() + (parent_geometry.width() - self.width()) // 2
             y = parent_geometry.y() + (parent_geometry.height() - self.height()) // 2
             self.move(x, y)
             self._centered = True
+
+        # 重新加载配置以同步主窗口的主题变化
+        self.app_config.reload_config()
+
+        # 更新主题下拉框的值
+        current_theme_mode = self.app_config.theme_mode
+
+        # 阻止信号触发
+        self.theme_combo.blockSignals(True)
+
+        if current_theme_mode == "auto":
+            # 自动切换模式
+            self.auto_theme_switch.setChecked(True)
+            self.theme_combo.setEnabled(False)
+            # 设置为当前实际主题
+            if self.app_config.theme == "dark":
+                self.theme_combo.setCurrentIndex(1)
+            else:
+                self.theme_combo.setCurrentIndex(0)
+        elif current_theme_mode == "system":
+            # 跟随系统模式
+            self.theme_combo.setCurrentIndex(2)
+            self.auto_theme_switch.setChecked(False)
+        elif self.app_config.theme == "dark":
+            # 暗色主题
+            self.theme_combo.setCurrentIndex(1)
+            self.theme_combo.setEnabled(True)
+            self.auto_theme_switch.setChecked(False)
+        else:
+            # 亮色主题
+            self.theme_combo.setCurrentIndex(0)
+            self.theme_combo.setEnabled(True)
+            self.auto_theme_switch.setChecked(False)
+
+        # 恢复信号
+        self.theme_combo.blockSignals(False)
 
 
