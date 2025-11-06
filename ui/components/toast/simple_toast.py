@@ -8,15 +8,26 @@ from PyQt6.QtWidgets import QLabel
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
 from enum import Enum
+from ....utils.app_config import get_app_config
 
 
 class ToastType(Enum):
     """Toast类型"""
+    DEBUG = "debug"
     INFO = "info"
     SUCCESS = "success"
     WARNING = "warning"
     ERROR = "error"
     FLOATING = "floating"  # 保持原悬浮消息样式
+
+
+# Toast级别权重（用于过滤）
+TOAST_LEVEL_WEIGHT = {
+    "DEBUG": 0,
+    "INFO": 1,
+    "WARNING": 2,
+    "ERROR": 3
+}
 
 
 class ToastPosition(Enum):
@@ -35,6 +46,11 @@ class Toast:
 
     # Toast样式配置
     STYLES = {
+        ToastType.DEBUG: {
+            'background': 'rgba(108, 117, 125, 230)',
+            'border': 'rgba(73, 80, 87, 255)',
+            'icon': '🐛'
+        },
         ToastType.INFO: {
             'background': 'rgba(52, 152, 219, 230)',
             'border': 'rgba(41, 128, 185, 255)',
@@ -63,11 +79,55 @@ class Toast:
     }
 
     @staticmethod
+    def _should_show_toast(toast_type: ToastType) -> bool:
+        """判断是否应该显示Toast（根据配置的级别）"""
+        # FLOATING类型总是显示
+        if toast_type == ToastType.FLOATING:
+            return True
+
+        try:
+            app_config = get_app_config()
+            configured_level = app_config.toast_level.upper()
+
+            # 将ToastType映射到级别名称
+            type_to_level = {
+                ToastType.DEBUG: "DEBUG",
+                ToastType.INFO: "INFO",
+                ToastType.SUCCESS: "INFO",  # SUCCESS视为INFO级别
+                ToastType.WARNING: "WARNING",
+                ToastType.ERROR: "ERROR"
+            }
+
+            toast_level = type_to_level.get(toast_type, "INFO")
+            configured_weight = TOAST_LEVEL_WEIGHT.get(configured_level, 1)
+            toast_weight = TOAST_LEVEL_WEIGHT.get(toast_level, 1)
+
+            # Toast过滤日志（临时使用INFO级别方便调试，正式版可改为DEBUG）
+            import logging
+            logger = logging.getLogger(__name__)
+            should_show = toast_weight >= configured_weight
+            logger.info(f"Toast过滤检查: [{toast_type.value}] 消息级别={toast_level}(权重{toast_weight}), "
+                       f"配置级别={configured_level}(权重{configured_weight}), "
+                       f"结果={'显示' if should_show else '过滤'}")
+
+            return toast_weight >= configured_weight
+        except Exception as e:
+            # 配置读取失败时，默认显示所有INFO及以上
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Toast过滤失败: {e}，默认显示")
+            return True
+
+    @staticmethod
     def show(parent, message: str, toast_type: ToastType = ToastType.INFO,
              duration: int = 3000, position: ToastPosition = ToastPosition.TOP_CENTER,
              show_icon: bool = True):
         """显示Toast消息 - 基于成功的悬浮消息实现"""
         try:
+            # 检查是否应该显示
+            if not Toast._should_show_toast(toast_type):
+                return
+
             # 获取样式
             style = Toast.STYLES.get(toast_type, Toast.STYLES[ToastType.INFO])
 

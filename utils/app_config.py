@@ -37,7 +37,10 @@ class AppConfig:
             "update_token": "",  # 更新令牌（可选）
             "pending_update": {},  # 待处理的更新信息
             # 工作目录相关配置
-            "last_opened_directory": ""  # 最后打开的图片目录
+            "last_opened_directory": "",  # 最后打开的图片目录
+            # 日志和提示相关配置
+            "log_level": "INFO",  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
+            "toast_level": "INFO"  # Toast提示级别：DEBUG, INFO, WARNING, ERROR
         }
 
     def _load_config(self) -> Dict[str, Any]:
@@ -287,6 +290,40 @@ class AppConfig:
         self._config["last_opened_directory"] = value
         self._save_config()
         self.logger.info(f"最后打开的目录已设置为: {value}")
+
+    # ==================== 日志和提示配置 ====================
+
+    @property
+    def log_level(self) -> str:
+        """获取日志级别"""
+        return self._config.get("log_level", "INFO")
+
+    @log_level.setter
+    def log_level(self, value: str):
+        """设置日志级别"""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        if value.upper() in valid_levels:
+            self._config["log_level"] = value.upper()
+            self._save_config()
+            self.logger.info(f"日志级别已设置为: {value.upper()}")
+        else:
+            self.logger.warning(f"无效的日志级别: {value}，已忽略")
+
+    @property
+    def toast_level(self) -> str:
+        """获取Toast提示级别"""
+        return self._config.get("toast_level", "INFO")
+
+    @toast_level.setter
+    def toast_level(self, value: str):
+        """设置Toast提示级别"""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR"]
+        if value.upper() in valid_levels:
+            self._config["toast_level"] = value.upper()
+            self._save_config()
+            self.logger.info(f"Toast提示级别已设置为: {value.upper()}")
+        else:
+            self.logger.warning(f"无效的Toast级别: {value}，已忽略")
 
     # ==================== 其他方法 ====================
 
