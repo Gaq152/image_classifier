@@ -2330,6 +2330,7 @@ class SettingsDialog(QDialog):
         content_layout.setContentsMargins(0, 0, 10, 0)
 
         # 添加各个设置组
+        content_layout.addWidget(self.create_log_toast_section())
         content_layout.addWidget(self.create_advanced_update_section())
         content_layout.addWidget(self.create_directory_section())
         content_layout.addWidget(self.create_smb_section())
@@ -2343,6 +2344,92 @@ class SettingsDialog(QDialog):
         tab_layout.addWidget(scroll_area)
 
         return tab
+
+    def create_log_toast_section(self) -> QGroupBox:
+        """创建日志和Toast级别设置区域"""
+        group = QGroupBox("📝 日志与提示")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(20)
+
+        # 日志级别设置
+        log_group = QWidget()
+        log_layout = QVBoxLayout(log_group)
+        log_layout.setSpacing(10)
+
+        # 标题和下拉框（横向布局）
+        log_header = QWidget()
+        log_header_layout = QHBoxLayout(log_header)
+        log_header_layout.setContentsMargins(0, 0, 0, 0)
+        log_header_layout.setSpacing(10)
+
+        log_title = QLabel("📋 日志保存级别")
+        log_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        log_header_layout.addWidget(log_title)
+
+        log_header_layout.addStretch()
+
+        self.log_level_combo = QComboBox()
+        self.log_level_combo.addItem("🐛 DEBUG - 调试信息", "DEBUG")
+        self.log_level_combo.addItem("ℹ️  INFO - 一般信息", "INFO")
+        self.log_level_combo.addItem("⚠️  WARNING - 警告信息", "WARNING")
+        self.log_level_combo.addItem("❌ ERROR - 错误信息", "ERROR")
+        self.log_level_combo.addItem("🔥 CRITICAL - 严重错误", "CRITICAL")
+        self.log_level_combo.setMinimumHeight(36)
+        self.log_level_combo.setMinimumWidth(220)
+        # 禁用滚轮切换
+        self.log_level_combo.wheelEvent = lambda event: None
+        # 设置当前级别
+        current_log_level = self.app_config.log_level
+        for i in range(self.log_level_combo.count()):
+            if self.log_level_combo.itemData(i) == current_log_level:
+                self.log_level_combo.setCurrentIndex(i)
+                break
+        self.log_level_combo.currentIndexChanged.connect(self.on_log_level_changed)
+        log_header_layout.addWidget(self.log_level_combo)
+
+        log_layout.addWidget(log_header)
+        layout.addWidget(log_group)
+
+        # Toast级别设置
+        toast_group = QWidget()
+        toast_layout = QVBoxLayout(toast_group)
+        toast_layout.setSpacing(10)
+
+        # 标题和下拉框（横向布局）
+        toast_header = QWidget()
+        toast_header_layout = QHBoxLayout(toast_header)
+        toast_header_layout.setContentsMargins(0, 0, 0, 0)
+        toast_header_layout.setSpacing(10)
+
+        toast_title = QLabel("💬 Toast提示级别")
+        toast_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        toast_header_layout.addWidget(toast_title)
+
+        toast_header_layout.addStretch()
+
+        self.toast_level_combo = QComboBox()
+        self.toast_level_combo.addItem("🐛 DEBUG - 所有提示", "DEBUG")
+        self.toast_level_combo.addItem("ℹ️  INFO - 一般及以上", "INFO")
+        self.toast_level_combo.addItem("⚠️  WARNING - 警告及错误", "WARNING")
+        self.toast_level_combo.addItem("❌ ERROR - 仅错误提示", "ERROR")
+        self.toast_level_combo.setMinimumHeight(36)
+        self.toast_level_combo.setMinimumWidth(220)
+        # 禁用滚轮切换
+        self.toast_level_combo.wheelEvent = lambda event: None
+        # 设置当前级别
+        current_toast_level = self.app_config.toast_level
+        for i in range(self.toast_level_combo.count()):
+            if self.toast_level_combo.itemData(i) == current_toast_level:
+                self.toast_level_combo.setCurrentIndex(i)
+                break
+        self.toast_level_combo.currentIndexChanged.connect(self.on_toast_level_changed)
+        toast_header_layout.addWidget(self.toast_level_combo)
+
+        toast_layout.addWidget(toast_header)
+        layout.addWidget(toast_group)
+
+        return group
 
     def create_basic_update_section(self) -> QGroupBox:
         """创建基本更新设置区域（仅包含开关和手动检查）"""
@@ -3283,6 +3370,28 @@ class SettingsDialog(QDialog):
                     self.parent().theme_button.setToolTip(theme_tooltip)
 
             toast_info(self, "已关闭自动切换")
+
+    def on_log_level_changed(self, index: int):
+        """日志级别下拉框改变事件"""
+        level = self.log_level_combo.itemData(index)
+        self.app_config.log_level = level
+        toast_success(self, f"日志级别已设置为 {level}（重启生效）")
+
+    def on_toast_level_changed(self, index: int):
+        """Toast级别下拉框改变事件"""
+        level = self.toast_level_combo.itemData(index)
+        self.logger.info(f"Toast级别下拉框改变: index={index}, level={level}")
+
+        # 更新配置
+        self.app_config.toast_level = level
+
+        # 验证配置是否更新（使用已经导入的get_app_config，避免导入方式不一致）
+        verify_config = get_app_config()
+        self.logger.info(f"配置验证: self.app_config.toast_level={self.app_config.toast_level}, "
+                        f"get_app_config().toast_level={verify_config.toast_level}, "
+                        f"是否同一实例={self.app_config is verify_config}")
+
+        toast_success(self, f"Toast提示级别已设置为 {level}")
 
     def select_theme(self, mode: str):
         """选择主题模式并立即应用

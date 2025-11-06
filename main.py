@@ -99,14 +99,23 @@ def setup_logging():
             backupCount=6,
             encoding='utf-8'
         )
-        file_handler.setLevel(logging.DEBUG)
+        # 从配置文件读取日志级别
+        from utils.app_config import get_app_config
+        try:
+            app_config = get_app_config()
+            log_level_str = app_config.log_level
+            log_level = getattr(logging, log_level_str, logging.INFO)
+        except Exception:
+            log_level = logging.INFO
+
+        file_handler.setLevel(log_level)
 
         # 设置日志文件后缀格式（日期格式）
         file_handler.suffix = '%Y-%m-%d'
 
         # 创建控制台处理器（用于重要信息）
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.INFO)  # 控制台始终显示INFO及以上
 
         # 设置格式 - 添加毫秒精度用于性能分析
         file_formatter = logging.Formatter(
