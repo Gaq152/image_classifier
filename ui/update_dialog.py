@@ -17,7 +17,7 @@ from ..core.update_utils import download_with_progress, sha256_file, launch_self
 from ..utils.paths import get_update_dir
 from .components.toast import toast_error
 from .components.styles.theme import default_theme
-from ..utils.app_config import AppConfig
+from ..utils.app_config import get_app_config
 
 
 class UpdateInfoDialog(QDialog):
@@ -126,7 +126,7 @@ class UpdateInfoDialog(QDialog):
     def _apply_theme(self):
         """应用主题样式"""
         # 确保使用当前配置的主题
-        config = AppConfig()
+        config = get_app_config()
         default_theme.set_theme(config.theme)
         c = default_theme.colors
 
@@ -305,7 +305,7 @@ class UpdateInfoDialog(QDialog):
             msg_box.setIcon(QMessageBox.Icon.Question)
 
             # 应用主题适配样式
-            config = AppConfig()
+            config = get_app_config()
             default_theme.set_theme(config.theme)
             c = default_theme.colors
             msg_box.setStyleSheet(f"""
@@ -365,7 +365,7 @@ class UpdateInfoDialog(QDialog):
                 info_box.setIcon(QMessageBox.Icon.Information)
 
                 # 应用主题适配样式
-                config = AppConfig()
+                config = get_app_config()
                 default_theme.set_theme(config.theme)
                 c = default_theme.colors
                 info_box.setStyleSheet(f"""
@@ -440,7 +440,7 @@ class DownloadProgressDialog(QDialog):
     def _apply_theme(self):
         """应用主题样式"""
         # 确保使用当前配置的主题
-        config = AppConfig()
+        config = get_app_config()
         default_theme.set_theme(config.theme)
         c = default_theme.colors
 

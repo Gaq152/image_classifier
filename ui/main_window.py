@@ -116,7 +116,6 @@ class ImageClassifier(QMainWindow):
         # 初始化教程管理器
         try:
             self.tutorial_manager = TutorialManager(self)
-            self.logger.info("教程管理器初始化成功")
         except Exception as e:
             self.logger.error(f"教程管理器初始化失败: {e}")
             self.tutorial_manager = None
@@ -4952,8 +4951,6 @@ class ImageClassifier(QMainWindow):
             # 强制重绘
             self.update()
 
-            self.logger.info(f"主题已切换到: {default_theme.get_current_theme()}")
-
         except Exception as e:
             self.logger.error(f"应用主题失败: {e}")
 
@@ -5231,8 +5228,8 @@ class ImageClassifier(QMainWindow):
 
                     # 应用主题适配样式
                     from .components.styles.theme import default_theme
-                    from ..utils.app_config import AppConfig
-                    config = AppConfig()
+                    from ..utils.app_config import get_app_config
+                    config = get_app_config()
                     default_theme.set_theme(config.theme)
                     c = default_theme.colors
 
