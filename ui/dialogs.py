@@ -333,27 +333,57 @@ class AddCategoriesDialog(QDialog):
                 QListWidget::item:hover {{
                     background-color: {c.BACKGROUND_HOVER};
                 }}
+                QListWidget::item:selected {{
+                    background-color: {c.PRIMARY};
+                    color: white;
+                }}
+                QListWidget::item:selected:hover {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
             """)
             preview_layout.addWidget(self.preview_list)
             layout.addWidget(preview_group)
 
             # 添加按钮
             btn_layout = QHBoxLayout()
+            btn_layout.addStretch()  # 左侧弹性空间，让按钮靠右
+
+            # 统一按钮样式：固定padding和height
+            button_style_base = """
+                padding: 6px 16px;
+                font-size: 13px;
+                font-weight: 500;
+                border-radius: 4px;
+                min-height: 24px;
+            """
+
             add_btn = QPushButton('添加')
+            add_btn.setMinimumWidth(100)
             add_btn.clicked.connect(self.add_categories)
-            add_btn.setStyleSheet(ButtonStyles.get_primary_button_style())
+            add_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c.PRIMARY};
+                    color: white;
+                    border: none;
+                    {button_style_base}
+                }}
+                QPushButton:hover {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+                QPushButton:pressed {{
+                    background-color: {c.PRIMARY_DARK};
+                }}
+            """)
 
             continue_btn = QPushButton('添加并继续')
+            continue_btn.setMinimumWidth(120)
             continue_btn.clicked.connect(self.add_and_continue)
             continue_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {c.SUCCESS};
                     color: white;
                     border: none;
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                    font-weight: 500;
+                    {button_style_base}
                 }}
                 QPushButton:hover {{
                     background-color: {c.SUCCESS_DARK};
@@ -364,8 +394,23 @@ class AddCategoriesDialog(QDialog):
             """)
 
             cancel_btn = QPushButton('取消')
+            cancel_btn.setMinimumWidth(100)
             cancel_btn.clicked.connect(self.reject)
-            cancel_btn.setStyleSheet(ButtonStyles.get_secondary_button_style(""))
+            cancel_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c.GRAY_100};
+                    color: {c.TEXT_PRIMARY};
+                    border: 1px solid {c.BORDER_LIGHT};
+                    {button_style_base}
+                }}
+                QPushButton:hover {{
+                    background-color: {c.BACKGROUND_HOVER};
+                    border-color: {c.BORDER_MEDIUM};
+                }}
+                QPushButton:pressed {{
+                    background-color: {c.BACKGROUND_PRESSED};
+                }}
+            """)
 
             btn_layout.addWidget(add_btn)
             btn_layout.addWidget(continue_btn)
