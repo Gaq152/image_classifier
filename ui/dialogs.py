@@ -629,6 +629,25 @@ class TabbedHelpDialog(QDialog):
             'primary_light': c.PRIMARY_LIGHT,
         }
 
+    def _get_git_branch(self):
+        """获取当前 git 分支名称"""
+        try:
+            result = subprocess.run(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                cwd=Path(__file__).parent.parent  # 项目根目录
+            )
+            if result.returncode == 0:
+                branch = result.stdout.strip()
+                return branch if branch else 'main'
+        except Exception as e:
+            self.logger.debug(f"获取 git 分支失败: {e}")
+
+        # 默认返回 main
+        return 'main'
+
     def _get_dialog_style(self):
         """根据当前主题获取对话框样式"""
         c = default_theme.colors
@@ -1467,7 +1486,10 @@ class TabbedHelpDialog(QDialog):
                 {"bg": "#fce4ec", "border": "#e91e63", "text": "#c2185b", "emoji": "📦", "label": ""},
             ]
 
-        for i, version_info in enumerate(VERSION_HISTORY):
+        # 只展示最近的3个版本
+        recent_versions = VERSION_HISTORY[:3]
+
+        for i, version_info in enumerate(recent_versions):
             style = version_styles[min(i, len(version_styles) - 1)]
 
             # 当前版本标记
@@ -1497,6 +1519,24 @@ class TabbedHelpDialog(QDialog):
             html_part += '</div>'
             html_parts.append(html_part)
 
+        # 如果版本数超过3个，添加查看完整更新日志的链接
+        if len(VERSION_HISTORY) > 3:
+            # 动态获取当前分支
+            branch = self._get_git_branch()
+            changelog_url = f"https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/blob/{branch}/CHANGELOG.md"
+
+            changelog_link = f'''
+            <div style="background-color: {colors['bg_hover']}; padding: 15px; border-radius: 8px; margin: 10px 0; text-align: center; border: 1px dashed {colors['border']};">
+            <p style="margin: 0; color: {colors['text_secondary']};">
+            查看更多版本历史，请访问：<br>
+            <a href="{changelog_url}" style="color: {colors['primary']}; text-decoration: none; font-weight: bold; font-size: 14px;">
+            📋 完整更新日志 (CHANGELOG.md)
+            </a>
+            </p>
+            </div>
+            '''
+            html_parts.append(changelog_link)
+
         return '\n'.join(html_parts)
         
     def _generate_about_html(self):
@@ -1517,10 +1557,10 @@ class TabbedHelpDialog(QDialog):
         <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
         <h4 style="color: {colors['primary']}; margin-top: 0;">图片处理</h4>
         <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
-        <li>支持多种常见图片格式</li>
-        <li>智能图片预览和缩放</li>
+        <li>支持多种常见图片格式（JPG、PNG、BMP、GIF、TIFF、WebP等）</li>
+        <li>智能图片预览和缩放（可配置缩放范围）</li>
         <li>拖拽移动查看细节</li>
-        <li>EXIF信息显示</li>
+        <li>实时信息面板显示</li>
         </ul>
 
         <h4 style="color: {colors['primary']}; margin-top: 15px;">文件管理</h4>
@@ -1629,7 +1669,19 @@ class TabbedHelpDialog(QDialog):
                 selection-color: white;
                 border: none;
             }}
+            a {{
+                color: {c.PRIMARY};
+                text-decoration: underline;
+            }}
+            a:hover {{
+                color: {c.PRIMARY_LIGHT};
+                background-color: {c.BACKGROUND_HOVER};
+            }}
         """)
+
+        # 连接链接点击事件
+        text_browser.setOpenLinks(False)  # 禁用默认的链接打开行为
+        text_browser.anchorClicked.connect(self._handle_link_click)
 
         text_browser.setHtml(self._generate_about_html())
         layout.addWidget(text_browser)
