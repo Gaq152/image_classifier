@@ -349,7 +349,7 @@ class TutorialBubble(QWidget):
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"[Bubble.show_at] ENTER: target={target_widget}, secondary={secondary_target}, offset_x={offset_x}, offset_y={offset_y}")
+        logger.debug(f"[Bubble.show_at] ENTER: target={target_widget}, secondary={secondary_target}, offset_x={offset_x}, offset_y={offset_y}")
 
         if target_widget is None or self.parent() is None:
             logger.warning(f"[Bubble.show_at] 提前返回: target_widget={target_widget}, parent={self.parent()}")

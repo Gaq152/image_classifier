@@ -84,7 +84,7 @@ class AppConfig:
         try:
             with open(self._config_file, 'w', encoding='utf-8') as f:
                 json.dump(self._config, f, ensure_ascii=False, indent=2)
-            self.logger.info(f"已保存应用配置: {self._config_file}")
+            self.logger.debug(f"已保存应用配置: {self._config_file}")
         except Exception as e:
             self.logger.error(f"保存配置文件失败: {e}")
 
@@ -289,7 +289,7 @@ class AppConfig:
         """设置最后打开的目录"""
         self._config["last_opened_directory"] = value
         self._save_config()
-        self.logger.info(f"最后打开的目录已设置为: {value}")
+        self.logger.warning(f"最后打开的目录已设置为: {value}")
 
     # ==================== 日志和提示配置 ====================
 

@@ -103,7 +103,7 @@ class HighPerformanceImageLoader(QThread):
             if self.smb_optimization['enable_local_cache']:
                 cache_dir = self.smb_optimization['cache_dir']
                 cache_dir.mkdir(parents=True, exist_ok=True)
-                self.logger.info(f"[SMB优化] 本地缓存目录: {cache_dir}")
+                self.logger.debug(f"[SMB优化] 本地缓存目录: {cache_dir}")
 
                 # 迁移旧的隐藏缓存目录数据
                 self._migrate_old_cache()
@@ -111,7 +111,7 @@ class HighPerformanceImageLoader(QThread):
                 # 清理过期缓存
                 self._cleanup_local_cache()
 
-            self.logger.info("[SMB优化] SMB/NAS专项优化已启用")
+            self.logger.debug("[SMB优化] SMB/NAS专项优化已启用")
 
         except Exception as e:
             self.logger.error(f"[SMB优化] 初始化失败: {e}")
@@ -129,7 +129,7 @@ class HighPerformanceImageLoader(QThread):
                 # 检查新目录是否已有缓存文件
                 new_cache_files = list(new_cache_dir.rglob('*'))
                 if len(new_cache_files) <= 1:  # 只有目录本身
-                    self.logger.info(f"[SMB缓存迁移] 发现旧缓存目录，开始迁移...")
+                    self.logger.debug(f"[SMB缓存迁移] 发现旧缓存目录，开始迁移...")
 
                     import shutil
                     migrated_count = 0
@@ -146,11 +146,11 @@ class HighPerformanceImageLoader(QThread):
                                 self.logger.debug(f"[SMB缓存迁移] 迁移文件失败 {old_file.name}: {e}")
 
                     if migrated_count > 0:
-                        self.logger.info(f"[SMB缓存迁移] 成功迁移 {migrated_count} 个缓存文件")
+                        self.logger.debug(f"[SMB缓存迁移] 成功迁移 {migrated_count} 个缓存文件")
                         # 迁移成功后删除旧目录
                         try:
                             shutil.rmtree(old_cache_dir)
-                            self.logger.info(f"[SMB缓存迁移] 已删除旧缓存目录")
+                            self.logger.debug(f"[SMB缓存迁移] 已删除旧缓存目录")
                         except Exception as e:
                             self.logger.warning(f"[SMB缓存迁移] 删除旧目录失败: {e}")
                 else:
@@ -181,8 +181,8 @@ class HighPerformanceImageLoader(QThread):
             
             total_size_gb = total_size / (1024**3)
             max_size_gb = self.smb_optimization['cache_max_size_gb']
-            
-            self.logger.info(f"[SMB缓存] 当前大小: {total_size_gb:.2f}GB, 上限: {max_size_gb}GB")
+
+            self.logger.debug(f"[SMB缓存] 当前大小: {total_size_gb:.2f}GB, 上限: {max_size_gb}GB")
             
             # 如果超过限制，删除最旧的文件
             if total_size_gb > max_size_gb:
@@ -420,10 +420,10 @@ class HighPerformanceImageLoader(QThread):
                 else:
                     max_threads = min(max_threads, 3)  # 本地+EXE环境最多3个线程
                 self.logger.info(f"[线程池] EXE环境限制线程数为:{max_threads}")
-            
+
             env_type = "网络" if is_network_env else "本地"
-            self.logger.info(f"[线程池配置] {env_type}环境 CPU核心:{cpu_count}物理/{logical_cpu_count}逻辑 "
-                            f"内存:{memory_gb:.1f}GB 线程池大小:{max_threads}")
+            self.logger.debug(f"[线程池配置] {env_type}环境 CPU核心:{cpu_count}物理/{logical_cpu_count}逻辑 "
+                             f"内存:{memory_gb:.1f}GB 线程池大小:{max_threads}")
             
             return ThreadPoolExecutor(max_workers=max_threads, thread_name_prefix="ImageLoader")
             
@@ -454,11 +454,11 @@ class HighPerformanceImageLoader(QThread):
             # 计算理论缓存图片数量
             avg_image_size = 15 * 1024 * 1024  # 假设平均15MB
             estimated_image_count = optimal_size // avg_image_size
-                
-            self.logger.info(f"大图片优化缓存策略: {optimal_size / 1024 / 1024:.0f}MB "
-                            f"(可用内存: {available_memory / 1024 / 1024 / 1024:.1f}GB, "
-                            f"使用率: {optimal_size / available_memory * 100:.0f}%, "
-                            f"预计可缓存: {estimated_image_count}张15MB图片)")
+
+            self.logger.debug(f"大图片优化缓存策略: {optimal_size / 1024 / 1024:.0f}MB "
+                             f"(可用内存: {available_memory / 1024 / 1024 / 1024:.1f}GB, "
+                             f"使用率: {optimal_size / available_memory * 100:.0f}%, "
+                             f"预计可缓存: {estimated_image_count}张15MB图片)")
             return int(optimal_size)
         except ImportError:
             return 3 * 1024 * 1024 * 1024  # 默认3GB，为大图片预留更多

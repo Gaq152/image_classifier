@@ -22,7 +22,7 @@ def performance_monitor(func):
         start_time = time.time()
         result = func(*args, **kwargs)
         duration = (time.time() - start_time) * 1000
-        logging.info(f"[Performance] {func.__name__} executed in {duration:.2f}ms")
+        logging.debug(f"[Performance] {func.__name__} executed in {duration:.2f}ms")
         return result
     return wrapper
 
@@ -71,7 +71,7 @@ class PerformanceMonitor:
             
             # 记录详细日志
             extra_info = ' '.join([f"{k}:{v}" for k, v in kwargs.items()])
-            self.logger.info(f"[{operation_name}] 耗时:{elapsed:.1f}ms 平均:{stats['avg_time']:.1f}ms {extra_info}")
+            self.logger.debug(f"[{operation_name}] 耗时:{elapsed:.1f}ms 平均:{stats['avg_time']:.1f}ms {extra_info}")
         
     def get_performance_summary(self):
         """获取性能摘要"""
@@ -82,7 +82,7 @@ class PerformanceMonitor:
         """记录系统状态"""
         if self.enabled:
             status_str = ' '.join([f"{k}:{v}" for k, v in status_info.items()])
-            self.logger.info(f"[System] {status_str}")
+            self.logger.debug(f"[System] {status_str}")
             
     def reset_stats(self):
         """重置统计数据"""

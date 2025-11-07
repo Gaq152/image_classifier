@@ -64,12 +64,14 @@ class BadgeButton(QPushButton):
 
 
 class BadgeWidget(QWidget):
-    """包装任意widget并在其上显示红点的容器组件 - 使用叠加Label方式"""
+    """包装任意widget并在其上显示红点的容器组件 - 直接绘制红点"""
 
     def __init__(self, widget: QWidget, parent=None):
         super().__init__(parent)
         self._widget = widget
         self._badge_size = 14  # 红点大小14像素
+        self._badge_visible = False
+        self._badge_color = QColor(255, 59, 48)  # iOS红色 #FF3B30
 
         # 使用布局管理器，让widget自己决定大小
         from PyQt6.QtWidgets import QVBoxLayout
@@ -81,68 +83,48 @@ class BadgeWidget(QWidget):
         # 设置尺寸策略跟随widget
         self.setSizePolicy(widget.sizePolicy())
 
-        # 创建红点Label，叠加在widget上层
-        self._badge_label = QLabel(self)
-        self._badge_label.setFixedSize(self._badge_size, self._badge_size)
-        self._badge_label.setStyleSheet("""
-            QLabel {
-                background-color: #FF3B30;
-                border: 2px solid white;
-                border-radius: 7px;
-            }
-        """)
-        self._badge_label.hide()  # 默认隐藏
-        self._badge_label.raise_()  # 确保在最上层
+    def paintEvent(self, event):
+        """重写绘制事件，直接绘制红点"""
+        super().paintEvent(event)
 
-    def resizeEvent(self, event):
-        """窗口大小变化时更新红点位置"""
-        super().resizeEvent(event)
-        self._update_badge_position()
+        if self._badge_visible:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    def _update_badge_position(self):
-        """更新红点位置到右上角"""
-        if hasattr(self, '_badge_label'):
-            # 位置：右上角，稍微偏移
+            # 计算红点位置（右上角）
             x = self.width() - self._badge_size - 2
             y = 2
-            self._badge_label.move(x, y)
+
+            # 绘制白色边框
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            painter.setBrush(self._badge_color)
+            painter.drawEllipse(x, y, self._badge_size, self._badge_size)
+
+            painter.end()
+
+    def resizeEvent(self, event):
+        """窗口大小变化时触发重绘"""
+        super().resizeEvent(event)
+        self.update()
 
     def set_badge_visible(self, visible: bool):
         """设置红点是否可见"""
-        if hasattr(self, '_badge_label'):
-            if visible:
-                self._badge_label.show()
-                self._update_badge_position()
-            else:
-                self._badge_label.hide()
+        if self._badge_visible != visible:
+            self._badge_visible = visible
+            self.update()  # 触发重绘
 
     def is_badge_visible(self) -> bool:
         """返回红点是否可见"""
-        if hasattr(self, '_badge_label'):
-            return self._badge_label.isVisible()
-        return False
+        return self._badge_visible
 
     def set_badge_color(self, color: QColor):
         """设置红点颜色"""
-        if hasattr(self, '_badge_label'):
-            self._badge_label.setStyleSheet(f"""
-                QLabel {{
-                    background-color: {color.name()};
-                    border: 2px solid white;
-                    border-radius: {self._badge_size // 2}px;
-                }}
-            """)
+        self._badge_color = color
+        if self._badge_visible:
+            self.update()  # 触发重绘
 
     def set_badge_size(self, size: int):
         """设置红点大小"""
         self._badge_size = size
-        if hasattr(self, '_badge_label'):
-            self._badge_label.setFixedSize(size, size)
-            self._badge_label.setStyleSheet(f"""
-                QLabel {{
-                    background-color: #FF3B30;
-                    border: 2px solid white;
-                    border-radius: {size // 2}px;
-                }}
-            """)
-            self._update_badge_position()
+        if self._badge_visible:
+            self.update()  # 触发重绘

@@ -26,7 +26,8 @@ from ..core.update_utils import fetch_manifest, download_with_progress, sha256_f
 from ..utils.app_config import get_app_config
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles.theme import default_theme
-from .components.widgets.badge_button import BadgeWidget
+from .components.styles import ButtonStyles
+from .update_dialog import UpdateInfoDialog
 
 
 class AnimatedToggle(QWidget):
@@ -2461,7 +2462,7 @@ class SettingsDialog(QDialog):
         control_layout.setContentsMargins(0, 0, 0, 0)
         control_layout.setSpacing(15)
 
-        # 检查更新按钮（主要功能）
+        # 检查更新按钮
         check_update_btn = QPushButton("检查更新")
         check_update_btn.clicked.connect(self.check_for_updates)
         check_update_btn.setMinimumHeight(36)
@@ -3380,16 +3381,16 @@ class SettingsDialog(QDialog):
     def on_toast_level_changed(self, index: int):
         """Toast级别下拉框改变事件"""
         level = self.toast_level_combo.itemData(index)
-        self.logger.info(f"Toast级别下拉框改变: index={index}, level={level}")
+        self.logger.debug(f"Toast级别下拉框改变: index={index}, level={level}")
 
         # 更新配置
         self.app_config.toast_level = level
 
         # 验证配置是否更新（使用已经导入的get_app_config，避免导入方式不一致）
         verify_config = get_app_config()
-        self.logger.info(f"配置验证: self.app_config.toast_level={self.app_config.toast_level}, "
-                        f"get_app_config().toast_level={verify_config.toast_level}, "
-                        f"是否同一实例={self.app_config is verify_config}")
+        self.logger.debug(f"配置验证: self.app_config.toast_level={self.app_config.toast_level}, "
+                         f"get_app_config().toast_level={verify_config.toast_level}, "
+                         f"是否同一实例={self.app_config is verify_config}")
 
         toast_success(self, f"Toast提示级别已设置为 {level}")
 
@@ -3611,6 +3612,99 @@ class SettingsDialog(QDialog):
     def check_for_updates(self):
         """检查更新"""
         try:
+            import re
+            import subprocess
+            from ..utils.paths import get_update_dir
+            from .._version_ import compare_version, __version__
+
+            # 1. 首先检查本地是否有待安装的更新包
+            local_pending_version = None
+            local_download_path = None
+            local_batch_path = None
+
+            try:
+                update_dir = get_update_dir()
+                self.logger.debug(f"检查本地更新目录: {update_dir}")
+
+                if update_dir.exists():
+                    # 查找 update 目录下的 exe 文件
+                    exe_files = list(update_dir.glob('*.exe'))
+                    if exe_files:
+                        # 按修改时间排序，取最新的
+                        exe_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                        local_download_path = exe_files[0]
+
+                        # 从文件名提取版本号
+                        match = re.search(r'v(\d+\.\d+\.\d+)', local_download_path.name)
+                        if match:
+                            local_pending_version = match.group(1)
+
+                        # 检查是否有对应的 batch 文件
+                        batch_files = list(update_dir.glob('update.bat'))
+                        if batch_files:
+                            local_batch_path = batch_files[0]
+
+                        self.logger.info(f"检测到本地待安装更新: version={local_pending_version}, exe={local_download_path.name}")
+
+                        # 询问用户是否安装本地更新包（使用主题适配样式）
+                        msg_box = QMessageBox(self)
+                        msg_box.setWindowTitle("发现已下载更新")
+                        msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
+                        msg_box.setIcon(QMessageBox.Icon.Question)
+
+                        # 应用主题适配样式
+                        c = default_theme.colors
+                        msg_box.setStyleSheet(f"""
+                            QMessageBox {{
+                                background-color: {c.BACKGROUND_PRIMARY};
+                                color: {c.TEXT_PRIMARY};
+                                border: 1px solid {c.BORDER_MEDIUM};
+                                border-radius: 8px;
+                                font-size: 14px;
+                                min-width: 400px;
+                            }}
+                            QMessageBox QLabel {{
+                                color: {c.TEXT_PRIMARY};
+                                font-size: 14px;
+                                padding: 10px;
+                            }}
+                            QPushButton {{
+                                background-color: {c.PRIMARY};
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                padding: 10px 24px;
+                                font-size: 14px;
+                                font-weight: bold;
+                                min-width: 100px;
+                                min-height: 36px;
+                            }}
+                            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+                            QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
+                        """)
+
+                        yes_btn = msg_box.addButton("是", QMessageBox.ButtonRole.YesRole)
+                        no_btn = msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
+                        msg_box.setDefaultButton(yes_btn)
+
+                        msg_box.exec()
+
+                        if msg_box.clickedButton() == yes_btn:
+                            # 用户选择立即重启
+                            self.logger.info(f"启动批处理脚本: {local_batch_path}")
+                            subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
+                            self.logger.info("用户选择立即重启安装更新")
+                            QApplication.quit()
+                            return  # 退出程序
+                        else:
+                            # 用户选择稍后安装
+                            self.logger.info("用户选择稍后安装本地更新包")
+                            # 不继续检查线上更新，直接返回
+                            return
+            except Exception as e:
+                self.logger.debug(f"检查本地更新目录失败: {e}")
+
+            # 2. 没有本地更新包，检查线上更新
             toast_info(self, "正在检查更新...")
 
             # 获取manifest
@@ -3629,30 +3723,24 @@ class SettingsDialog(QDialog):
                 return
 
             # 比较版本
-            from .._version_ import compare_version, __version__
             cmp_result = compare_version(new_ver, __version__)
 
             if cmp_result > 0:
-                # 有新版本
-                msgBox = QMessageBox(self)
-                msgBox.setWindowTitle("发现新版本")
-                msgBox.setText(f"检测到新版本 v{new_ver}\n\n当前版本: v{__version__}\n\n是否立即下载更新？")
-                msgBox.setIcon(QMessageBox.Icon.Question)
-                yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
-                no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
-                msgBox.setDefaultButton(yes_btn)
-                msgBox.exec()
+                # 有新版本 - 显示红点并显示详细信息对话框
+                size_bytes = int(manifest.get('size_bytes', 0) or 0)
+                notes = str(manifest.get('notes', '')).strip()
 
-                if msgBox.clickedButton() == yes_btn:
-                    # 创建下载对话框
-                    download_dialog = DownloadProgressDialog(
-                        manifest=manifest,
-                        token=token,
-                        parent=self
-                    )
-                    download_dialog.exec()
-                else:
-                    toast_info(self, "已取消更新")
+                # 创建详细信息对话框
+                update_dialog = UpdateInfoDialog(
+                    new_version=new_ver,
+                    current_version=__version__,
+                    size_bytes=size_bytes,
+                    notes=notes,
+                    manifest=manifest,
+                    token=token,
+                    parent=self
+                )
+                update_dialog.exec()
             elif cmp_result == 0:
                 toast_success(self, f"当前已是最新版本 v{__version__}")
             else:
@@ -3679,7 +3767,7 @@ class SettingsDialog(QDialog):
                 if self.parent() and hasattr(self.parent(), 'image_loader'):
                     self.parent().image_loader.clear_cache()
                     toast_success(self, "SMB缓存已清除")
-                    self.logger.info("用户手动清除了SMB缓存")
+                    self.logger.warning("用户手动清除了SMB缓存")
                 else:
                     toast_warning(self, "无法访问图片加载器")
             except Exception as e:
@@ -3688,16 +3776,44 @@ class SettingsDialog(QDialog):
 
     def reset_to_defaults(self):
         """恢复默认设置"""
-        msgBox = QMessageBox(self)
-        msgBox.setWindowTitle("确认恢复默认")
-        msgBox.setText("确定要恢复所有设置到默认值吗？\n此操作不可撤销。")
-        msgBox.setIcon(QMessageBox.Icon.Warning)
-        yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
-        no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
-        msgBox.setDefaultButton(no_btn)
-        msgBox.exec()
+        c = default_theme.colors
 
-        if msgBox.clickedButton() == yes_btn:
+        # 创建消息框（与删除类别确认框样式一致）
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("⚠️ 确认恢复默认")
+        msg_box.setText("确定要恢复所有设置到默认值吗？")
+        msg_box.setInformativeText("此操作不可撤销。")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+
+        # 创建中文按钮
+        yes_button = QPushButton("是")
+        no_button = QPushButton("否")
+
+        msg_box.addButton(yes_button, QMessageBox.ButtonRole.YesRole)
+        msg_box.addButton(no_button, QMessageBox.ButtonRole.NoRole)
+
+        # 设置默认按钮为"否"
+        msg_box.setDefaultButton(no_button)
+
+        # 使用主题样式
+        message_box_style = f"""
+            QMessageBox {{
+                background-color: {c.BACKGROUND_CARD};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QMessageBox QLabel {{
+                color: {c.TEXT_PRIMARY};
+                font-size: 14px;
+            }}
+            {ButtonStyles.get_primary_button_style()}
+        """
+        msg_box.setStyleSheet(message_box_style)
+
+        # 显示对话框并处理结果
+        msg_box.exec()
+        clicked_button = msg_box.clickedButton()
+
+        if clicked_button == yes_button:
             # 恢复默认值
             self.theme_combo.setCurrentIndex(0)  # 默认浅色主题
             self.auto_theme_switch.setChecked(False)  # 默认关闭自动切换
@@ -3708,8 +3824,20 @@ class SettingsDialog(QDialog):
             self.token_input.setText("")
             self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
 
+            # 恢复日志级别和Toast级别到默认值（INFO）
+            for i in range(self.log_level_combo.count()):
+                if self.log_level_combo.itemData(i) == "INFO":
+                    self.log_level_combo.setCurrentIndex(i)
+                    break
+            for i in range(self.toast_level_combo.count()):
+                if self.toast_level_combo.itemData(i) == "INFO":
+                    self.toast_level_combo.setCurrentIndex(i)
+                    break
+
             # 保存配置（实时保存）
             self.app_config.auto_update_enabled = True
+            self.app_config.log_level = "INFO"
+            self.app_config.toast_level = "INFO"
 
             toast_success(self, "已恢复默认设置")
 

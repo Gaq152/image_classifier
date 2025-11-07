@@ -457,7 +457,7 @@ class TutorialManager:
                 # 简化：直接使用负的偏移量
                 adjusted_offset_x = -(menu_width + spacing)
 
-                self.logger.info(f"调整气泡位置以避开虚拟菜单: offset_x从{step.offset_x}调整为{adjusted_offset_x}")
+                self.logger.debug(f"调整气泡位置以避开虚拟菜单: offset_x从{step.offset_x}调整为{adjusted_offset_x}")
 
             self.logger.debug(f"开始显示气泡，offset_x={adjusted_offset_x}, offset_y={adjusted_offset_y}")
             self.logger.debug(f"目标控件geometry: {target_widget.geometry()}")
@@ -505,7 +505,7 @@ class TutorialManager:
                     secondary_pos_in_parent.y() + secondary_rect.height() // 2  # 垂直中心
                 )
 
-                self.logger.info(f"设置双箭头: bubble_center={bubble_center}, left={left_target}, right={right_target}")
+                self.logger.debug(f"设置双箭头: bubble_center={bubble_center}, left={left_target}, right={right_target}")
                 self.overlay.set_dual_arrows(bubble_center, left_target, right_target)
             else:
                 # 非双箭头模式，清除箭头
@@ -529,7 +529,7 @@ class TutorialManager:
         if not step.mock_widget_type or not step.mock_widget_content:
             return
 
-        self.logger.info(f"创建虚拟组件: {step.mock_widget_type}")
+        self.logger.debug(f"创建虚拟组件: {step.mock_widget_type}")
 
         try:
             # 创建虚拟组件
@@ -637,7 +637,7 @@ class TutorialManager:
             # 保存引用
             self.current_mock_widget = mock_widget
 
-            self.logger.info(f"虚拟组件已显示: 位置({mock_widget.x()}, {mock_widget.y()}), 大小({mock_widget.width()}x{mock_widget.height()})")
+            self.logger.debug(f"虚拟组件已显示: 位置({mock_widget.x()}, {mock_widget.y()}), 大小({mock_widget.width()}x{mock_widget.height()})")
 
         except Exception as e:
             self.logger.error(f"创建虚拟组件时出错: {e}", exc_info=True)
@@ -645,7 +645,7 @@ class TutorialManager:
     def _hide_mock_widget(self):
         """隐藏并销毁当前虚拟组件"""
         if self.current_mock_widget is not None:
-            self.logger.info("隐藏虚拟组件")
+            self.logger.debug("隐藏虚拟组件")
             self.current_mock_widget.hide()
             self.current_mock_widget.deleteLater()
             self.current_mock_widget = None
@@ -720,7 +720,7 @@ class TutorialManager:
         """
         # 特殊处理：如果要查找整个主窗口
         if widget_name == "main_window":
-            self.logger.info(f"[OK] 返回主窗口: main_window")
+            self.logger.debug(f"[OK] 返回主窗口: main_window")
             return self.main_window
 
         # 优先尝试直接通过属性访问（更可靠）
@@ -731,7 +731,7 @@ class TutorialManager:
             widget = getattr(self.main_window, widget_name)
             self.logger.debug(f"获取到的对象类型: {type(widget).__name__}, 是否为QWidget: {isinstance(widget, QWidget)}")
             if isinstance(widget, QWidget):
-                self.logger.info(f"[OK] 通过属性找到控件: {widget_name} (类型: {type(widget).__name__})")
+                self.logger.debug(f"[OK] 通过属性找到控件: {widget_name} (类型: {type(widget).__name__})")
                 self.logger.debug(f"即将return widget: {widget}, id={id(widget)}")
                 return widget
             else:
@@ -746,7 +746,7 @@ class TutorialManager:
         for widget in widgets:
             self.logger.debug(f"检查对象: {type(widget).__name__}, 是否为QWidget: {isinstance(widget, QWidget)}")
             if isinstance(widget, QWidget):
-                self.logger.info(f"[OK] 通过findChildren找到控件: {widget_name} (类型: {type(widget).__name__})")
+                self.logger.debug(f"[OK] 通过findChildren找到控件: {widget_name} (类型: {type(widget).__name__})")
                 return widget
 
         self.logger.error(f"[FAIL] 未找到控件: {widget_name}")

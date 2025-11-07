@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import (QPushButton, QLabel, QHBoxLayout, QDialog, QVBoxLay
                             QLineEdit, QMenu, QMessageBox)
 from PyQt6.QtCore import Qt
 
-from image_classifier.utils.file_operations import normalize_folder_name, retry_file_operation
-from image_classifier.utils.exceptions import FileOperationError
+from ....utils.file_operations import normalize_folder_name, retry_file_operation
+from ....utils.exceptions import FileOperationError
 from ..toast import toast_warning, toast_error, toast_floating
 from ..styles import apply_category_button_style, WidgetStyles, ButtonStyles
 
@@ -206,15 +206,15 @@ class CategoryButton(QPushButton):
             button_layout = QHBoxLayout()
             button_layout.addStretch()
 
-            cancel_button = QPushButton("取消")
-            cancel_button.setObjectName("cancelButton")
-            cancel_button.clicked.connect(dialog.reject)
-            button_layout.addWidget(cancel_button)
-
             ok_button = QPushButton("确定")
             ok_button.clicked.connect(dialog.accept)
             ok_button.setDefault(True)
             button_layout.addWidget(ok_button)
+
+            cancel_button = QPushButton("取消")
+            cancel_button.setObjectName("cancelButton")
+            cancel_button.clicked.connect(dialog.reject)
+            button_layout.addWidget(cancel_button)
 
             layout.addLayout(button_layout)
 
