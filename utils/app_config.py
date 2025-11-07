@@ -101,7 +101,7 @@ class AppConfig:
         if value in ("light", "dark"):
             self._config["theme"] = value
             self._save_config()
-            self.logger.info(f"主题已设置为: {value}")
+            self.logger.debug(f"主题已设置为: {value}")
         else:
             self.logger.warning(f"无效的主题值: {value}，应为 'light' 或 'dark'")
 
@@ -120,7 +120,16 @@ class AppConfig:
         if value in ("manual", "auto", "system"):
             self._config["theme_mode"] = value
             self._save_config()
-            self.logger.info(f"主题模式已设置为: {value}")
+
+            # 获取切换后实际生效的主题
+            if value == "auto":
+                actual_theme = self.get_auto_theme_by_time()
+            elif value == "system":
+                actual_theme = self.get_system_theme()
+            else:
+                actual_theme = self.theme
+
+            self.logger.info(f"主题模式已设置为: {value}, 当前主题: {actual_theme}")
         else:
             self.logger.warning(f"无效的主题模式值: {value}，应为 'manual', 'auto' 或 'system'")
 

@@ -2225,9 +2225,6 @@ class SettingsDialog(QDialog):
         status_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         status_layout.addWidget(status_title)
 
-        # 重新加载配置以获取最新状态
-        self.app_config.reload_config()
-
         # 确定当前状态
         if self.app_config.tutorial_completed:
             status_text = "✅ 教程已完成"
@@ -3310,9 +3307,10 @@ class SettingsDialog(QDialog):
         """自动切换复选框状态变化"""
         if checked:
             # 启用自动模式
-            self.app_config.theme_mode = "auto"
             actual_theme = self.app_config.get_auto_theme_by_time()
+            # 先设置主题，再设置模式（这样模式设置时可以正确读取新主题）
             self.app_config.theme = actual_theme
+            self.app_config.theme_mode = "auto"
             default_theme.set_theme(actual_theme)
 
             # 禁用主题下拉列表
@@ -3404,11 +3402,11 @@ class SettingsDialog(QDialog):
         self.theme_combo.blockSignals(True)
         if mode == "system":
             self.theme_combo.setCurrentIndex(2)  # 跟随系统
-            # 设置为系统模式
-            self.app_config.theme_mode = "system"
             # 获取系统主题
             actual_theme = self.app_config.get_system_theme()
+            # 先设置主题，再设置模式（这样模式设置时可以正确读取新主题）
             self.app_config.theme = actual_theme
+            self.app_config.theme_mode = "system"
             default_theme.set_theme(actual_theme)
             toast_message = f"已切换到系统模式（当前: {'亮色' if actual_theme == 'light' else '暗色'}主题）"
         else:
@@ -3418,9 +3416,9 @@ class SettingsDialog(QDialog):
             else:
                 self.theme_combo.setCurrentIndex(1)  # 深色主题
 
-            # 设置为手动模式
-            self.app_config.theme_mode = "manual"
+            # 先设置主题，再设置模式（这样模式设置时可以正确读取新主题）
             self.app_config.theme = mode
+            self.app_config.theme_mode = "manual"
             default_theme.set_theme(mode)
             toast_message = f"已切换到{'亮色' if mode == 'light' else '暗色'}主题"
         self.theme_combo.blockSignals(False)
@@ -3840,34 +3838,6 @@ class SettingsDialog(QDialog):
             self.app_config.toast_level = "INFO"
 
             toast_success(self, "已恢复默认设置")
-
-    def _sync_main_window_theme_button(self):
-        """同步主窗口主题按钮状态（防止缓存不一致）"""
-        try:
-            if not self.parent() or not hasattr(self.parent(), 'theme_button'):
-                return
-
-            # 重新加载配置确保同步
-            self.app_config.reload_config()
-            theme_mode = self.app_config.theme_mode
-            current_theme = self.app_config.theme
-
-            # 更新按钮启用状态
-            if theme_mode in ("auto", "system"):
-                self.parent().theme_button.setEnabled(False)
-                mode_name = "自动切换" if theme_mode == "auto" else "跟随系统"
-                self.parent().theme_button.setToolTip(f"已启用{mode_name}，点击查看提示")
-            else:
-                self.parent().theme_button.setEnabled(True)
-                theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
-                self.parent().theme_button.setToolTip(theme_tooltip)
-
-            # 更新按钮图标
-            theme_icon = '☾' if current_theme == "light" else '☼'
-            self.parent().theme_button.setText(theme_icon)
-        except Exception as e:
-            self.logger.error(f"同步主窗口状态失败: {e}")
-
 
     def _apply_theme(self):
         """应用主题样式"""
