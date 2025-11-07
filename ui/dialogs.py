@@ -1327,46 +1327,30 @@ class TabbedHelpDialog(QDialog):
         return f'''
         <h2 style="border-bottom: 2px solid {colors['primary']}; padding-bottom: 8px; color: {colors['text_primary']};">常见问题解答</h2>
 
-        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">文件和目录</h3>
-
-        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
-        <h4 style="color: {colors['primary']};">Q: 程序支持哪些图片格式？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 支持 JPG、JPEG、PNG、BMP、GIF、TIFF 等常见格式，区分大小写。</p>
-
-        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 可以处理子目录中的图片吗？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 是的，程序会递归扫描选定目录下的所有子目录，自动发现图片文件。</p>
-
-        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 分类后的图片存储在哪里？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 在原目录下创建以类别名命名的文件夹，图片会复制或移动到相应文件夹中。</p>
-
-        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 删除的图片会永久消失吗？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 不会，删除的图片会移动到 "remove" 目录中，可以手动恢复。</p>
-        </div>
-
         <h3 style="color: {colors['text_primary']}; margin-top: 20px;">图片显示和操作</h3>
 
         <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
         <h4 style="color: {colors['primary']};">Q: 图片显示很慢或模糊？</h4>
         <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 对于大图片和网络路径，程序会自动检测并启用性能优化模式，提供最佳的显示效果。</p>
 
-        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 如何查看图片的详细信息？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 点击图片右上角的 ℹ️ 按钮即可显示半透明的信息面板，查看图片的基本信息、尺寸属性和分类状态。点击"更多信息"可展开查看详细的文件信息。</p>
-
         <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 缩放后图片位置错乱？</h4>
         <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 按 Ctrl+F 键重置为适应窗口模式，或按 Ctrl+0 显示原始大小。</p>
+
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 删除的图片会永久消失吗？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 不会，删除的图片会移动到 "remove" 目录中。再次按 Delete 键即可撤销删除，将图片从 remove 目录恢复。</p>
         </div>
 
         <h3 style="color: {colors['text_primary']}; margin-top: 20px;">分类和管理</h3>
 
         <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 15px 0;">
-        <h4 style="color: {colors['primary']};">Q: 复制模式和移动模式有什么区别？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 复制模式保留原文件并创建副本；移动模式直接移动文件到目标位置。</p>
+        <h4 style="color: {colors['primary']};">Q: 如何撤销错误的分类操作？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> <b>单分类模式</b>：再次点击已分类的类别按钮可以撤销分类（复制模式移除该文件，移动模式文件返回原目录）。<b>多分类模式</b>：再次点击已分类的类别按钮可以移除该分类。<b>撤销删除</b>：再次按 Delete 键可以从 remove 目录恢复。</p>
 
-        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 如何撤销错误的分类操作？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> <b>单分类模式</b>：只能更改分类，不能变为未分类状态，需手动移除文件后按F5刷新。<b>多分类模式</b>：再次点击已分类的类别按钮可直接取消该分类。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 如何重新开始新手教程？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 在菜单栏点击"帮助" → "显示新手教程"即可重新启动交互式引导教程。</p>
 
-        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 类别名称有长度限制吗？</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 类别名称最长50个字符，支持中英文和常见符号，但不能包含文件系统禁用字符。</p>
+        <h4 style="color: {colors['primary']}; margin-top: 15px;">Q: 如何开启自动更新功能？</h4>
+        <p style="line-height: 1.6; color: {colors['text_primary']};"><b>A:</b> 在菜单栏点击"设置"打开设置面板，在"更新"选项中开启"自动检查更新"。程序会定期检查新版本，下载完成后提示重启更新。也可以在帮助菜单中手动点击"检查更新"。</p>
         </div>
 
         <h3 style="color: {colors['text_primary']}; margin-top: 20px;">网络存储</h3>
