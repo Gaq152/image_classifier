@@ -155,7 +155,7 @@ class TutorialOverlay(QWidget):
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"[Overlay] 设置双箭头: bubble={bubble_center}, left={left_target}, right={right_target}")
+        logger.debug(f"[Overlay] 设置双箭头: bubble={bubble_center}, left={left_target}, right={right_target}")
 
         self._arrow_start_pos = bubble_center
         self._arrow_left_target = left_target

@@ -102,13 +102,13 @@ class Toast:
             configured_weight = TOAST_LEVEL_WEIGHT.get(configured_level, 1)
             toast_weight = TOAST_LEVEL_WEIGHT.get(toast_level, 1)
 
-            # Toast过滤日志（临时使用INFO级别方便调试，正式版可改为DEBUG）
+            # Toast过滤日志（使用DEBUG级别）
             import logging
             logger = logging.getLogger(__name__)
             should_show = toast_weight >= configured_weight
-            logger.info(f"Toast过滤检查: [{toast_type.value}] 消息级别={toast_level}(权重{toast_weight}), "
-                       f"配置级别={configured_level}(权重{configured_weight}), "
-                       f"结果={'显示' if should_show else '过滤'}")
+            logger.debug(f"Toast过滤检查: [{toast_type.value}] 消息级别={toast_level}(权重{toast_weight}), "
+                        f"配置级别={configured_level}(权重{configured_weight}), "
+                        f"结果={'显示' if should_show else '过滤'}")
 
             return toast_weight >= configured_weight
         except Exception as e:

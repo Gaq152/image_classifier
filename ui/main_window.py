@@ -27,7 +27,6 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush
 from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
                                 StatisticsPanel)
-from .components.widgets.badge_button import BadgeWidget
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
 from .components.styles.theme import default_theme
@@ -935,14 +934,11 @@ class ImageClassifier(QMainWindow):
                                                      self.show_settings_dialog)
         toolbar.addWidget(settings_button)
 
-        # 帮助按钮 - 使用统一样式，包装在BadgeWidget中以支持红点标记
+        # 帮助按钮 - 使用统一样式
         help_button = self.create_toolbar_button('?', 'help_button',
                                                 '查看使用指南和快捷键',
                                                 self.show_help_dialog)
-        # 使用BadgeWidget包装帮助按钮
-        self.help_button_badge = BadgeWidget(help_button, self)
-        self.help_button_badge.set_badge_visible(False)  # 初始不显示红点
-        toolbar.addWidget(self.help_button_badge)
+        toolbar.addWidget(help_button)
     
     def create_mode_button(self, toolbar):
         """创建图标化的模式选择按钮 - 直接点击切换"""
@@ -4482,6 +4478,11 @@ class ImageClassifier(QMainWindow):
             from .dialogs import SettingsDialog
             dialog = SettingsDialog(self)
             dialog.exec()
+            # 注意：不再自动隐藏红点
+            # 红点的显示/隐藏由更新检查逻辑控制
+            # - 有待安装更新时：红点保持显示
+            # - 用户选择立即安装：隐藏红点并退出
+            # - 确认是最新版本：隐藏红点
         except Exception as e:
             self.logger.error(f"打开设置对话框失败: {e}")
             toast_error(self, f"打开设置失败: {str(e)}")
@@ -5127,9 +5128,6 @@ class ImageClassifier(QMainWindow):
                         local_batch_path = batch_files[0]
 
                     self.logger.info(f"检测到本地待安装更新: version={local_pending_version}, exe={local_download_path.name}, batch={local_batch_path}")
-                    # 显示红点标记
-                    if hasattr(self, 'help_button_badge'):
-                        self.help_button_badge.set_badge_visible(True)
         except Exception as e:
             self.logger.debug(f"检查本地更新目录失败: {e}")
 
@@ -5155,18 +5153,50 @@ class ImageClassifier(QMainWindow):
         if local_pending_version and local_download_path:
             # 有本地更新包，比较版本
             if online_version and compare_version(online_version, local_pending_version) > 0:
-                # 线上版本更新，清理旧更新包，下载新版本
-                self.logger.info(f"线上版本v{online_version}比本地v{local_pending_version}更新，清理旧包并下载新版本")
+                # 线上版本更新，清理旧更新包，提示下载新版本
+                self.logger.info(f"线上版本v{online_version}比本地v{local_pending_version}更新，清理旧包并提示下载新版本")
                 try:
                     # 删除旧更新包
                     if local_download_path.exists():
                         local_download_path.unlink()
                         self.logger.info(f"已删除旧更新包: {local_download_path}")
+                    if local_batch_path and local_batch_path.exists():
+                        local_batch_path.unlink()
+                        self.logger.info(f"已删除旧批处理脚本: {local_batch_path}")
                 except Exception as e:
                     self.logger.warning(f"清理旧更新包失败: {e}")
 
-                # 触发线上更新下载（已移除无效的调用）
-                self.logger.debug("线上更新检查已跳过")
+                # 获取完整的manifest信息并显示更新对话框
+                try:
+                    endpoint = None
+                    token = ''
+                    if self.config:
+                        endpoint = getattr(self.config, 'update_endpoint', None)
+                        token = getattr(self.config, 'update_token', '')
+                    if not endpoint:
+                        endpoint = get_manifest_url(latest=True)
+
+                    manifest = fetch_manifest(endpoint, token or None)
+                    if manifest:
+                        size_bytes = int(manifest.get('size_bytes', 0) or 0)
+                        notes = str(manifest.get('notes', '')).strip()
+
+                        # 显示更新对话框
+                        from .update_dialog import UpdateInfoDialog
+                        update_dialog = UpdateInfoDialog(
+                            new_version=online_version,
+                            current_version=__version__,
+                            size_bytes=size_bytes,
+                            notes=notes,
+                            manifest=manifest,
+                            token=token,
+                            parent=self
+                        )
+                        update_dialog.exec()
+                    else:
+                        self.logger.warning("无法获取线上更新详情")
+                except Exception as e:
+                    self.logger.error(f"处理线上更新失败: {e}")
             else:
                 # 本地更新包是最新的或线上检查失败，提示安装本地包
                 self.logger.info(f"本地更新包v{local_pending_version}是最新的，提示安装")
@@ -5185,7 +5215,7 @@ class ImageClassifier(QMainWindow):
                         local_batch_path = launch_self_update(exe_path, local_download_path)
                         self.logger.info(f"已生成批处理脚本: {local_batch_path}")
 
-                    # 创建美化的消息框
+                    # 创建主题适配的消息框
                     box = QMessageBox(self)
                     box.setWindowTitle('发现已下载更新')
                     box.setText(f'检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？')
@@ -5199,51 +5229,53 @@ class ImageClassifier(QMainWindow):
                     except Exception:
                         pass
 
-                    # 应用美化样式
-                    box.setStyleSheet("""
-                        QMessageBox {
-                            background-color: #F8F9FA;
-                            color: #2C3E50;
-                            border: 1px solid #BDC3C7;
+                    # 应用主题适配样式
+                    from .components.styles.theme import default_theme
+                    from ..utils.app_config import AppConfig
+                    config = AppConfig()
+                    default_theme.set_theme(config.theme)
+                    c = default_theme.colors
+
+                    box.setStyleSheet(f"""
+                        QMessageBox {{
+                            background-color: {c.BACKGROUND_PRIMARY};
+                            color: {c.TEXT_PRIMARY};
+                            border: 1px solid {c.BORDER_MEDIUM};
                             border-radius: 8px;
                             font-size: 14px;
-                        }
-                        QMessageBox QLabel {
-                            color: #2C3E50;
+                            min-width: 400px;
+                        }}
+                        QMessageBox QLabel {{
+                            color: {c.TEXT_PRIMARY};
                             font-size: 14px;
                             padding: 10px;
-                        }
-                        QPushButton {
-                            background-color: #3498DB;
+                        }}
+                        QPushButton {{
+                            background-color: {c.PRIMARY};
                             color: white;
                             border: none;
                             border-radius: 6px;
-                            padding: 8px 16px;
-                            font-size: 13px;
+                            padding: 10px 24px;
+                            font-size: 14px;
                             font-weight: bold;
-                            min-width: 80px;
-                        }
-                        QPushButton:hover { background-color: #2980B9; }
-                        QPushButton:pressed { background-color: #21618C; }
+                            min-width: 100px;
+                            min-height: 36px;
+                        }}
+                        QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+                        QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
                     """)
 
-                    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    # 使用自定义按钮
+                    yes_btn = box.addButton("是", QMessageBox.ButtonRole.YesRole)
+                    no_btn = box.addButton("否", QMessageBox.ButtonRole.NoRole)
+                    box.setDefaultButton(yes_btn)
 
-                    # 中文化按钮
-                    yes_btn = box.button(QMessageBox.StandardButton.Yes)
-                    no_btn = box.button(QMessageBox.StandardButton.No)
-                    if yes_btn:
-                        yes_btn.setText("立即重启")
-                    if no_btn:
-                        no_btn.setText("稍后安装")
+                    box.exec()
+                    clicked_button = box.clickedButton()
 
-                    reply = box.exec()
-                    if reply == QMessageBox.StandardButton.Yes:
+                    if clicked_button == yes_btn:
                         # 立即重启安装
                         try:
-                            # 隐藏红点（用户正在安装）
-                            if hasattr(self, 'help_button_badge'):
-                                self.help_button_badge.set_badge_visible(False)
                             self.logger.info(f"启动批处理脚本: {local_batch_path}")
                             subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
                             self.logger.info("用户选择立即重启安装更新")
@@ -5256,9 +5288,49 @@ class ImageClassifier(QMainWindow):
                 except Exception as e:
                     self.logger.debug(f"提示安装本地更新失败: {e}")
         else:
-            # 没有本地更新包，正常检查线上更新
-            # 自动检查更新（已移除无效的调用）
-            self.logger.debug("自动检查更新已跳过")
+            # 没有本地更新包，检查线上更新
+            if online_version:
+                try:
+                    # 比较版本
+                    cmp_result = compare_version(online_version, __version__)
+                    if cmp_result > 0:
+                        # 有新版本，弹窗提示
+                        self.logger.info(f"检测到新版本 v{online_version}，当前版本 v{__version__}")
+
+                        # 获取完整的manifest信息
+                        endpoint = None
+                        token = ''
+                        if self.config:
+                            endpoint = getattr(self.config, 'update_endpoint', None)
+                            token = getattr(self.config, 'update_token', '')
+                        if not endpoint:
+                            endpoint = get_manifest_url(latest=True)
+
+                        manifest = fetch_manifest(endpoint, token or None)
+                        if manifest:
+                            size_bytes = int(manifest.get('size_bytes', 0) or 0)
+                            notes = str(manifest.get('notes', '')).strip()
+
+                            # 显示更新对话框
+                            from .update_dialog import UpdateInfoDialog
+                            update_dialog = UpdateInfoDialog(
+                                new_version=online_version,
+                                current_version=__version__,
+                                size_bytes=size_bytes,
+                                notes=notes,
+                                manifest=manifest,
+                                token=token,
+                                parent=self
+                            )
+                            update_dialog.exec()
+                        else:
+                            self.logger.warning("无法获取更新详情")
+                    else:
+                        self.logger.debug(f"当前版本已是最新: v{__version__}")
+                except Exception as e:
+                    self.logger.error(f"处理线上更新失败: {e}")
+            else:
+                self.logger.debug("未获取到线上版本信息")
     
     def keyPressEvent(self, event):
         """处理键盘事件 - 优化按键处理和日志记录"""
