@@ -43,6 +43,9 @@ class EnhancedImageLabel(QLabel):
         # 创建信息按钮
         self.create_info_button()
 
+        # 创建状态标记
+        self.create_status_badge()
+
         self.logger = logging.getLogger(__name__)
 
     def create_info_button(self):
@@ -81,6 +84,128 @@ class EnhancedImageLabel(QLabel):
         except Exception as e:
             self.logger.debug(f"定位信息按钮失败: {e}")
 
+    def create_status_badge(self):
+        """创建状态标记"""
+        try:
+            from PyQt6.QtWidgets import QLabel
+            from PyQt6.QtCore import Qt
+
+            # 创建状态标签
+            self.status_badge = QLabel("", self)
+            self.status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.status_badge.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(76, 175, 80, 230);
+                    color: white;
+                    padding: 4px 10px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+            """)
+
+            # 初始隐藏
+            self.status_badge.hide()
+
+            # 定位到左上角
+            self.position_status_badge()
+
+        except Exception as e:
+            self.logger.error(f"创建状态标记失败: {e}")
+
+    def position_status_badge(self):
+        """定位状态标记到左上角"""
+        try:
+            if hasattr(self, 'status_badge') and self.status_badge:
+                x = 10
+                y = 10
+                self.status_badge.move(x, y)
+        except Exception as e:
+            self.logger.debug(f"定位状态标记失败: {e}")
+
+    def update_status_badge(self):
+        """更新状态标记显示"""
+        try:
+            if not hasattr(self, 'status_badge'):
+                return
+
+            # 获取主窗口
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'image_files'):
+                main_window = main_window.parent()
+
+            if not main_window or not hasattr(main_window, 'image_files') or not main_window.image_files:
+                self.status_badge.hide()
+                return
+
+            if main_window.current_index < 0 or main_window.current_index >= len(main_window.image_files):
+                self.status_badge.hide()
+                return
+
+            current_image_path = str(main_window.image_files[main_window.current_index])
+
+            # 获取分类状态
+            classification = main_window.classified_images.get(current_image_path)
+            is_removed = current_image_path in main_window.removed_images
+
+            if is_removed:
+                # 已移除
+                self.status_badge.setText("🗑 已移除")
+                self.status_badge.setStyleSheet("""
+                    QLabel {
+                        background-color: rgba(239, 68, 68, 230);
+                        color: white;
+                        padding: 4px 10px;
+                        border-radius: 4px;
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                """)
+                self.status_badge.adjustSize()
+                self.status_badge.show()
+            elif classification:
+                if isinstance(classification, list) and len(classification) > 0:
+                    # 多分类：显示类别列表（换行展示）
+                    categories_text = "📁 " + "\n".join(classification)
+                    self.status_badge.setText(categories_text)
+                    self.status_badge.setStyleSheet("""
+                        QLabel {
+                            background-color: rgba(59, 130, 246, 230);
+                            color: white;
+                            padding: 6px 10px;
+                            border-radius: 4px;
+                            font-size: 11px;
+                            font-weight: bold;
+                            line-height: 1.4;
+                        }
+                    """)
+                    self.status_badge.adjustSize()
+                    self.status_badge.show()
+                elif isinstance(classification, str):
+                    # 单分类：显示类别名称
+                    self.status_badge.setText(f"📁 {classification}")
+                    self.status_badge.setStyleSheet("""
+                        QLabel {
+                            background-color: rgba(59, 130, 246, 230);
+                            color: white;
+                            padding: 6px 10px;
+                            border-radius: 4px;
+                            font-size: 11px;
+                            font-weight: bold;
+                        }
+                    """)
+                    self.status_badge.adjustSize()
+                    self.status_badge.show()
+                else:
+                    # 空分类或异常
+                    self.status_badge.hide()
+            else:
+                # 未处理
+                self.status_badge.hide()
+
+        except Exception as e:
+            self.logger.error(f"更新状态标记失败: {e}")
+
     def set_image(self, pixmap):
         """设置图像"""
         try:
@@ -94,6 +219,9 @@ class EnhancedImageLabel(QLabel):
                 # 更新信息面板内容（如果存在且可见）
                 if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
                     QTimer.singleShot(100, self.update_info_panel)
+
+                # 更新状态标记
+                QTimer.singleShot(50, self.update_status_badge)
             else:
                 self.clear()
                 self.original_pixmap = None
@@ -101,6 +229,10 @@ class EnhancedImageLabel(QLabel):
                 # 隐藏信息面板（如果没有图片）
                 if hasattr(self, 'info_panel') and self.info_panel:
                     self.info_panel.hide()
+
+                # 隐藏状态标记
+                if hasattr(self, 'status_badge'):
+                    self.status_badge.hide()
 
         except Exception as e:
             self.logger.error(f"设置图像失败: {e}")
@@ -329,9 +461,10 @@ class EnhancedImageLabel(QLabel):
             # 延迟调整，避免频繁刷新
             QTimer.singleShot(50, self.fit_to_window)
 
-        # 重新定位信息按钮和面板
+        # 重新定位信息按钮、面板和状态标记
         QTimer.singleShot(10, self.position_info_button)
         QTimer.singleShot(10, self.position_info_panel)
+        QTimer.singleShot(10, self.position_status_badge)
 
     def show_image_info_panel(self):
         """显示图片信息面板"""

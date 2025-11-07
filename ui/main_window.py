@@ -3032,7 +3032,11 @@ class ImageClassifier(QMainWindow):
         
         # 异步更新统计信息和类别计数
         QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
-        
+
+        # 更新状态标记显示
+        if hasattr(self.image_label, 'update_status_badge'):
+            QTimer.singleShot(50, self.image_label.update_status_badge)
+
         # 只在单分类模式下自动移动到下一张图片
         if not self.is_multi_category:
             # 单分类模式下，自动移动到下一张
@@ -3184,7 +3188,11 @@ class ImageClassifier(QMainWindow):
         
         # 异步更新统计信息和类别计数
         QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
-        
+
+        # 更新状态标记显示
+        if hasattr(self.image_label, 'update_status_badge'):
+            QTimer.singleShot(50, self.image_label.update_status_badge)
+
         # 只在单分类模式下自动移动到下一张图片
         if not self.is_multi_category:
             # 单分类模式下，自动移动到下一张
@@ -3303,6 +3311,10 @@ class ImageClassifier(QMainWindow):
             # 更新UI和状态
             self._update_single_image_status(self.current_index, image_path)
             QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
+
+            # 更新状态标记显示
+            if hasattr(self.image_label, 'update_status_badge'):
+                QTimer.singleShot(50, self.image_label.update_status_badge)
 
             # 保持在当前图片，刷新UI显示状态
             if not self.is_multi_category:
