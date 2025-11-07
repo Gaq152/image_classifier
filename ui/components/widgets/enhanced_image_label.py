@@ -13,6 +13,7 @@ from PyQt6.QtGui import QPixmap, QPainter
 
 from ..toast import toast_floating
 from ..styles import apply_enhanced_image_label_style
+from ....utils.app_config import get_app_config
 
 
 class EnhancedImageLabel(QLabel):
@@ -24,10 +25,13 @@ class EnhancedImageLabel(QLabel):
         self.setMinimumSize(300, 200)
         apply_enhanced_image_label_style(self)
 
+        # 从配置中读取缩放限制
+        app_config = get_app_config()
+
         self.original_pixmap = None
         self.scale_factor = 1.0
-        self.min_scale = 0.1
-        self.max_scale = 3.0  # 限制最大3倍，防止卡顿
+        self.min_scale = app_config.image_zoom_min  # 从配置读取最小缩放
+        self.max_scale = app_config.image_zoom_max  # 从配置读取最大缩放
         self.scale_step = 0.2  # 增大缩放步长，减少细微调整
         self._fit_to_window_mode = True  # 默认适应窗口模式
 
@@ -46,7 +50,30 @@ class EnhancedImageLabel(QLabel):
         # 创建状态标记
         self.create_status_badge()
 
+        # 防抖定时器（用于延迟保存缩放配置）
+        self.zoom_save_timer = QTimer()
+        self.zoom_save_timer.setSingleShot(True)
+        self.zoom_save_timer.timeout.connect(self._do_save_zoom)
+
         self.logger = logging.getLogger(__name__)
+
+    def _save_current_zoom(self):
+        """延迟保存当前缩放倍数（使用防抖机制）"""
+        # 重启防抖定时器（500ms后保存）
+        self.zoom_save_timer.stop()
+        self.zoom_save_timer.start(500)
+
+    def _do_save_zoom(self):
+        """实际保存缩放倍数到配置（防抖定时器触发）"""
+        try:
+            app_config = get_app_config()
+            # 直接更新内存中的值，绕过 setter 避免立即写入磁盘
+            app_config._config["last_zoom_factor"] = self.scale_factor
+            # 保存到磁盘
+            app_config._save_config()
+            self.logger.debug(f"已保存缩放倍数: {self.scale_factor:.2f}x")
+        except Exception as e:
+            self.logger.error(f"保存缩放倍数失败: {e}")
 
     def create_info_button(self):
         """创建信息按钮"""
@@ -211,10 +238,22 @@ class EnhancedImageLabel(QLabel):
         try:
             if pixmap and not pixmap.isNull():
                 self.original_pixmap = pixmap
-                self.scale_factor = 1.0
                 self.image_offset = QPoint(0, 0)
-                self._fit_to_window_mode = True  # 新图像默认适应窗口
-                self.fit_to_window()
+
+                # 检查是否应用全局缩放倍数
+                app_config = get_app_config()
+
+                if app_config.global_zoom_enabled and app_config.last_zoom_factor != 1.0:
+                    # 应用保存的缩放倍数
+                    self.scale_factor = app_config.last_zoom_factor
+                    self._fit_to_window_mode = False
+                    self.update_display()
+                    self.logger.debug(f"应用全局缩放倍数: {self.scale_factor:.2f}x")
+                else:
+                    # 使用默认的适应窗口模式
+                    self.scale_factor = 1.0
+                    self._fit_to_window_mode = True
+                    self.fit_to_window()
 
                 # 更新信息面板内容（如果存在且可见）
                 if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
@@ -266,12 +305,13 @@ class EnhancedImageLabel(QLabel):
         """放大"""
         if self.scale_factor >= self.max_scale:
             self.logger.info("已达到最大缩放倍数，停止放大防止卡顿")
-            toast_floating(self, "📈 已达到最大缩放倍数 (3.0x)", 3000)
+            toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)", 3000)
             return
 
         self._fit_to_window_mode = False  # 手动缩放时退出适应窗口模式
         self.scale_factor = min(self.scale_factor + self.scale_step, self.max_scale)
         self.update_display()
+        self._save_current_zoom()  # 保存缩放倍数
         # 更新信息面板中的缩放信息
         if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
             QTimer.singleShot(50, self.update_info_panel)
@@ -279,12 +319,13 @@ class EnhancedImageLabel(QLabel):
     def zoom_out(self):
         """缩小"""
         if self.scale_factor <= self.min_scale:
-            toast_floating(self, "📉 已达到最小缩放倍数 (0.1x)", 3000)
+            toast_floating(self, f"📉 已达到最小缩放倍数 ({self.min_scale:.2f}x)", 3000)
             return
 
         self._fit_to_window_mode = False  # 手动缩放时退出适应窗口模式
         self.scale_factor = max(self.scale_factor - self.scale_step, self.min_scale)
         self.update_display()
+        self._save_current_zoom()  # 保存缩放倍数
         # 更新信息面板中的缩放信息
         if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
             QTimer.singleShot(50, self.update_info_panel)
@@ -294,6 +335,7 @@ class EnhancedImageLabel(QLabel):
         self.scale_factor = 1.0
         self.image_offset = QPoint(0, 0)
         self._fit_to_window_mode = True  # 重置时回到适应窗口模式
+        self._save_current_zoom()  # 保存缩放倍数（重置为1.0）
         self.fit_to_window()
 
     def scale_image(self, factor):
@@ -305,11 +347,12 @@ class EnhancedImageLabel(QLabel):
             # 限制缩放范围，防止过度放大导致卡顿
             if new_scale > self.max_scale:
                 self.logger.info(f"缩放倍数 {new_scale:.1f} 超过限制 {self.max_scale}，已限制")
-                toast_floating(self, "📈 已达到最大缩放倍数 (3.0x)", 3000)
+                toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)", 3000)
                 new_scale = self.max_scale
 
             self.scale_factor = max(self.min_scale, min(new_scale, self.max_scale))
             self.update_display()
+            self._save_current_zoom()  # 保存缩放倍数
             # 更新信息面板中的缩放信息
             if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
                 QTimer.singleShot(50, self.update_info_panel)
@@ -370,24 +413,26 @@ class EnhancedImageLabel(QLabel):
                     self._fit_to_window_mode = False
                     self.scale_factor = min(self.scale_factor + scale_step, self.max_scale)
                     self.update_display()
+                    self._save_current_zoom()  # 保存缩放倍数
                     # 更新信息面板中的缩放信息
                     if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
                         QTimer.singleShot(50, self.update_info_panel)
                 else:
                     # 已达到最大缩放，显示提示
-                    toast_floating(self, "📈 已达到最大缩放倍数 (3.0x)", 3000)
+                    toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)", 3000)
             else:
                 # 向下滚动 - 缩小
                 if self.scale_factor > self.min_scale:
                     self._fit_to_window_mode = False
                     self.scale_factor = max(self.scale_factor - scale_step, self.min_scale)
                     self.update_display()
+                    self._save_current_zoom()  # 保存缩放倍数
                     # 更新信息面板中的缩放信息
                     if hasattr(self, 'info_panel') and self.info_panel and self.info_panel.isVisible():
                         QTimer.singleShot(50, self.update_info_panel)
                 else:
                     # 已达到最小缩放，显示提示
-                    toast_floating(self, "📉 已达到最小缩放倍数 (0.1x)", 3000)
+                    toast_floating(self, f"📉 已达到最小缩放倍数 ({self.min_scale:.2f}x)", 3000)
 
         except Exception as e:
             self.logger.error(f"滚轮事件处理失败: {e}")
@@ -657,7 +702,7 @@ class EnhancedImageLabel(QLabel):
                 self.info_labels['dimensions'].setText("图片尺寸: 未知")
 
             # 当前缩放
-            self.info_labels['scale'].setText(f"当前缩放: {self.scale_factor:.1f}x")
+            self.info_labels['scale'].setText(f"当前缩放: {self.scale_factor:.2f}x")
 
             # 分类状态
             image_path_str = str(current_image_path)

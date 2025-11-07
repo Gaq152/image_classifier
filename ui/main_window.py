@@ -5207,8 +5207,23 @@ class ImageClassifier(QMainWindow):
                 except Exception as e:
                     self.logger.error(f"处理线上更新失败: {e}")
             else:
-                # 本地更新包是最新的或线上检查失败，提示安装本地包
-                self.logger.info(f"本地更新包v{local_pending_version}是最新的，提示安装")
+                # 本地更新包是最新的或线上检查失败，检查是否需要安装
+                # 如果本地更新包版本等于当前版本，删除更新包（已经是这个版本了）
+                if local_pending_version == __version__:
+                    self.logger.info(f"本地更新包v{local_pending_version}与当前版本相同，清理更新包")
+                    try:
+                        if local_download_path.exists():
+                            local_download_path.unlink()
+                            self.logger.info(f"已删除同版本更新包: {local_download_path}")
+                        if local_batch_path and local_batch_path.exists():
+                            local_batch_path.unlink()
+                            self.logger.info(f"已删除批处理脚本: {local_batch_path}")
+                    except Exception as e:
+                        self.logger.warning(f"清理同版本更新包失败: {e}")
+                    return  # 不提示安装
+
+                # 本地更新包版本高于当前版本，提示安装
+                self.logger.info(f"本地更新包v{local_pending_version}比当前版本v{__version__}更新，提示安装")
                 try:
                     # 如果批处理脚本不存在，需要重新生成
                     if not local_batch_path or not local_batch_path.exists():
