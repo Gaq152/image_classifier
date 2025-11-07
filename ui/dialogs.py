@@ -3246,42 +3246,79 @@ class SettingsDialog(QDialog):
         zoom_max_label = QLabel("最大缩放倍数：")
         zoom_controls_layout.addWidget(zoom_max_label)
 
+        # 创建包含spinbox和外部按钮的容器
+        zoom_max_container = QHBoxLayout()
+        zoom_max_container.setSpacing(2)
+        zoom_max_container.setContentsMargins(0, 0, 0, 0)
+
         self.zoom_max_spinbox = QDoubleSpinBox()
         self.zoom_max_spinbox.setDecimals(1)
         self.zoom_max_spinbox.setRange(1.0, 20.0)
         self.zoom_max_spinbox.setSingleStep(0.5)
         self.zoom_max_spinbox.setValue(self.app_config.image_zoom_max)
-        self.zoom_max_spinbox.setSuffix(" 倍")
-        self.zoom_max_spinbox.setMinimumHeight(40)
+        self.zoom_max_spinbox.setMinimumHeight(32)
+        self.zoom_max_spinbox.setMinimumWidth(80)  # 增加宽度以完整显示数字
+        self.zoom_max_spinbox.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)  # 隐藏内置按钮
         self.zoom_max_spinbox.setToolTip("设置图片缩放的最大倍数（范围：1.0-20.0）")
         # 禁用滚轮调整
         self.zoom_max_spinbox.wheelEvent = lambda event: None
         self.zoom_max_spinbox.valueChanged.connect(self.on_zoom_max_changed)
-        zoom_controls_layout.addWidget(self.zoom_max_spinbox)
+        # 美化样式
+        self._apply_spinbox_style(self.zoom_max_spinbox)
+        zoom_max_container.addWidget(self.zoom_max_spinbox)
+
+        # 外部上下按钮（垂直排列）
+        zoom_max_buttons = self._create_spinbox_buttons(self.zoom_max_spinbox)
+        zoom_max_container.addLayout(zoom_max_buttons)
+
+        zoom_controls_layout.addLayout(zoom_max_container)
+
+        # "倍" 标签
+        zoom_max_unit = QLabel("倍")
+        zoom_max_unit.setStyleSheet("color: #757575; font-size: 13px;")
+        zoom_controls_layout.addWidget(zoom_max_unit)
 
         # 最小缩放倍数
         zoom_min_label = QLabel("最小缩放倍数：")
         zoom_controls_layout.addWidget(zoom_min_label)
+
+        # 创建包含spinbox和外部按钮的容器
+        zoom_min_container = QHBoxLayout()
+        zoom_min_container.setSpacing(2)
+        zoom_min_container.setContentsMargins(0, 0, 0, 0)
 
         self.zoom_min_spinbox = QDoubleSpinBox()
         self.zoom_min_spinbox.setDecimals(2)
         self.zoom_min_spinbox.setRange(0.01, 1.0)
         self.zoom_min_spinbox.setSingleStep(0.01)
         self.zoom_min_spinbox.setValue(self.app_config.image_zoom_min)
-        self.zoom_min_spinbox.setSuffix(" 倍")
-        self.zoom_min_spinbox.setMinimumHeight(40)
+        self.zoom_min_spinbox.setMinimumHeight(32)
+        self.zoom_min_spinbox.setMinimumWidth(80)  # 增加宽度以完整显示数字
+        self.zoom_min_spinbox.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)  # 隐藏内置按钮
         self.zoom_min_spinbox.setToolTip("设置图片缩放的最小倍数（范围：0.01-1.0）")
         # 禁用滚轮调整
         self.zoom_min_spinbox.wheelEvent = lambda event: None
         self.zoom_min_spinbox.valueChanged.connect(self.on_zoom_min_changed)
-        zoom_controls_layout.addWidget(self.zoom_min_spinbox)
+        # 美化样式
+        self._apply_spinbox_style(self.zoom_min_spinbox)
+        zoom_min_container.addWidget(self.zoom_min_spinbox)
+
+        # 外部上下按钮（垂直排列）
+        zoom_min_buttons = self._create_spinbox_buttons(self.zoom_min_spinbox)
+        zoom_min_container.addLayout(zoom_min_buttons)
+
+        zoom_controls_layout.addLayout(zoom_min_container)
+
+        # "倍" 标签
+        zoom_min_unit = QLabel("倍")
+        zoom_min_unit.setStyleSheet("color: #757575; font-size: 13px;")
+        zoom_controls_layout.addWidget(zoom_min_unit)
 
         zoom_controls_layout.addStretch()
         layout.addLayout(zoom_controls_layout)
 
         layout.addStretch()
         return group
-
 
     def on_theme_combo_changed(self, index: int):
         """主题下拉列表变化处理"""
@@ -4212,6 +4249,96 @@ class SettingsDialog(QDialog):
         self.style().unpolish(self)
         self.style().polish(self)
         self.update()
+
+    def _apply_spinbox_style(self, spinbox):
+        """为spinbox应用美化样式（无按钮版本）"""
+        c = default_theme.colors
+
+        spinbox.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_PRIMARY};
+                border: 2px solid {c.BORDER_MEDIUM};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QDoubleSpinBox:hover {{
+                border-color: {c.PRIMARY};
+            }}
+            QDoubleSpinBox:focus {{
+                border-color: {c.PRIMARY};
+                background-color: {c.BACKGROUND_CARD};
+            }}
+        """)
+
+    def _create_spinbox_buttons(self, spinbox):
+        """创建外部垂直排列的上下按钮"""
+        c = default_theme.colors
+
+        # 按钮容器（垂直布局）
+        buttons_layout = QVBoxLayout()
+        buttons_layout.setSpacing(0)
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 上箭头按钮
+        up_button = QPushButton("▲")
+        up_button.setFixedSize(18, 16)
+        up_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        up_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_SECONDARY};
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-top-right-radius: 3px;
+                border-bottom: none;
+                font-size: 9px;
+                padding: 0px;
+                min-height: 0px;
+                max-height: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.PRIMARY};
+                color: white;
+            }}
+        """)
+        up_button.clicked.connect(lambda: spinbox.stepUp())
+        buttons_layout.addWidget(up_button)
+
+        # 下箭头按钮
+        down_button = QPushButton("▼")
+        down_button.setFixedSize(18, 16)
+        down_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        down_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_SECONDARY};
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-bottom-right-radius: 3px;
+                border-top: none;
+                font-size: 9px;
+                padding: 0px;
+                min-height: 0px;
+                max-height: 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.PRIMARY};
+                color: white;
+            }}
+        """)
+        down_button.clicked.connect(lambda: spinbox.stepDown())
+        buttons_layout.addWidget(down_button)
+
+        return buttons_layout
 
     def showEvent(self, event):
         """对话框显示时居中并同步配置"""
