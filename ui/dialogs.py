@@ -1023,7 +1023,7 @@ class TabbedHelpDialog(QDialog):
 
         <h3 style="color: {colors['text_primary']}; margin-top: 20px;">支持的图片格式</h3>
         <p style="background-color: {colors['bg_secondary']}; padding: 10px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">
-        JPG, JPEG, PNG, BMP, GIF, TIFF
+        JPG, JPEG, PNG, BMP, GIF, TIFF, WebP
         </p>
 
         <h3 style="color: {colors['text_primary']}; margin-top: 20px;">核心操作</h3>
@@ -1068,22 +1068,18 @@ class TabbedHelpDialog(QDialog):
         <h3 style="color: {colors['text_primary']}; margin-top: 20px;">高效使用技巧</h3>
         <ul style="line-height: 1.8; color: {colors['text_primary']};">
         <li><b>使用快捷键</b>：按数字键 1-9 快速分类到对应类别</li>
-        <li><b>文件模式切换</b>：点击工具栏的"复制模式"/"移动模式"按钮切换</li>
-        <li><b>多分类模式</b>：点击"→ 单分类模式"按钮开启多分类，一图多标签</li>
+        <li><b>文件模式切换</b>：点击工具栏的"⧉/✂"按钮切换复制/移动模式</li>
+        <li><b>多分类模式</b>：点击工具栏的"→/⇶"按钮切换单/多分类</li>
+        <li><b>撤销分类</b>：单分类模式下，再次点击已分类的类别可撤销分类</li>
+        <li><b>撤销删除</b>：已删除的图片再次按 Delete 键可从移出目录恢复</li>
         <li><b>回车确认</b>：选中类别后按 Enter 键快速分类</li>
         <li><b>自动同步</b>：程序会自动检测外部文件变化</li>
         <li><b>状态保存</b>：工作状态会自动保存，重启后恢复</li>
+        <li><b>主题切换</b>：在设置中可切换亮色/暗色主题，或设置跟随系统</li>
+        <li><b>缩放配置</b>：可在设置中自定义图片缩放范围和全局缩放行为</li>
+        <li><b>新手教程</b>：首次使用时会自动引导，也可在帮助菜单重新开始</li>
+        <li><b>自动更新</b>：支持在线检查和下载最新版本（需联网）</li>
         </ul>
-
-        <div style="background-color: {colors['bg_hover']}; padding: 15px; border-left: 4px solid {colors['primary']}; margin: 20px 0;">
-        <h4 style="color: {colors['primary']}; margin-top: 0;">专业提示</h4>
-        <p style="line-height: 1.6; color: {colors['text_primary']};">
-        • 使用右键点击类别按钮可以自定义快捷键<br>
-        • 按 F5 键可以刷新文件列表同步外部变化<br>
-        • 按 Ctrl+F 键可以让图片适应窗口大小<br>
-        • 支持批量添加类别，用逗号分隔多个类别名<br>
-        • <b>多分类模式</b>：再次点击已分类的类别可取消分类<br>
-        • <b>高亮按钮</b>：表示当前图片属于该类别（多分类模式下）
         </p>
         </div>
         '''
