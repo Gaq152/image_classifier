@@ -561,7 +561,7 @@ class HighPerformanceImageLoader(QThread):
             cached_pixmap = self._get_from_cache(cache_key)
             if self._is_valid_pixmap(cached_pixmap):
                 load_time = (time.time() - load_start) * 1000
-                self.logger.info(f"[并行加载-缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
+                self.logger.debug(f"[并行加载-缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
                 return {'image_data': cached_pixmap, 'cached': True, 'load_time': load_time}
             
             # 根据文件大小和环境选择加载策略
@@ -596,10 +596,10 @@ class HighPerformanceImageLoader(QThread):
                     self.load_times = self.load_times[-100:]
                     
                 avg_load_time = sum(self.load_times) / len(self.load_times)
-                
-                self.logger.info(f"[并行加载-成功] {Path(image_path).name} {file_size_mb:.1f}MB "
+
+                self.logger.debug(f"[并行加载-成功] {Path(image_path).name} {file_size_mb:.1f}MB "
                                f"耗时:{load_time:.1f}ms 平均:{avg_load_time:.1f}ms 优先级:{is_priority}")
-                
+
                 return {'image_data': pixmap, 'cached': False, 'load_time': load_time}
             else:
                 raise ImageLoadError("图片加载失败")
