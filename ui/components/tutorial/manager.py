@@ -281,23 +281,46 @@ class TutorialManager:
             # 步骤14: 主题切换
             TutorialStep(
                 title="主题切换",
-                content='点击这个<b>「☾/☼」</b>按钮可以切换明暗主题：<br><br>'
+                content='点击这个<b>「☾/☼」</b>按钮可以快速切换明暗主题：<br><br>'
                         '• <b>☾</b>：切换到暗色主题<br>'
                         '• <b>☼</b>：切换到亮色主题<br><br>'
-                        '根据你的使用习惯选择合适的主题。',
+                        '💡 更多主题设置（如自动切换、跟随系统）可以在<b>设置面板</b>中配置。',
                 target_widget_name="theme_button",
                 arrow_position=ArrowPosition.TOP,
                 highlight_padding=12,
                 offset_y=20
             ),
 
-            # 步骤15: 帮助按钮
+            # 步骤15: 设置面板
+            TutorialStep(
+                title="设置面板",
+                content='点击这个<b>「⚙」</b>按钮可以打开设置面板，配置应用的各项设置：<br><br>'
+                        '• <b>⚙️ 基本设置</b>：外观主题、教程状态、自动更新<br>'
+                        '• <b>🔧 高级设置</b>：日志级别、Toast提示、目录设置<br><br>'
+                        '你还可以在这里找到<b>「重新开始教程」</b>按钮，随时复习教程内容。',
+                target_widget_name="settings_button",
+                arrow_position=ArrowPosition.TOP,
+                highlight_padding=12,
+                offset_y=20,
+                mock_widget_type="tabbed_dialog",
+                mock_widget_content={
+                    "title": "设置",
+                    "tabs": ["⚙️ 基本设置", "🔧 高级设置"],
+                    "buttons": ["恢复默认", "重新开始教程"]
+                },
+                mock_widget_position="center"
+            ),
+
+            # 步骤16: 帮助按钮
             TutorialStep(
                 title="获取帮助",
                 content='点击这个<b>「?」</b>按钮可以随时查看：<br><br>'
-                        '• 完整的使用指南<br>'
-                        '• 快捷键列表<br>'
-                        '• 重新开始本教程',
+                        '• <b>快速入门</b>：基础操作指南<br>'
+                        '• <b>使用指南</b>：详细功能说明<br>'
+                        '• <b>高级功能</b>：进阶使用技巧<br>'
+                        '• <b>常见问题</b>：常见问题解答<br>'
+                        '• <b>关于</b>：版本信息和更新日志<br><br>'
+                        '如需重新学习教程，请到<b>设置面板</b>中操作。',
                 target_widget_name="help_button",
                 arrow_position=ArrowPosition.TOP,
                 highlight_padding=12,
@@ -306,12 +329,12 @@ class TutorialManager:
                 mock_widget_content={
                     "title": "帮助和关于",
                     "tabs": ["快速入门", "使用指南", "高级功能", "常见问题", "关于"],
-                    "buttons": ["🗑️ 清理SMB缓存", "📖 重新开始教程"]
+                    "buttons": []
                 },
                 mock_widget_position="center"
             ),
 
-            # 步骤16: 快捷键
+            # 步骤17: 快捷键
             TutorialStep(
                 title="快捷键操作",
                 content='使用键盘快捷键可以大幅提升分类效率：<br><br>'
@@ -328,13 +351,13 @@ class TutorialManager:
                 offset_y=100
             ),
 
-            # 步骤17: 完成
+            # 步骤18: 完成
             TutorialStep(
                 title="教程完成！",
                 content='恭喜你完成了所有教程！<br><br>'
                         '现在你已经掌握了图像分类工具的所有功能。<br><br>'
                         '开始整理你的图片吧！<br><br>'
-                        '如需再次查看教程，可以在帮助对话框中点击<b>「重新开始教程」</b>按钮。',
+                        '如需再次查看教程，可以在<b>设置面板</b>中点击<b>「重新开始教程」</b>按钮。',
                 target_widget_name="main_window",
                 arrow_position=ArrowPosition.TOP,
                 offset_y=100
