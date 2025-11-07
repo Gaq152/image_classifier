@@ -1164,8 +1164,8 @@ class ImageClassifier(QMainWindow):
             extra_info = ""
             for key, value in kwargs.items():
                 extra_info += f" {key}:{value}"
-            
-            self.logger.info(base_info + extra_info)
+
+            self.logger.debug(base_info + extra_info)
             
         except Exception as e:
             self.logger.debug(f"性能日志记录失败: {e}")
