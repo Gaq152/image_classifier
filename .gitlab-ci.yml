@@ -141,30 +141,37 @@ release:
       artifacts: true
   script:
     - echo "创建 GitLab Release..."
+    # 获取 tag 所在的分支（用于 CHANGELOG 链接）
+    - BRANCH=$(git branch -r --contains $CI_COMMIT_TAG | grep -o 'origin/[^[:space:]]*' | head -1 | sed 's/origin\///' || echo "main")
+    - echo "检测到分支: $BRANCH"
+    - echo "CHANGELOG_BRANCH=$BRANCH" > release_branch.env
+  artifacts:
+    reports:
+      dotenv: release_branch.env
   release:
     tag_name: $CI_COMMIT_TAG
     name: '图像分类工具 $CI_COMMIT_TAG'
     description: |
       ## 🚀 图像分类工具 $CI_COMMIT_TAG 发布
-      
+
       ### 📥 下载链接
       - **Windows 版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME)
       - **最新版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/latest/$RELEASE_FILENAME)
-      
+
       ### 📋 系统要求
       - **操作系统**: Windows 7 及以上版本
       - **内存**: 4GB RAM 以上
       - **存储**: 200MB 可用空间
-      
+
       ### 🎯 主要功能
       - 🖼️ 支持多种图片格式
       - 📁 智能分类管理
       - ⌨️ 丰富快捷键支持
       - 🔄 复制/移动双模式
       - 🎨 现代化用户界面
-      
+
       ### 📝 更新说明
-      详细更新内容请查看 [CHANGELOG.md](https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/blob/main/CHANGELOG.md)
+      详细更新内容请查看 [CHANGELOG.md](https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/blob/$CHANGELOG_BRANCH/CHANGELOG.md)
     
     assets:
       links:
