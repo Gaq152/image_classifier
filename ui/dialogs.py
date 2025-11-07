@@ -746,8 +746,6 @@ class TabbedHelpDialog(QDialog):
                                     text_browser.setHtml(self._generate_quick_start_html())
                                 elif tab_title == '使用指南':
                                     text_browser.setHtml(self._generate_help_html())
-                                elif tab_title == '高级功能':
-                                    text_browser.setHtml(self._generate_advanced_html())
                                 elif tab_title == '常见问题':
                                     text_browser.setHtml(self._generate_faq_html())
                                 elif tab_title == '关于':
@@ -847,10 +845,6 @@ class TabbedHelpDialog(QDialog):
             # 添加详细帮助标签页
             help_tab = self.create_help_tab()
             tab_widget.addTab(help_tab, '使用指南')
-
-            # 添加高级功能标签页
-            advanced_tab = self.create_advanced_tab()
-            tab_widget.addTab(advanced_tab, '高级功能')
 
             # 添加常见问题标签页
             faq_tab = self.create_faq_tab()
@@ -1157,7 +1151,7 @@ class TabbedHelpDialog(QDialog):
         <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">放大图片</td>
         <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">滚轮向上/菜单</td>
         <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">Ctrl + =</td>
-        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">放大图片，最大3倍</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">放大图片，最大倍数可在设置中配置（默认3倍，最大20倍）</td>
         </tr>
         <tr>
         <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">缩小图片</td>
@@ -1185,6 +1179,8 @@ class TabbedHelpDialog(QDialog):
         <li><b>移动模式</b>：直接移动文件到目标类别文件夹</li>
         <li><b>分类方法</b>：双击类别按钮、使用快捷键或按回车键</li>
         <li><b>多分类模式</b>：同一张图片可分配到多个类别</li>
+        <li><b>删除图片</b>：按 Delete 键将图片移动到 "remove" 文件夹</li>
+        <li><b>撤销操作</b>：支持撤销分类（单/多分类）和撤销删除，再次点击已分类类别或已删除图片的 Delete 键即可撤销</li>
         </ul>
 
         <h4 style="color: {colors['text_primary']};">分类模式详解</h4>
@@ -1202,7 +1198,7 @@ class TabbedHelpDialog(QDialog):
         <h5 style="color: {colors['primary']}; margin-top: 0;">多分类模式（新功能）</h5>
         <ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {colors['text_primary']};">
         <li><b>灵活分类</b>：一张图片可以同时属于多个类别</li>
-        <li><b>切换方式</b>：点击工具栏"→ 单分类模式"按钮切换</li>
+        <li><b>切换方式</b>：点击工具栏的"→/⇶"按钮切换单/多分类</li>
         <li><b>分类操作</b>：点击类别按钮添加分类，再次点击取消分类</li>
         <li><b>视觉反馈</b>：多分类的类别按钮显示蓝色背景</li>
         <li><b>应用场景</b>：标签化管理，如"风景+日落"、"人物+室内"等</li>
@@ -1222,7 +1218,7 @@ class TabbedHelpDialog(QDialog):
         <tr style="background-color: {colors['bg_hover']};">
         <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">已分类的类别</td>
         <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">从列表中移除（取消分类）</td>
-        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">不执行操作</td>
+        <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">撤销分类（复制模式移除该文件，移动模式文件返回原目录）</td>
         </tr>
         <tr>
         <td style="padding: 8px; border: 1px solid {colors['border']}; color: {colors['text_primary']};">其他类别</td>
@@ -1269,10 +1265,31 @@ class TabbedHelpDialog(QDialog):
         </ul>
 
         <h3 style="color: {colors['text_primary']}; margin-top: 20px;">高级设置</h3>
+
+        <h4 style="color: {colors['text_primary']};">快捷键系统</h4>
         <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>性能优化</b>：针对大量图片的性能优化</li>
-        <li><b>网络优化</b>：SMB/NAS网络存储专项优化</li>
-        <li><b>缓存管理</b>：智能图片缓存提高浏览速度</li>
+        <li><b>自动分配</b>：数字键 1-9 和字母键 a-z 会自动分配给前 35 个类别</li>
+        <li><b>手动设置</b>：右键类别按钮选择"设置快捷键"可自定义</li>
+        <li><b>组合键</b>：支持 Ctrl、Alt、Shift 组合键，需手动设置</li>
+        <li><b>冲突检测</b>：设置快捷键时会自动检测冲突，避开系统保留快捷键</li>
+        <li><b>排序模式</b>：支持按类别名称或快捷键顺序排列</li>
+        </ul>
+
+        <h4 style="color: {colors['text_primary']};">性能优化</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
+        <li><b>智能预加载</b>：自动预加载下一张图片提高浏览速度</li>
+        <li><b>内存管理</b>：智能释放不需要的图片内存，减少占用</li>
+        <li><b>多线程处理</b>：后台线程处理文件操作，界面保持流畅</li>
+        <li><b>大图片优化</b>：自动检测大图并优化加载策略</li>
+        <li><b>批量处理</b>：支持高效处理数千张图片</li>
+        </ul>
+
+        <h4 style="color: {colors['text_primary']};">网络存储优化</h4>
+        <ul style="line-height: 1.8; color: {colors['text_primary']};">
+        <li><b>SMB/NAS 支持</b>：支持 \\\\server\\share 格式的网络路径</li>
+        <li><b>网络缓存</b>：智能缓存网络图片提高访问速度</li>
+        <li><b>自动重试</b>：网络操作失败时自动重试3次</li>
+        <li><b>连接优化</b>：维护网络连接池提高效率</li>
         </ul>
         '''
 
@@ -1302,120 +1319,7 @@ class TabbedHelpDialog(QDialog):
         layout.addWidget(text_browser)
 
         return widget
-        
-    def _generate_advanced_html(self):
-        """生成高级功能标签页的HTML内容"""
-        colors = self._get_html_colors()
 
-        return f'''
-        <h2 style="border-bottom: 2px solid {colors['primary']}; padding-bottom: 8px; color: {colors['text_primary']};">高级功能详解</h2>
-
-        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">分类操作</h3>
-
-        <h4 style="color: {colors['text_primary']};">当前分类功能</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>单张分类</b>：双击类别按钮分类当前图片</li>
-        <li><b>快捷键分类</b>：使用数字键1-9或自定义快捷键</li>
-        <li><b>多分类模式</b>：一张图片可同时分配到多个类别</li>
-        <li><b>快速导航</b>：使用方向键浏览图片和选择类别</li>
-        </ul>
-
-        <h4 style="color: {colors['text_primary']};">类别管理</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>批量添加</b>：输入多个类别名，用逗号分隔</li>
-        <li><b>快捷键绑定</b>：右键类别按钮自定义快捷键</li>
-        <li><b>类别排序</b>：拖拽调整类别显示顺序</li>
-        <li><b>状态统计</b>：实时显示每个类别的图片数量</li>
-        </ul>
-
-        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">自定义功能</h3>
-
-        <h4 style="color: {colors['text_primary']};">快捷键自定义</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>数字键</b>：1-9 对应前9个类别</li>
-        <li><b>字母键</b>：a-z 可自定义对应不同类别</li>
-        <li><b>功能键</b>：F1-F12 可绑定特殊操作</li>
-        <li><b>组合键</b>：支持 Ctrl、Alt、Shift 组合</li>
-        </ul>
-
-        <h4 style="color: {colors['text_primary']};">界面特性</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>响应式布局</b>：界面自动适应窗口大小</li>
-        <li><b>分割面板</b>：可拖拽调整各区域大小</li>
-        <li><b>状态保存</b>：界面布局自动保存和恢复</li>
-        </ul>
-
-        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">网络存储优化</h3>
-
-        <h4 style="color: {colors['text_primary']};">SMB/NAS 支持</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>网络路径</b>：支持 \\\\server\\share 格式</li>
-        <li><b>连接池</b>：维护网络连接池提高效率</li>
-        <li><b>操作重试</b>：网络操作失败时自动重试</li>
-        <li><b>缓存优化</b>：智能缓存网络图片</li>
-        </ul>
-
-        <h4 style="color: {colors['text_primary']};">性能优化</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>预加载</b>：提前加载下一张图片</li>
-        <li><b>内存管理</b>：智能释放不需要的图片内存</li>
-        <li><b>多线程</b>：后台线程处理文件操作</li>
-        <li><b>进度缓存</b>：缓存处理进度避免重复扫描</li>
-        </ul>
-
-        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">同步与备份</h3>
-
-        <h4 style="color: {colors['text_primary']};">文件同步</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>实时监控</b>：监控目录变化自动更新</li>
-        <li><b>增量同步</b>：只处理变化的文件</li>
-        <li><b>冲突解决</b>：智能处理文件名冲突</li>
-        <li><b>分类撤销</b>：多分类模式支持快速取消分类</li>
-        </ul>
-
-        <h4 style="color: {colors['text_primary']};">状态备份</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>自动保存</b>：定期保存工作状态</li>
-        <li><b>手动备份</b>：导出当前分类状态</li>
-        <li><b>状态恢复</b>：从备份文件恢复工作状态</li>
-        </ul>
-
-        <h3 style="color: {colors['text_primary']}; margin-top: 20px;">图片分析</h3>
-
-        <h4 style="color: {colors['text_primary']};">图片信息</h4>
-        <ul style="line-height: 1.8; color: {colors['text_primary']};">
-        <li><b>EXIF 数据</b>：显示拍摄时间、相机信息等</li>
-        <li><b>文件属性</b>：大小、分辨率、格式信息</li>
-        </ul>
-        '''
-
-    def create_advanced_tab(self):
-        """创建高级功能标签页"""
-
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        text_browser = QTextBrowser()
-
-        # 应用主题样式
-        c = default_theme.colors
-        text_browser.setStyleSheet(f"""
-            QTextBrowser {{
-                background-color: {c.BACKGROUND_PRIMARY};
-                color: {c.TEXT_PRIMARY};
-                font-size: 13px;
-                line-height: 1.6;
-                selection-background-color: {c.PRIMARY};
-                selection-color: white;
-                border: none;
-            }}
-        """)
-
-        text_browser.setHtml(self._generate_advanced_html())
-        layout.addWidget(text_browser)
-
-        return widget
-        
     def _generate_faq_html(self):
         """生成常见问题标签页的HTML内容"""
         colors = self._get_html_colors()
