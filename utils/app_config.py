@@ -40,7 +40,12 @@ class AppConfig:
             "last_opened_directory": "",  # 最后打开的图片目录
             # 日志和提示相关配置
             "log_level": "INFO",  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
-            "toast_level": "INFO"  # Toast提示级别：DEBUG, INFO, WARNING, ERROR
+            "toast_level": "INFO",  # Toast提示级别：DEBUG, INFO, WARNING, ERROR
+            # 图像预览相关配置
+            "image_zoom_max": 3.0,  # 最大缩放倍数（范围：1.0-20.0）
+            "image_zoom_min": 0.1,  # 最小缩放倍数（范围：0.01-1.0）
+            "global_zoom_enabled": False,  # 是否启用全局缩放（将缩放倍数应用到所有图片）
+            "last_zoom_factor": 1.0  # 最后使用的缩放倍数（自动记录）
         }
 
     def _load_config(self) -> Dict[str, Any]:
@@ -333,6 +338,63 @@ class AppConfig:
             self.logger.info(f"Toast提示级别已设置为: {value.upper()}")
         else:
             self.logger.warning(f"无效的Toast级别: {value}，已忽略")
+
+    # ==================== 图像预览配置 ====================
+
+    @property
+    def image_zoom_max(self) -> float:
+        """获取最大缩放倍数"""
+        return self._config.get("image_zoom_max", 3.0)
+
+    @image_zoom_max.setter
+    def image_zoom_max(self, value: float):
+        """设置最大缩放倍数"""
+        # 限制范围：1.0 - 20.0
+        if 1.0 <= value <= 20.0:
+            self._config["image_zoom_max"] = value
+            self._save_config()
+            self.logger.info(f"最大缩放倍数已设置为: {value}")
+        else:
+            self.logger.warning(f"无效的最大缩放倍数: {value}，应在 1.0-20.0 之间")
+
+    @property
+    def image_zoom_min(self) -> float:
+        """获取最小缩放倍数"""
+        return self._config.get("image_zoom_min", 0.1)
+
+    @image_zoom_min.setter
+    def image_zoom_min(self, value: float):
+        """设置最小缩放倍数"""
+        # 限制范围：0.01 - 1.0
+        if 0.01 <= value <= 1.0:
+            self._config["image_zoom_min"] = value
+            self._save_config()
+            self.logger.info(f"最小缩放倍数已设置为: {value}")
+        else:
+            self.logger.warning(f"无效的最小缩放倍数: {value}，应在 0.01-1.0 之间")
+
+    @property
+    def global_zoom_enabled(self) -> bool:
+        """获取是否启用全局缩放（将缩放倍数应用到所有图片）"""
+        return self._config.get("global_zoom_enabled", False)
+
+    @global_zoom_enabled.setter
+    def global_zoom_enabled(self, value: bool):
+        """设置是否启用全局缩放（将缩放倍数应用到所有图片）"""
+        self._config["global_zoom_enabled"] = value
+        self._save_config()
+        self.logger.info(f"全局缩放功能已{'启用' if value else '禁用'}")
+
+    @property
+    def last_zoom_factor(self) -> float:
+        """获取最后使用的缩放倍数（自动记录）"""
+        return self._config.get("last_zoom_factor", 1.0)
+
+    @last_zoom_factor.setter
+    def last_zoom_factor(self, value: float):
+        """设置最后使用的缩放倍数（自动记录，无需手动调用）"""
+        self._config["last_zoom_factor"] = value
+        self._save_config()
 
     # ==================== 其他方法 ====================
 

@@ -15,8 +15,9 @@ from urllib.parse import urlparse, unquote
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                             QPushButton, QTextEdit, QListWidget, QListWidgetItem,
                             QMessageBox, QTabWidget, QProgressBar, QApplication,
-                            QWidget, QTextBrowser, QCheckBox, QGroupBox, QScrollArea, QComboBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty
+                            QWidget, QTextBrowser, QCheckBox, QGroupBox, QScrollArea, QComboBox,
+                            QDoubleSpinBox)
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer
 from PyQt6.QtGui import QKeySequence, QIcon, QDesktopServices, QPainter, QColor, QPen
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from .._version_ import compare_version, __version__
@@ -28,6 +29,7 @@ from .components.toast import toast_info, toast_success, toast_warning, toast_er
 from .components.styles.theme import default_theme
 from .components.styles import ButtonStyles
 from .update_dialog import UpdateInfoDialog
+from .components.widgets.switch import Switch
 
 
 class AnimatedToggle(QWidget):
@@ -2133,6 +2135,11 @@ class SettingsDialog(QDialog):
         # 临时存储配置（用于取消操作）
         self.temp_config = {}
 
+        # 防抖定时器（用于延迟保存配置，避免频繁写入磁盘）
+        self.zoom_save_timer = QTimer()
+        self.zoom_save_timer.setSingleShot(True)
+        self.zoom_save_timer.timeout.connect(self._save_zoom_config)
+
         self.initUI()
 
     def initUI(self):
@@ -2343,6 +2350,7 @@ class SettingsDialog(QDialog):
 
         # 添加各个设置组
         content_layout.addWidget(self.create_appearance_section())
+        content_layout.addWidget(self.create_preview_section())
         content_layout.addWidget(self.create_tutorial_section())
         content_layout.addWidget(self.create_basic_update_section())
         content_layout.addStretch()
@@ -3202,123 +3210,78 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return group
 
-    def create_advanced_section(self) -> QGroupBox:
-        """创建高级设置区域"""
-        from utils.paths import get_cache_dir
-
-        group = QGroupBox("⚙️ 高级设置")
+    def create_preview_section(self) -> QGroupBox:
+        """创建图像预览设置区域"""
+        group = QGroupBox("🖼️ 图像预览设置")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(20)
+        layout.setSpacing(15)
 
-        # 工作目录历史
-        dir_group = QWidget()
-        dir_layout = QVBoxLayout(dir_group)
-        dir_layout.setSpacing(10)
+        # 标题行：左边是缩放范围标题，右边是全局应用开关
+        header_layout = QHBoxLayout()
 
-        # 标题和按钮（横向布局）
-        dir_header = QWidget()
-        dir_header_layout = QHBoxLayout(dir_header)
-        dir_header_layout.setContentsMargins(0, 0, 0, 0)
-        dir_header_layout.setSpacing(10)
+        zoom_title = QLabel("🔍 缩放范围")
+        zoom_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        header_layout.addWidget(zoom_title)
 
-        dir_title = QLabel("📁 最后打开的目录")
-        dir_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        dir_header_layout.addWidget(dir_title)
+        header_layout.addStretch()
 
-        dir_header_layout.addStretch()
+        # 全局应用缩放开关（横向布局）
+        apply_label = QLabel("全局应用缩放倍数")
+        header_layout.addWidget(apply_label)
 
-        clear_dir_btn = QPushButton("清除历史记录")
-        clear_dir_btn.clicked.connect(self.clear_directory_history)
-        clear_dir_btn.setMinimumHeight(28)
-        clear_dir_btn.setToolTip("清除最后打开的工作目录路径")
-        dir_header_layout.addWidget(clear_dir_btn)
+        self.remember_zoom_checkbox = Switch()
+        self.remember_zoom_checkbox.setChecked(self.app_config.global_zoom_enabled)
+        self.remember_zoom_checkbox.setToolTip("启用后，当前的缩放倍数会应用到所有图片。关闭后，每次翻页都会恢复默认适应窗口模式")
+        self.remember_zoom_checkbox.toggled.connect(self.on_remember_zoom_changed)
+        header_layout.addWidget(self.remember_zoom_checkbox)
 
-        dir_layout.addWidget(dir_header)
+        layout.addLayout(header_layout)
 
-        # 路径显示
-        last_dir = self.app_config.last_opened_directory
-        last_dir_label_adv = QLabel(last_dir if last_dir else "（无）")
-        last_dir_label_adv.setObjectName("lastDirLabel")
-        last_dir_label_adv.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        c = default_theme.colors
-        last_dir_label_adv.setStyleSheet(f"""
-            color: {c.TEXT_PRIMARY};
-            padding: 10px;
-            background-color: {c.BACKGROUND_SECONDARY};
-            border-radius: 4px;
-            font-size: 12px;
-            font-family: monospace;
-        """)
-        last_dir_label_adv.setWordWrap(True)
-        dir_layout.addWidget(last_dir_label_adv)
+        # 最大和最小缩放倍数横向并排
+        zoom_controls_layout = QHBoxLayout()
+        zoom_controls_layout.setSpacing(15)
 
-        layout.addWidget(dir_group)
+        # 最大缩放倍数
+        zoom_max_label = QLabel("最大缩放倍数：")
+        zoom_controls_layout.addWidget(zoom_max_label)
 
-        # SMB缓存管理
-        smb_group = QWidget()
-        smb_layout = QVBoxLayout(smb_group)
-        smb_layout.setSpacing(10)
+        self.zoom_max_spinbox = QDoubleSpinBox()
+        self.zoom_max_spinbox.setDecimals(1)
+        self.zoom_max_spinbox.setRange(1.0, 20.0)
+        self.zoom_max_spinbox.setSingleStep(0.5)
+        self.zoom_max_spinbox.setValue(self.app_config.image_zoom_max)
+        self.zoom_max_spinbox.setSuffix(" 倍")
+        self.zoom_max_spinbox.setMinimumHeight(40)
+        self.zoom_max_spinbox.setToolTip("设置图片缩放的最大倍数（范围：1.0-20.0）")
+        # 禁用滚轮调整
+        self.zoom_max_spinbox.wheelEvent = lambda event: None
+        self.zoom_max_spinbox.valueChanged.connect(self.on_zoom_max_changed)
+        zoom_controls_layout.addWidget(self.zoom_max_spinbox)
 
-        # 标题和按钮（横向布局）
-        smb_header = QWidget()
-        smb_header_layout = QHBoxLayout(smb_header)
-        smb_header_layout.setContentsMargins(0, 0, 0, 0)
-        smb_header_layout.setSpacing(10)
+        # 最小缩放倍数
+        zoom_min_label = QLabel("最小缩放倍数：")
+        zoom_controls_layout.addWidget(zoom_min_label)
 
-        smb_title = QLabel("🌐 SMB/NAS 缓存")
-        smb_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        smb_header_layout.addWidget(smb_title)
+        self.zoom_min_spinbox = QDoubleSpinBox()
+        self.zoom_min_spinbox.setDecimals(2)
+        self.zoom_min_spinbox.setRange(0.01, 1.0)
+        self.zoom_min_spinbox.setSingleStep(0.01)
+        self.zoom_min_spinbox.setValue(self.app_config.image_zoom_min)
+        self.zoom_min_spinbox.setSuffix(" 倍")
+        self.zoom_min_spinbox.setMinimumHeight(40)
+        self.zoom_min_spinbox.setToolTip("设置图片缩放的最小倍数（范围：0.01-1.0）")
+        # 禁用滚轮调整
+        self.zoom_min_spinbox.wheelEvent = lambda event: None
+        self.zoom_min_spinbox.valueChanged.connect(self.on_zoom_min_changed)
+        zoom_controls_layout.addWidget(self.zoom_min_spinbox)
 
-        smb_header_layout.addStretch()
-
-        clear_smb_btn = QPushButton("清除SMB缓存")
-        clear_smb_btn.clicked.connect(self.clear_smb_cache)
-        clear_smb_btn.setMinimumHeight(28)
-        clear_smb_btn.setToolTip("清除SMB/NAS网络路径的图片缓存（如果遇到缓存问题可尝试清除）")
-        smb_header_layout.addWidget(clear_smb_btn)
-
-        smb_layout.addWidget(smb_header)
-
-        # 缓存路径显示
-        cache_dir = get_cache_dir()
-        cache_path_label_adv = QLabel(str(cache_dir))
-        cache_path_label_adv.setObjectName("cacheDirLabel")
-        cache_path_label_adv.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        cache_path_label_adv.setStyleSheet(f"""
-            color: {c.TEXT_PRIMARY};
-            padding: 10px;
-            background-color: {c.BACKGROUND_SECONDARY};
-            border-radius: 4px;
-            font-size: 12px;
-            font-family: monospace;
-        """)
-        cache_path_label_adv.setWordWrap(True)
-        smb_layout.addWidget(cache_path_label_adv)
-
-        layout.addWidget(smb_group)
-
-        # 配置文件信息
-        info_group = QWidget()
-        info_layout = QVBoxLayout(info_group)
-        info_layout.setSpacing(10)
-
-        info_title = QLabel("ℹ️ 配置信息")
-        info_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        info_layout.addWidget(info_title)
-
-        version_label = QLabel(f"配置文件版本：{self.app_config._config.get('version', '未知')}")
-        info_layout.addWidget(version_label)
-
-        self.config_path_label = QLabel(f"配置文件路径：{self.app_config._config_file}")
-        self.config_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.config_path_label.setWordWrap(True)
-        info_layout.addWidget(self.config_path_label)
-
-        layout.addWidget(info_group)
+        zoom_controls_layout.addStretch()
+        layout.addLayout(zoom_controls_layout)
 
         layout.addStretch()
         return group
+
 
     def on_theme_combo_changed(self, index: int):
         """主题下拉列表变化处理"""
@@ -3689,61 +3652,76 @@ class SettingsDialog(QDialog):
 
                         self.logger.info(f"检测到本地待安装更新: version={local_pending_version}, exe={local_download_path.name}")
 
-                        # 询问用户是否安装本地更新包（使用主题适配样式）
-                        msg_box = QMessageBox(self)
-                        msg_box.setWindowTitle("发现已下载更新")
-                        msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
-                        msg_box.setIcon(QMessageBox.Icon.Question)
-
-                        # 应用主题适配样式
-                        c = default_theme.colors
-                        msg_box.setStyleSheet(f"""
-                            QMessageBox {{
-                                background-color: {c.BACKGROUND_PRIMARY};
-                                color: {c.TEXT_PRIMARY};
-                                border: 1px solid {c.BORDER_MEDIUM};
-                                border-radius: 8px;
-                                font-size: 14px;
-                                min-width: 400px;
-                            }}
-                            QMessageBox QLabel {{
-                                color: {c.TEXT_PRIMARY};
-                                font-size: 14px;
-                                padding: 10px;
-                            }}
-                            QPushButton {{
-                                background-color: {c.PRIMARY};
-                                color: white;
-                                border: none;
-                                border-radius: 6px;
-                                padding: 10px 24px;
-                                font-size: 14px;
-                                font-weight: bold;
-                                min-width: 100px;
-                                min-height: 36px;
-                            }}
-                            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-                            QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
-                        """)
-
-                        yes_btn = msg_box.addButton("是", QMessageBox.ButtonRole.YesRole)
-                        no_btn = msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
-                        msg_box.setDefaultButton(yes_btn)
-
-                        msg_box.exec()
-
-                        if msg_box.clickedButton() == yes_btn:
-                            # 用户选择立即重启
-                            self.logger.info(f"启动批处理脚本: {local_batch_path}")
-                            subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
-                            self.logger.info("用户选择立即重启安装更新")
-                            QApplication.quit()
-                            return  # 退出程序
+                        # 检查本地更新包版本是否与当前版本相同
+                        if local_pending_version == __version__:
+                            self.logger.info(f"本地更新包v{local_pending_version}与当前版本相同，清理更新包")
+                            try:
+                                if local_download_path.exists():
+                                    local_download_path.unlink()
+                                    self.logger.info(f"已删除同版本更新包: {local_download_path}")
+                                if local_batch_path and local_batch_path.exists():
+                                    local_batch_path.unlink()
+                                    self.logger.info(f"已删除批处理脚本: {local_batch_path}")
+                            except Exception as e:
+                                self.logger.warning(f"清理同版本更新包失败: {e}")
+                            # 跳过提示，继续检查线上更新
                         else:
-                            # 用户选择稍后安装
-                            self.logger.info("用户选择稍后安装本地更新包")
-                            # 不继续检查线上更新，直接返回
-                            return
+                            # 本地更新包版本不同于当前版本，询问用户是否安装
+                            # 询问用户是否安装本地更新包（使用主题适配样式）
+                            msg_box = QMessageBox(self)
+                            msg_box.setWindowTitle("发现已下载更新")
+                            msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
+                            msg_box.setIcon(QMessageBox.Icon.Question)
+
+                            # 应用主题适配样式
+                            c = default_theme.colors
+                            msg_box.setStyleSheet(f"""
+                                QMessageBox {{
+                                    background-color: {c.BACKGROUND_PRIMARY};
+                                    color: {c.TEXT_PRIMARY};
+                                    border: 1px solid {c.BORDER_MEDIUM};
+                                    border-radius: 8px;
+                                    font-size: 14px;
+                                    min-width: 400px;
+                                }}
+                                QMessageBox QLabel {{
+                                    color: {c.TEXT_PRIMARY};
+                                    font-size: 14px;
+                                    padding: 10px;
+                                }}
+                                QPushButton {{
+                                    background-color: {c.PRIMARY};
+                                    color: white;
+                                    border: none;
+                                    border-radius: 6px;
+                                    padding: 10px 24px;
+                                    font-size: 14px;
+                                    font-weight: bold;
+                                    min-width: 100px;
+                                    min-height: 36px;
+                                }}
+                                QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+                                QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
+                            """)
+
+                            yes_btn = msg_box.addButton("是", QMessageBox.ButtonRole.YesRole)
+                            no_btn = msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
+                            msg_box.setDefaultButton(yes_btn)
+
+                            msg_box.exec()
+
+                            if msg_box.clickedButton() == yes_btn:
+                                # 用户选择立即重启
+                                self.logger.info(f"启动批处理脚本: {local_batch_path}")
+                                subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
+                                self.logger.info("用户选择立即重启安装更新")
+                                QApplication.quit()
+                                return  # 退出程序
+                            else:
+                                # 用户选择稍后安装
+                                self.logger.info("用户选择稍后安装本地更新包")
+                                # 不继续检查线上更新，直接返回
+                                return
             except Exception as e:
                 self.logger.debug(f"检查本地更新目录失败: {e}")
 
@@ -3816,6 +3794,41 @@ class SettingsDialog(QDialog):
             except Exception as e:
                 self.logger.error(f"清除SMB缓存失败: {e}")
                 toast_error(self, f"清除缓存失败: {str(e)}")
+
+    def _save_zoom_config(self):
+        """保存缩放配置到磁盘（防抖定时器触发）"""
+        try:
+            self.app_config._save_config()
+            self.logger.debug("已保存缩放配置")
+        except Exception as e:
+            self.logger.error(f"保存缩放配置失败: {e}")
+
+    def on_zoom_max_changed(self, value: float):
+        """最大缩放倍数变化处理（使用防抖机制延迟保存）"""
+        # 只更新内存中的值，不立即保存（绕过setter）
+        self.app_config._config["image_zoom_max"] = value
+        # 通知主窗口更新缩放限制（立即生效）
+        if self.parent() and hasattr(self.parent(), 'image_label'):
+            self.parent().image_label.max_scale = value
+        # 重启防抖定时器（500ms后保存）
+        self.zoom_save_timer.stop()
+        self.zoom_save_timer.start(500)
+
+    def on_zoom_min_changed(self, value: float):
+        """最小缩放倍数变化处理（使用防抖机制延迟保存）"""
+        # 只更新内存中的值，不立即保存（绕过setter）
+        self.app_config._config["image_zoom_min"] = value
+        # 通知主窗口更新缩放限制（立即生效）
+        if self.parent() and hasattr(self.parent(), 'image_label'):
+            self.parent().image_label.min_scale = value
+        # 重启防抖定时器（500ms后保存）
+        self.zoom_save_timer.stop()
+        self.zoom_save_timer.start(500)
+
+    def on_remember_zoom_changed(self, checked: bool):
+        """全局应用缩放倍数选项变化处理"""
+        self.app_config.global_zoom_enabled = checked
+        toast_info(self, f"全局缩放功能已{'启用' if checked else '禁用'}")
 
     def reset_to_defaults(self):
         """恢复默认设置"""
@@ -4247,5 +4260,14 @@ class SettingsDialog(QDialog):
 
         # 恢复信号
         self.theme_combo.blockSignals(False)
+
+    def closeEvent(self, event):
+        """对话框关闭时，立即保存未完成的配置"""
+        # 如果防抖定时器正在运行，立即触发保存
+        if self.zoom_save_timer.isActive():
+            self.zoom_save_timer.stop()
+            self._save_zoom_config()
+            self.logger.debug("对话框关闭，立即保存缩放配置")
+        super().closeEvent(event)
 
 
