@@ -133,9 +133,16 @@ class Config:
                     # 迁移逻辑：如果旧配置中有更新相关字段，迁移到全局配置
                     self._migrate_update_config(config_data)
         except FileNotFoundError:
+            # 配置文件不存在，初始化默认值并尝试保存
             with self._lock:
                 self.category_shortcuts = {}
-            self.save_config()
+            # 尝试保存配置文件，如果失败则向上抛出异常（通常是权限问题）
+            try:
+                self.save_config()
+            except (OSError, IOError, ConfigError) as e:
+                # 如果是权限错误，向上抛出让调用者处理
+                # ConfigError 可能是由 save_config() 包装后的异常
+                raise ConfigError(f"无法创建配置文件（权限不足）: {e}")
         except (json.JSONDecodeError, OSError) as e:
             raise ConfigError(f"加载配置文件失败: {e}")
             
