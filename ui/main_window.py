@@ -38,7 +38,7 @@ from ..core.config import Config
 from ..utils.app_config import get_app_config
 from ..core.scanner import FileScannerThread
 from ..core.image_loader import HighPerformanceImageLoader
-from ..utils.exceptions import ImageClassifierError, FileOperationError
+from ..utils.exceptions import ImageClassifierError, FileOperationError, ConfigError
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from ..core.file_manager import FileOperationManager
 from ..utils.performance import performance_monitor
@@ -1239,6 +1239,23 @@ class ImageClassifier(QMainWindow):
                 self.logger.warning(f"获取盘符缓存失败: {e}，使用直接检测")
                 is_network = is_network_path(self.current_dir)
 
+            # 设置配置文件路径为图片目录的父目录
+            # 这个操作可能会因为权限问题失败（尤其是网络路径）
+            try:
+                self.config.set_base_dir(str(self.current_dir.parent))
+            except ConfigError as e:
+                # 检查是否是权限错误
+                if "Permission denied" in str(e) or "权限" in str(e):
+                    self.logger.error(f"目录访问权限不足: {self.current_dir.parent}")
+                    toast_error(self, f"⚠️ 无法打开目录：该路径没有写入权限\n路径：{self.current_dir.parent}")
+                else:
+                    self.logger.error(f"配置初始化失败: {e}")
+                    toast_error(self, f"⚠️ 打开目录失败：{e}")
+
+                # 重置当前目录，取消打开操作
+                self.current_dir = None
+                return  # 提前退出，不执行后续操作
+
             if is_network:
                 # 网络路径提醒
                 toast_info(self,'🚀 检测到网络路径，已启用专项优化')
@@ -1254,9 +1271,6 @@ class ImageClassifier(QMainWindow):
                 app_config.update_last_opened_drive_info(str(self.current_dir), is_network)
             except Exception as e:
                 self.logger.error(f"保存最后打开的目录信息失败: {e}")
-
-            # 设置配置文件路径为图片目录的父目录
-            self.config.set_base_dir(str(self.current_dir.parent))
 
             # 先启动图片扫描，让UI立即响应
             self.load_images()
