@@ -38,6 +38,7 @@ class AppConfig:
             "pending_update": {},  # 待处理的更新信息
             # 工作目录相关配置
             "last_opened_directory": "",  # 最后打开的图片目录
+            "last_opened_drive_is_network": False,  # 最后打开目录的盘符是否为网络路径
             # 日志和提示相关配置
             "log_level": "INFO",  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
             "toast_level": "INFO",  # Toast提示级别：DEBUG, INFO, WARNING, ERROR
@@ -304,6 +305,49 @@ class AppConfig:
         self._config["last_opened_directory"] = value
         self._save_config()
         self.logger.warning(f"最后打开的目录已设置为: {value}")
+
+    @property
+    def last_opened_drive_is_network(self) -> bool:
+        """获取最后打开的盘符是否为网络路径"""
+        return self._config.get("last_opened_drive_is_network", False)
+
+    @last_opened_drive_is_network.setter
+    def last_opened_drive_is_network(self, value: bool):
+        """设置最后打开的盘符是否为网络路径"""
+        self._config["last_opened_drive_is_network"] = value
+        self._save_config()
+
+    def get_last_opened_drive(self) -> str:
+        """
+        从最后打开的目录路径中提取盘符
+
+        Returns:
+            str: 盘符（如 "D:"），如果无法提取则返回空字符串
+        """
+        from pathlib import Path
+        last_dir = self.last_opened_directory
+        if last_dir:
+            return Path(last_dir).drive
+        return ""
+
+    def update_last_opened_drive_info(self, directory: str, is_network: bool):
+        """
+        更新最后打开的目录及其网络状态信息
+
+        Args:
+            directory: 目录路径
+            is_network: 是否为网络路径
+        """
+        from pathlib import Path
+        path = Path(directory)
+        drive = path.drive  # 例如 "D:"
+
+        self._config["last_opened_directory"] = directory
+        self._config["last_opened_drive_is_network"] = is_network
+        self._save_config()
+
+        path_type = "网络" if is_network else "本地"
+        self.logger.info(f"已更新最后打开的目录: {directory} (盘符: {drive}, 类型: {path_type})")
 
     # ==================== 日志和提示配置 ====================
 
