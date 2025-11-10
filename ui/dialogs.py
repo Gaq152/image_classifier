@@ -20,9 +20,8 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer
 from PyQt6.QtGui import QKeySequence, QIcon, QDesktopServices, QPainter, QColor, QPen
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
-from .._version_ import compare_version, __version__
+from .._version_ import compare_version, __version__, get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
 from ..utils.exceptions import FileOperationError
-from .._version_ import get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
 from ..utils.app_config import get_app_config
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
