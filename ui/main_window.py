@@ -1213,30 +1213,47 @@ class ImageClassifier(QMainWindow):
     
     def open_directory(self):
         """打开图片目录"""
+        from utils.file_operations import is_network_path
+
         dir_path = QFileDialog.getExistingDirectory(self, '选择图片目录')
         if dir_path:
             self.current_dir = Path(dir_path)
+            current_drive = self.current_dir.drive  # 例如 "D:"
 
-            # 检查是否为网络路径
-            path_str = str(self.current_dir)
-            is_network_path = path_str.startswith('\\\\')
+            # 尝试从全局配置中获取盘符缓存
+            try:
+                app_config = get_app_config()
+                cached_drive = app_config.get_last_opened_drive()  # 从路径中实时提取盘符
+                cached_is_network = app_config.last_opened_drive_is_network
 
-            if is_network_path:
+                # 如果缓存命中（盘符相同），使用缓存值
+                if cached_drive == current_drive:
+                    is_network = cached_is_network
+                    self.logger.debug(f"盘符缓存命中: {current_drive} ({'网络' if is_network else '本地'})")
+                else:
+                    # 缓存未命中，需要检测
+                    is_network = is_network_path(self.current_dir)
+                    self.logger.debug(f"盘符缓存未命中，重新检测: {current_drive} ({'网络' if is_network else '本地'})")
+            except Exception as e:
+                # 如果获取缓存失败，回退到直接检测
+                self.logger.warning(f"获取盘符缓存失败: {e}，使用直接检测")
+                is_network = is_network_path(self.current_dir)
+
+            if is_network:
                 # 网络路径提醒
-                toast_info(self,'🚀 SMB/NAS路径已启用专项优化')
-
-                self.logger.info(f"用户选择网络路径: {self.current_dir}")
+                toast_info(self,'🚀 检测到网络路径，已启用专项优化')
+                self.logger.info(f"[网络路径] 用户选择: {self.current_dir}")
             else:
-                self.logger.info(f"用户选择本地路径: {self.current_dir}")
+                self.logger.info(f"[本地路径] 用户选择: {self.current_dir}")
                 # 显示本地目录打开成功通知
                 toast_success(self,f"已打开目录：{self.current_dir.name}")
 
-            # 保存最后打开的目录到全局配置
+            # 保存最后打开的目录和盘符信息到全局配置
             try:
                 app_config = get_app_config()
-                app_config.last_opened_directory = str(self.current_dir)
+                app_config.update_last_opened_drive_info(str(self.current_dir), is_network)
             except Exception as e:
-                self.logger.error(f"保存最后打开的目录失败: {e}")
+                self.logger.error(f"保存最后打开的目录信息失败: {e}")
 
             # 设置配置文件路径为图片目录的父目录
             self.config.set_base_dir(str(self.current_dir.parent))
@@ -4526,11 +4543,25 @@ class ImageClassifier(QMainWindow):
             if not last_dir or not Path(last_dir).exists():
                 return
 
+            # 检测路径类型
+            from utils.file_operations import is_network_path
+            is_network = is_network_path(last_dir)
+            path_type_icon = "🌐" if is_network else "💾"
+            path_type_text = "网络路径" if is_network else "本地路径"
+
+            # 提取盘符信息
+            last_dir_path = Path(last_dir)
+            drive_info = f" ({last_dir_path.drive})" if last_dir_path.drive else ""
+
             # 创建询问对话框
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("恢复上次任务")
             msg_box.setText(f"检测到上次打开的工作目录")
-            msg_box.setInformativeText(f"路径：{last_dir}\n\n是否继续上次的任务？")
+            msg_box.setInformativeText(
+                f"路径：{last_dir}\n"
+                f"{path_type_icon} {path_type_text}{drive_info}\n\n"
+                f"是否继续上次的任务？"
+            )
 
             # 应用主题样式
             c = default_theme.colors

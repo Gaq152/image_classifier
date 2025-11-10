@@ -2756,7 +2756,19 @@ class SettingsDialog(QDialog):
 
         # 路径显示
         last_dir = self.app_config.last_opened_directory
-        self.last_dir_label = QLabel(last_dir if last_dir else "（无）")
+        is_network = self.app_config.last_opened_drive_is_network
+
+        # 构建带网络路径标记的显示文本
+        if last_dir:
+            path_type_icon = "🌐" if is_network else "💾"
+            path_type_text = "网络路径" if is_network else "本地路径"
+            from pathlib import Path
+            drive = Path(last_dir).drive if last_dir else ""
+            display_text = f"{path_type_icon} {last_dir}\n({drive} - {path_type_text})"
+        else:
+            display_text = "（无）"
+
+        self.last_dir_label = QLabel(display_text)
         self.last_dir_label.setObjectName("lastDirLabel")
         self.last_dir_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         c = default_theme.colors
