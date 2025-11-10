@@ -131,16 +131,21 @@ upload:
 # GitLab Release 创建任务
 release:
   stage: deploy
+  image: registry.gddi.com/ops/release-cli:v0.14.0
   extends:
     - .is_deploy
+  dependencies:
+    - upload
   needs:
     - job: upload
       artifacts: true
-  release:
-    tag_name: $CI_COMMIT_TAG
-    name: '图像分类工具 $CI_COMMIT_TAG'
-    description: |
-      ## 🚀 图像分类工具 $CI_COMMIT_TAG 发布
+  script:
+    - echo "创建 GitLab Release..."
+    - |
+      release-cli create \
+        --name "图像分类工具 $CI_COMMIT_TAG" \
+        --tag-name "$CI_COMMIT_TAG" \
+        --description "## 🚀 图像分类工具 $CI_COMMIT_TAG 发布
 
       ### 📥 下载链接
       - **Windows 版本**: [$RELEASE_FILENAME]($PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME)
@@ -159,13 +164,8 @@ release:
       - 🎨 现代化用户界面
 
       ### 📝 更新说明
-      详细更新内容请查看 [CHANGELOG.md](https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/blob/$CI_COMMIT_TAG/CHANGELOG.md)
-    
-    assets:
-      links:
-        - name: 'Windows 版本'
-          url: "$PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME"
-          link_type: 'package'
+      详细更新内容请查看 [CHANGELOG.md](https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/blob/$CI_COMMIT_TAG/CHANGELOG.md)" \
+        --assets-link "{\"name\":\"Windows 版本\",\"url\":\"$PACKAGE_REGISTRY_URL/$RELEASE_VERSION/$RELEASE_FILENAME\",\"link_type\":\"package\"}"
 
 # 测试任务（可选）
 test:
