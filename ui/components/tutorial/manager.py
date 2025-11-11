@@ -8,7 +8,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore import QTimer, QPoint, QRect
+from PyQt6.QtCore import QTimer, QPoint, QRect, QObject
 
 from .overlay import TutorialOverlay
 from .bubble import TutorialBubble, ArrowPosition
@@ -499,7 +499,6 @@ class TutorialManager:
             self.bubble.raise_()
 
             # 告诉overlay bubble的位置，避免拦截bubble的点击
-            from PyQt6.QtCore import QRect, QPoint
             bubble_rect = QRect(self.bubble.x(), self.bubble.y(), self.bubble.width(), self.bubble.height())
             self.overlay.set_bubble_region(bubble_rect)
 
@@ -728,7 +727,6 @@ class TutorialManager:
         self.logger.info(f"教程已{'完成' if completed else '跳过'}")
 
         # 教程结束后，延迟检查是否需要恢复上次目录
-        from PyQt6.QtCore import QTimer
         if hasattr(self.main_window, '_check_and_restore_last_directory'):
             QTimer.singleShot(500, self.main_window._check_and_restore_last_directory)
 
@@ -761,7 +759,6 @@ class TutorialManager:
                 self.logger.warning(f"对象不是QWidget: {widget_name}, 类型: {type(widget).__name__}")
 
         # 回退到使用findChildren查找
-        from PyQt6.QtCore import QObject
         widgets = self.main_window.findChildren(QObject, widget_name)
         self.logger.debug(f"findChildren找到 {len(widgets)} 个对象")
 

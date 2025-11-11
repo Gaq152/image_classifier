@@ -12,8 +12,17 @@ import sys
 import os
 import logging
 import traceback
+import glob
+import time
 from pathlib import Path
+from logging.handlers import TimedRotatingFileHandler
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import Qt, QLocale
+from PyQt6.QtGui import QIcon
 from _version_ import __version__, get_full_version_string, print_version_info
+from utils.paths import get_logs_dir
+from utils.app_config import get_app_config
+from .ui.main_window import ImageClassifier
 
 # 配置环境变量以减少调试输出
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.*=false"
@@ -26,7 +35,6 @@ os.environ["PIL_DEBUG"] = "0"
 def get_log_directory():
     """获取日志目录 - 使用统一路径管理"""
     try:
-        from utils.paths import get_logs_dir
         return get_logs_dir()
     except Exception as e:
         # 备用方案 - 当前目录
@@ -39,10 +47,6 @@ def get_log_directory():
 def setup_logging():
     """设置日志系统 - 支持日志轮转和自动清理"""
     try:
-        from logging.handlers import TimedRotatingFileHandler
-        import glob
-        import time
-
         # 清除现有handlers，避免冲突
         root_logger = logging.getLogger()
         for handler in root_logger.handlers[:]:
@@ -151,43 +155,6 @@ def setup_logging():
         return False
 
 
-def check_dependencies():
-    """检查必要的依赖"""
-    missing_deps = []
-    
-    try:
-        from PyQt6.QtWidgets import QApplication, QMessageBox
-        from PyQt6.QtCore import Qt
-        from PyQt6.QtGui import QIcon
-    except ImportError:
-        missing_deps.append("PyQt6")
-    
-    try:
-        import cv2
-    except ImportError:
-        missing_deps.append("opencv-python")
-    
-    try:
-        from PIL import Image
-    except ImportError:
-        missing_deps.append("Pillow")
-    
-    try:
-        import psutil
-    except ImportError:
-        missing_deps.append("psutil")
-    
-    if missing_deps:
-        error_msg = f"缺少以下依赖包：\n" + "\n".join(f"• {dep}" for dep in missing_deps)
-        error_msg += "\n\n请使用以下命令安装：\n"
-        error_msg += f"pip install {' '.join(missing_deps)}"
-        
-        print(error_msg)
-        return False
-    
-    return True
-
-
 def handle_exception(exc_type, exc_value, exc_traceback):
     """全局异常处理器"""
     if issubclass(exc_type, KeyboardInterrupt):
@@ -203,7 +170,6 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     
     # 显示错误对话框
     try:
-        from PyQt6.QtWidgets import QMessageBox
         error_msg = f"程序遇到未预期的错误：\n{exc_value}\n\n请查看日志文件获取详细信息。"
         QMessageBox.critical(None, "程序错误", error_msg)
     except:
@@ -213,22 +179,13 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 def main():
     """主函数"""
     try:
-        # 检查依赖
-        if not check_dependencies():
-            sys.exit(1)
-        
         # 设置日志
         if not setup_logging():
             print("警告: 日志设置失败，程序将继续运行")
         
         # 设置全局异常处理器
         sys.excepthook = handle_exception
-        
-        # 导入PyQt6
-        from PyQt6.QtWidgets import QApplication
-        from PyQt6.QtCore import Qt, QLocale
-        from PyQt6.QtGui import QIcon
-        
+
         # 创建应用程序实例
         app = QApplication(sys.argv)
         app.setApplicationName("图像分类工具")
@@ -240,11 +197,7 @@ def main():
         
         # 设置中文本地化
         QLocale.setDefault(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
-        
-        # 导入主窗口类 - 支持两种启动方式
-        # 使用相对导入
-        from .ui.main_window import ImageClassifier
-        
+
         # 创建主窗口
         window = ImageClassifier()
         window.show()

@@ -11,6 +11,7 @@ import logging
 import hashlib
 import time
 import threading
+import shutil
 from pathlib import Path
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
@@ -29,9 +30,12 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+import psutil
+
 from ..utils.exceptions import ImageLoadError
 from ..utils.file_operations import is_network_path
 from ..utils.performance import performance_monitor
+from ..utils.paths import get_cache_dir, get_old_cache_dir
 
 
 class HighPerformanceImageLoader(QThread):
@@ -57,7 +61,6 @@ class HighPerformanceImageLoader(QThread):
         self.thumbnail_size = (400, 300)  # 缩略图尺寸
         
         # SMB/NAS 专项优化配置
-        from utils.paths import get_cache_dir
         self.smb_optimization = {
             'enable_local_cache': True,  # 启用本地临时缓存
             'cache_dir': get_cache_dir(),  # 本地缓存目录: C:\Users\<username>\image_classifier\cache
@@ -120,7 +123,6 @@ class HighPerformanceImageLoader(QThread):
     def _migrate_old_cache(self):
         """迁移旧的隐藏缓存目录数据到新位置"""
         try:
-            from utils.paths import get_old_cache_dir, get_cache_dir
             old_cache_dir = get_old_cache_dir()
             new_cache_dir = get_cache_dir()
 
@@ -131,7 +133,6 @@ class HighPerformanceImageLoader(QThread):
                 if len(new_cache_files) <= 1:  # 只有目录本身
                     self.logger.debug(f"[SMB缓存迁移] 发现旧缓存目录，开始迁移...")
 
-                    import shutil
                     migrated_count = 0
                     for old_file in old_cache_dir.rglob('*'):
                         if old_file.is_file():
@@ -384,7 +385,6 @@ class HighPerformanceImageLoader(QThread):
     def _create_adaptive_thread_pool(self):
         """创建自适应线程池，根据系统性能和网络环境调整"""
         try:
-            import psutil
             cpu_count = psutil.cpu_count(logical=False)  # 物理核心数
             logical_cpu_count = psutil.cpu_count(logical=True)  # 逻辑核心数
             memory_gb = psutil.virtual_memory().total / (1024**3)
@@ -434,7 +434,6 @@ class HighPerformanceImageLoader(QThread):
     def _get_optimal_cache_size(self):
         """根据系统内存动态确定缓存大小 - 针对17-20MB大图片优化"""
         try:
-            import psutil
             total_memory = psutil.virtual_memory().total
             available_memory = psutil.virtual_memory().available
             

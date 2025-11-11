@@ -6,6 +6,7 @@
 
 import os
 import logging
+import shutil
 import threading
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -339,7 +340,6 @@ class FileOperationManager:
     def move_file(self, src_path, dst_path):
         """移动文件"""
         def move_operation():
-            import shutil
             shutil.move(str(src_path), str(dst_path))
             
         return self.execute_file_operation(move_operation)
@@ -347,7 +347,6 @@ class FileOperationManager:
     def copy_file(self, src_path, dst_path):
         """复制文件"""
         def copy_operation():
-            import shutil
             shutil.copy2(str(src_path), str(dst_path))
             
         return self.execute_file_operation(copy_operation)

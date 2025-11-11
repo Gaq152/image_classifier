@@ -4,6 +4,8 @@
 提供半透明遮罩效果，并支持挖空特定区域以突出显示指定的UI元素。
 """
 
+import logging
+import math
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, QRect, QRectF, QPoint, QPointF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPainterPath, QPen, QRegion
@@ -27,6 +29,9 @@ class TutorialOverlay(QWidget):
             parent: 父窗口，通常是主窗口
         """
         super().__init__(parent)
+
+        # 创建logger
+        self.logger = logging.getLogger(__name__)
 
         # 遮罩配置
         self._mask_color = QColor(0, 0, 0, 180)  # 半透明黑色，透明度180/255
@@ -153,9 +158,7 @@ class TutorialOverlay(QWidget):
             left_target: 左侧目标位置（全局坐标）
             right_target: 右侧目标位置（全局坐标）
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"[Overlay] 设置双箭头: bubble={bubble_center}, left={left_target}, right={right_target}")
+        self.logger.debug(f"[Overlay] 设置双箭头: bubble={bubble_center}, left={left_target}, right={right_target}")
 
         self._arrow_start_pos = bubble_center
         self._arrow_left_target = left_target
@@ -203,9 +206,7 @@ class TutorialOverlay(QWidget):
             self._arrow_left_target is not None and
             self._arrow_right_target is not None):
 
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.debug(f"[Overlay.paintEvent] 开始绘制双箭头")
+            self.logger.debug(f"[Overlay.paintEvent] 开始绘制双箭头")
 
             # 设置箭头画笔
             pen = QPen(self._arrow_color)
@@ -221,7 +222,6 @@ class TutorialOverlay(QWidget):
 
             # 左箭头头部（指向左侧目标）
             # 计算箭头方向向量
-            import math
             dx = left_end.x() - left_start.x()
             dy = left_end.y() - left_start.y()
             length = math.sqrt(dx*dx + dy*dy)
@@ -263,7 +263,7 @@ class TutorialOverlay(QWidget):
                 painter.drawLine(right_end, QPointF(left_wing_x, left_wing_y))
                 painter.drawLine(right_end, QPointF(right_wing_x, right_wing_y))
 
-            logger.debug(f"[Overlay.paintEvent] 双箭头绘制完成")
+            self.logger.debug(f"[Overlay.paintEvent] 双箭头绘制完成")
 
         painter.end()
 
@@ -335,9 +335,7 @@ class TutorialOverlay(QWidget):
         highlight_rect = QRect(global_pos, widget_rect.size())
 
         # DEBUG
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"[Overlay] widget_rect={widget_rect}, global_pos={global_pos}, highlight_rect={highlight_rect}")
+        self.logger.debug(f"[Overlay] widget_rect={widget_rect}, global_pos={global_pos}, highlight_rect={highlight_rect}")
 
         # 设置高亮区域
         self.set_highlight_region(highlight_rect, padding)

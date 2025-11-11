@@ -4,6 +4,7 @@
 提供带箭头的提示气泡，用于显示教程文本和说明。
 """
 
+import logging
 from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPainterPath, QFont
@@ -57,6 +58,9 @@ class TutorialBubble(QWidget):
         # 窗口设置
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+
+        # 创建logger
+        self.logger = logging.getLogger(__name__)
 
         # 创建UI
         self._setup_ui()
@@ -347,12 +351,10 @@ class TutorialBubble(QWidget):
             offset_y: Y轴偏移量
             secondary_target: 第二个目标控件（用于双箭头模式）
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"[Bubble.show_at] ENTER: target={target_widget}, secondary={secondary_target}, offset_x={offset_x}, offset_y={offset_y}")
+        self.logger.debug(f"[Bubble.show_at] ENTER: target={target_widget}, secondary={secondary_target}, offset_x={offset_x}, offset_y={offset_y}")
 
         if target_widget is None or self.parent() is None:
-            logger.warning(f"[Bubble.show_at] 提前返回: target_widget={target_widget}, parent={self.parent()}")
+            self.logger.warning(f"[Bubble.show_at] 提前返回: target_widget={target_widget}, parent={self.parent()}")
             return
 
         # 调整气泡大小以适应内容
