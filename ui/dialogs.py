@@ -2182,6 +2182,27 @@ class SettingsDialog(QDialog):
         # 恢复信号
         self.theme_combo.blockSignals(False)
 
+        # 检查是否因性能原因需要禁用主题控件（图片数量>10000）
+        if self.parent() and hasattr(self.parent(), 'image_list'):
+            image_count = self.parent().image_list.count()
+            if image_count > 10000:
+                # 禁用主题下拉列表和自动切换开关
+                self.theme_combo.setEnabled(False)
+                self.auto_theme_switch.setEnabled(False)
+
+                # 更新tooltip提示原因
+                tooltip_text = f"图片数量过多（{image_count}张），主题切换已禁用以保证性能"
+                self.theme_combo.setToolTip(tooltip_text)
+                auto_label.setToolTip(tooltip_text)
+
+                # 添加说明文本
+                warning_label = QLabel(f"⚠️ 当前图片数量（{image_count}张）超过10000，为保证性能已禁用主题切换功能")
+                warning_label.setStyleSheet("font-size: 12px; color: #F59E0B; padding: 5px;")
+                warning_label.setWordWrap(True)
+                theme_layout.addWidget(warning_label)
+
+                self.logger.debug(f"SettingsDialog: 主题控件因性能原因禁用（图片数：{image_count}）")
+
         layout.addStretch()
         return group
 
@@ -3322,8 +3343,16 @@ class SettingsDialog(QDialog):
             # 禁用自动模式，恢复手动模式
             self.app_config.theme_mode = "manual"
 
-            # 启用主题下拉列表
-            self.theme_combo.setEnabled(True)
+            # 启用主题下拉列表（但需要检查是否因性能原因禁用）
+            # 检查图片数量，如果>10000则保持禁用状态
+            should_disable_for_performance = False
+            if self.parent() and hasattr(self.parent(), 'image_list'):
+                image_count = self.parent().image_list.count()
+                if image_count > 10000:
+                    should_disable_for_performance = True
+
+            if not should_disable_for_performance:
+                self.theme_combo.setEnabled(True)
 
             # 根据当前主题设置下拉列表（阻止信号触发）
             current_theme = self.app_config.theme
@@ -3339,12 +3368,17 @@ class SettingsDialog(QDialog):
                 if hasattr(self.parent(), 'stop_auto_theme_timer'):
                     self.parent().stop_auto_theme_timer()
                 if hasattr(self.parent(), 'theme_button'):
-                    # 重新启用主窗口的主题按钮
-                    self.parent().theme_button.setEnabled(True)
-                    # 恢复正确的tooltip
-                    current_theme = self.app_config.theme
-                    theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
-                    self.parent().theme_button.setToolTip(theme_tooltip)
+                    # 重新启用主窗口的主题按钮（但需要检查是否因性能原因禁用）
+                    # 使用主窗口的update_theme_button_state方法来正确设置状态
+                    if hasattr(self.parent(), 'update_theme_button_state'):
+                        self.parent().update_theme_button_state()
+                    elif not should_disable_for_performance:
+                        # 如果没有update_theme_button_state方法，则直接启用（向后兼容）
+                        self.parent().theme_button.setEnabled(True)
+                        # 恢复正确的tooltip
+                        current_theme = self.app_config.theme
+                        theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
+                        self.parent().theme_button.setToolTip(theme_tooltip)
 
             toast_info(self, "已关闭自动切换")
 
@@ -3421,10 +3455,13 @@ class SettingsDialog(QDialog):
                     self.parent().theme_button.setEnabled(False)
                     self.parent().theme_button.setToolTip("已启用跟随系统，点击查看提示")
                 else:
-                    # 手动模式：启用主窗口按钮
-                    self.parent().theme_button.setEnabled(True)
-                    theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
-                    self.parent().theme_button.setToolTip(theme_tooltip)
+                    # 手动模式：启用主窗口按钮（但需要检查性能）
+                    if hasattr(self.parent(), 'update_theme_button_state'):
+                        self.parent().update_theme_button_state()
+                    else:
+                        self.parent().theme_button.setEnabled(True)
+                        theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
+                        self.parent().theme_button.setToolTip(theme_tooltip)
 
         # 提示用户已应用
         toast_success(self, toast_message)
@@ -3839,7 +3876,17 @@ class SettingsDialog(QDialog):
             # 恢复默认值
             self.theme_combo.setCurrentIndex(0)  # 默认浅色主题
             self.auto_theme_switch.setChecked(False)  # 默认关闭自动切换
-            self.theme_combo.setEnabled(True)  # 确保下拉列表可用
+
+            # 检查是否因性能原因禁用主题控件（图片数量>10000）
+            should_disable_for_performance = False
+            if self.parent() and hasattr(self.parent(), 'image_list'):
+                image_count = self.parent().image_list.count()
+                if image_count > 10000:
+                    should_disable_for_performance = True
+
+            if not should_disable_for_performance:
+                self.theme_combo.setEnabled(True)  # 确保下拉列表可用
+
             self.auto_update_switch.setChecked(True)
             self.endpoint_input.setText("https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json")
             self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
@@ -4304,12 +4351,16 @@ class SettingsDialog(QDialog):
         elif self.app_config.theme == "dark":
             # 暗色主题
             self.theme_combo.setCurrentIndex(1)
-            self.theme_combo.setEnabled(True)
+            # 检查是否因性能原因禁用（图片数量>10000）
+            if not (self.parent() and hasattr(self.parent(), 'image_list') and self.parent().image_list.count() > 10000):
+                self.theme_combo.setEnabled(True)
             self.auto_theme_switch.setChecked(False)
         else:
             # 亮色主题
             self.theme_combo.setCurrentIndex(0)
-            self.theme_combo.setEnabled(True)
+            # 检查是否因性能原因禁用（图片数量>10000）
+            if not (self.parent() and hasattr(self.parent(), 'image_list') and self.parent().image_list.count() > 10000):
+                self.theme_combo.setEnabled(True)
             self.auto_theme_switch.setChecked(False)
 
         # 恢复信号

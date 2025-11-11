@@ -1703,6 +1703,9 @@ class ImageClassifier(QMainWindow):
 
         self.logger.info(f"🎯 后台扫描完成: 实际文件 {actual_count} 个")
 
+        # 更新主题按钮状态（根据图片数量）
+        self.update_theme_button_state()
+
         # 检查是否需要提示用户跳转到上次位置
         QTimer.singleShot(500, self._check_and_prompt_last_position)
 
@@ -4659,9 +4662,57 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"启动教程失败: {e}")
             toast_error(self, f"启动教程失败: {str(e)}")
 
+    def is_theme_switch_disabled_due_to_performance(self):
+        """检查是否因性能原因禁用主题切换（图片数量>10000）"""
+        if hasattr(self, 'image_list'):
+            return self.image_list.count() > 10000
+        return False
+
+    def update_theme_button_state(self):
+        """更新主题按钮状态（根据图片数量和主题模式）"""
+        if not hasattr(self, 'theme_button'):
+            return
+
+        try:
+            app_config = get_app_config()
+            theme_mode = app_config.theme_mode
+            image_count = self.image_list.count() if hasattr(self, 'image_list') else 0
+
+            # 检查是否因性能原因需要禁用
+            disabled_due_to_performance = image_count > 10000
+
+            # 检查是否因为自动模式或系统模式需要禁用
+            disabled_due_to_mode = theme_mode in ("auto", "system")
+
+            if disabled_due_to_performance:
+                # 因性能原因禁用
+                self.theme_button.setEnabled(False)
+                self.theme_button.setToolTip(f"图片数量过多（{image_count}张），主题切换已禁用以保证性能")
+                self.logger.debug(f"主题按钮因性能原因禁用（图片数：{image_count}）")
+            elif disabled_due_to_mode:
+                # 因模式原因禁用
+                self.theme_button.setEnabled(False)
+                mode_name = "自动切换" if theme_mode == "auto" else "跟随系统"
+                self.theme_button.setToolTip(f"已启用{mode_name}，点击查看提示")
+            else:
+                # 启用按钮
+                self.theme_button.setEnabled(True)
+                current_theme = default_theme.get_current_theme()
+                theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
+                self.theme_button.setToolTip(theme_tooltip)
+
+        except Exception as e:
+            self.logger.warning(f"更新主题按钮状态失败: {e}")
+
     def toggle_theme(self):
         """切换主题"""
         try:
+            # 检查是否因性能原因禁用（图片过多）
+            if self.is_theme_switch_disabled_due_to_performance():
+                count = self.image_list.count() if hasattr(self, 'image_list') else 0
+                toast_warning(self, f"图片数量过多（{count}张），主题切换已禁用以保证性能")
+                return
+
             # 检查是否启用了自动切换
             app_config = get_app_config()
 
@@ -5023,6 +5074,12 @@ class ImageClassifier(QMainWindow):
 
             # 只有在自动模式下才进行检查
             if app_config.theme_mode != "auto":
+                return
+
+            # 检查是否因性能原因禁用自动切换（图片过多）
+            if self.is_theme_switch_disabled_due_to_performance():
+                image_count = self.image_list.count() if hasattr(self, 'image_list') else 0
+                self.logger.debug(f"自动主题切换已跳过（图片数量：{image_count}，超过10000限制）")
                 return
 
             # 根据时间获取应该使用的主题
