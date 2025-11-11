@@ -6,6 +6,7 @@
 
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -348,7 +349,6 @@ class UpdateInfoDialog(QDialog):
             if clicked_button == yes_button:
                 # 用户选择立即重启
                 self.logger.info(f"启动批处理脚本: {batch_path}")
-                import subprocess
                 subprocess.Popen(["cmd", "/c", "start", "", str(batch_path), str(dest)], shell=False)
                 self.logger.info("用户选择立即重启安装更新")
                 # 关闭对话框

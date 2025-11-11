@@ -9,6 +9,7 @@ import time
 import psutil
 import sys
 import json
+import re
 import threading
 import functools
 import shutil
@@ -22,27 +23,31 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                             QSplitter, QLabel, QScrollArea, QStatusBar, QToolBar
                             , QSizePolicy, QFileDialog,
                             QMessageBox, QApplication, QListWidget,
-                            QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu)
+                            QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu, QDialog)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent
-from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush
+from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush, QFont
 from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
                                 StatisticsPanel)
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
-from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles
+from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles, WidgetStyles
 from .components.styles.theme import default_theme
+from .components.styles.widget_styles import WidgetStyles as WS
 from .components.tutorial import TutorialManager
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
-                     TabbedHelpDialog, ProgressDialog)
+                     TabbedHelpDialog, ProgressDialog, SettingsDialog, ManageIgnoredCategoriesDialog)
 from .managers import FileStateManager
+from .update_dialog import UpdateInfoDialog
 from ..core.config import Config
 from ..utils.app_config import get_app_config
 from ..core.scanner import FileScannerThread
 from ..core.image_loader import HighPerformanceImageLoader
 from ..utils.exceptions import ImageClassifierError, FileOperationError, ConfigError
-from ..utils.file_operations import normalize_folder_name, retry_file_operation
+from ..utils.file_operations import normalize_folder_name, retry_file_operation, is_network_path
 from ..core.file_manager import FileOperationManager
+from ..core.update_utils import fetch_manifest, launch_self_update
 from ..utils.performance import performance_monitor
-from .._version_ import __version__
+from ..utils.paths import get_update_dir
+from .._version_ import __version__, get_manifest_url, compare_version
 
 
 class DisabledButtonEventFilter(QObject):
@@ -59,7 +64,6 @@ class DisabledButtonEventFilter(QObject):
             if not obj.isEnabled():
                 # 获取当前主题模式 - 重新加载配置确保同步
                 try:
-                    from utils.app_config import get_app_config
                     app_config = get_app_config()
                     # 重新加载配置文件，确保获取最新值
                     app_config.reload_config()
@@ -897,7 +901,6 @@ class ImageClassifier(QMainWindow):
         # 从应用配置中读取主题设置
         current_theme = "light"
         try:
-            from utils.app_config import get_app_config
             app_config = get_app_config()
             current_theme = app_config.theme
             self.logger.info(f"从应用配置加载主题: {current_theme}")
@@ -959,7 +962,6 @@ class ImageClassifier(QMainWindow):
         # 在状态栏右侧添加版本信息
         self.version_label = QLabel(f"版本 {__version__}")
         # 使用主题颜色
-        from .components.styles.theme import default_theme
         c = default_theme.colors
         self.version_label.setStyleSheet(f"""
             QLabel {{
@@ -1213,7 +1215,6 @@ class ImageClassifier(QMainWindow):
     
     def open_directory(self):
         """打开图片目录"""
-        from utils.file_operations import is_network_path
 
         dir_path = QFileDialog.getExistingDirectory(self, '选择图片目录')
         if dir_path:
@@ -1720,8 +1721,6 @@ class ImageClassifier(QMainWindow):
                 return
 
             # 弹出确认对话框
-            from PyQt6.QtWidgets import QMessageBox
-            from .components.styles.theme import default_theme
 
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("恢复上次位置")
@@ -2606,7 +2605,6 @@ class ImageClassifier(QMainWindow):
             QIcon: 状态图标
         """
         # 创建72x40的图标（左侧checkbox + 右侧状态图标）
-        from PyQt6.QtGui import QPainter, QPen, QBrush, QFont
 
         pixmap = QPixmap(72, 40)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -2687,7 +2685,6 @@ class ImageClassifier(QMainWindow):
         Args:
             checked: 是否选中状态
         """
-        from .components.styles import default_theme
 
         # 创建18x18的图标
         pixmap = QPixmap(18, 18)
@@ -2717,7 +2714,6 @@ class ImageClassifier(QMainWindow):
 
     def show_sort_menu(self):
         """显示排序方式菜单"""
-        from .components.styles import WidgetStyles
 
         menu = QMenu(self)
         menu.setStyleSheet(WidgetStyles.get_context_menu_style())
@@ -2764,7 +2760,6 @@ class ImageClassifier(QMainWindow):
 
     def show_filter_menu(self):
         """显示筛选菜单"""
-        from .components.styles import WidgetStyles
 
         menu = QMenu(self)
         menu.setStyleSheet(WidgetStyles.get_context_menu_style())
@@ -3872,7 +3867,6 @@ class ImageClassifier(QMainWindow):
 
     def _show_migration_confirmation_dialog(self, target_mode):
         """显示迁移确认对话框"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
 
         dialog = QDialog(self)
         dialog.setWindowTitle("模式切换迁移确认")
@@ -4517,7 +4511,6 @@ class ImageClassifier(QMainWindow):
     def show_settings_dialog(self):
         """显示设置对话框"""
         try:
-            from .dialogs import SettingsDialog
             dialog = SettingsDialog(self)
             dialog.exec()
             # 注意：不再自动隐藏红点
@@ -4558,7 +4551,6 @@ class ImageClassifier(QMainWindow):
                 return
 
             # 检测路径类型
-            from utils.file_operations import is_network_path
             is_network = is_network_path(last_dir)
             path_type_icon = "🌐" if is_network else "💾"
             path_type_text = "网络路径" if is_network else "本地路径"
@@ -4671,7 +4663,6 @@ class ImageClassifier(QMainWindow):
         """切换主题"""
         try:
             # 检查是否启用了自动切换
-            from utils.app_config import get_app_config
             app_config = get_app_config()
 
             # 重新加载配置确保使用最新值（防止缓存不一致）
@@ -4959,7 +4950,6 @@ class ImageClassifier(QMainWindow):
             # 更新EnhancedImageLabel背景
             if hasattr(self, 'image_label'):
                 # 更新图像标签样式
-                from .components.styles.widget_styles import WidgetStyles
                 self.image_label.setStyleSheet(WidgetStyles.get_image_label_style())
 
                 # 更新信息按钮样式
@@ -5147,9 +5137,6 @@ class ImageClassifier(QMainWindow):
 
     def _auto_check_update_once(self):
         """执行一次静默检查，有更新则弹窗提示"""
-        from core.update_utils import fetch_manifest
-        from _version_ import get_manifest_url, __version__, compare_version
-        import re
 
         # 检查 update 目录下是否有更新包
         local_pending_version = None
@@ -5158,7 +5145,6 @@ class ImageClassifier(QMainWindow):
 
         try:
             # 获取用户目录下的 update 文件夹
-            from ..utils.paths import get_update_dir
             update_dir = get_update_dir()
 
             self.logger.debug(f"检查本地更新目录: {update_dir}")
@@ -5236,7 +5222,6 @@ class ImageClassifier(QMainWindow):
                         notes = str(manifest.get('notes', '')).strip()
 
                         # 显示更新对话框
-                        from .update_dialog import UpdateInfoDialog
                         update_dialog = UpdateInfoDialog(
                             new_version=online_version,
                             current_version=__version__,
@@ -5273,7 +5258,6 @@ class ImageClassifier(QMainWindow):
                     # 如果批处理脚本不存在，需要重新生成
                     if not local_batch_path or not local_batch_path.exists():
                         self.logger.warning(f"批处理脚本不存在，重新生成")
-                        from core.update_utils import launch_self_update
                         # 获取正确的exe路径（开发环境 vs 打包环境）
                         if getattr(sys, 'frozen', False):
                             # 打包环境：使用exe所在目录
@@ -5299,8 +5283,6 @@ class ImageClassifier(QMainWindow):
                         pass
 
                     # 应用主题适配样式
-                    from .components.styles.theme import default_theme
-                    from ..utils.app_config import get_app_config
                     config = get_app_config()
                     default_theme.set_theme(config.theme)
                     c = default_theme.colors
@@ -5381,7 +5363,6 @@ class ImageClassifier(QMainWindow):
                             notes = str(manifest.get('notes', '')).strip()
 
                             # 显示更新对话框
-                            from .update_dialog import UpdateInfoDialog
                             update_dialog = UpdateInfoDialog(
                                 new_version=online_version,
                                 current_version=__version__,
@@ -5618,7 +5599,6 @@ class ImageClassifier(QMainWindow):
     def show_manage_ignored_dialog(self):
         """显示管理忽略列表对话框"""
         try:
-            from .dialogs import ManageIgnoredCategoriesDialog
 
             dialog = ManageIgnoredCategoriesDialog(self.config, self)
             dialog.exec()
