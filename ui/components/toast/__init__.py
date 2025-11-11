@@ -8,8 +8,7 @@ Toast通知组件模块
 # 导入简化版Toast系统（主要接口）
 from .simple_toast import (
     Toast, ToastType, ToastPosition,
-    toast_info, toast_success, toast_warning, toast_error, toast_floating,
-    simple_toast_info, simple_toast_success, simple_toast_warning, simple_toast_error
+    toast_info, toast_success, toast_warning, toast_error, toast_floating
 )
 
 # 为了向后兼容，保留旧的导入路径
@@ -27,10 +26,6 @@ __all__ = [
     'toast_warning',
     'toast_error',
     'toast_floating',
-    'simple_toast_info',
-    'simple_toast_success',
-    'simple_toast_warning',
-    'simple_toast_error',
     # 向后兼容
     'ToastConfig',
     'ToastStyles',

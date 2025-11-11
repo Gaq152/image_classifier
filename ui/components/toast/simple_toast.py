@@ -103,7 +103,6 @@ class Toast:
             toast_weight = TOAST_LEVEL_WEIGHT.get(toast_level, 1)
 
             # Toast过滤日志（使用DEBUG级别）
-            import logging
             logger = logging.getLogger(__name__)
             should_show = toast_weight >= configured_weight
             logger.debug(f"Toast过滤检查: [{toast_type.value}] 消息级别={toast_level}(权重{toast_weight}), "
@@ -113,7 +112,6 @@ class Toast:
             return toast_weight >= configured_weight
         except Exception as e:
             # 配置读取失败时，默认显示所有INFO及以上
-            import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Toast过滤失败: {e}，默认显示")
             return True
@@ -276,27 +274,6 @@ def toast_warning(parent, message: str, duration: int = 3000, position: ToastPos
 def toast_error(parent, message: str, duration: int = 3000, position: ToastPosition = ToastPosition.TOP_CENTER):
     """显示错误Toast"""
     return Toast.show(parent, message, ToastType.ERROR, duration, position)
-
-
-# 简化版便捷函数
-def simple_toast_info(parent, message: str, duration: int = 3000):
-    """显示信息Toast（简化版）"""
-    return Toast.show(parent, message, ToastType.INFO, duration)
-
-
-def simple_toast_success(parent, message: str, duration: int = 3000):
-    """显示成功Toast（简化版）"""
-    return Toast.show(parent, message, ToastType.SUCCESS, duration)
-
-
-def simple_toast_warning(parent, message: str, duration: int = 3000):
-    """显示警告Toast（简化版）"""
-    return Toast.show(parent, message, ToastType.WARNING, duration)
-
-
-def simple_toast_error(parent, message: str, duration: int = 3000):
-    """显示错误Toast（简化版）"""
-    return Toast.show(parent, message, ToastType.ERROR, duration)
 
 
 def toast_floating(parent, message: str, duration: int = 3000, position: ToastPosition = ToastPosition.TOP_CENTER):
