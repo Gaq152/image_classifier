@@ -11,13 +11,8 @@ from .simple_toast import (
     toast_info, toast_success, toast_warning, toast_error, toast_floating
 )
 
-# 为了向后兼容，保留旧的导入路径
-from .toast_config import ToastConfig
-from .toast_styles import ToastStyles
-
 # 定义公共接口
 __all__ = [
-    # 新的简化版系统
     'Toast',
     'ToastType',
     'ToastPosition',
@@ -26,7 +21,4 @@ __all__ = [
     'toast_warning',
     'toast_error',
     'toast_floating',
-    # 向后兼容
-    'ToastConfig',
-    'ToastStyles',
 ]
