@@ -6,6 +6,7 @@
 
 import logging
 import os
+import re
 import sys
 import subprocess
 import shutil
@@ -17,16 +18,17 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                             QMessageBox, QTabWidget, QProgressBar, QApplication,
                             QWidget, QTextBrowser, QCheckBox, QGroupBox, QScrollArea, QComboBox,
                             QDoubleSpinBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer, QSize
 from PyQt6.QtGui import QKeySequence, QIcon, QDesktopServices, QPainter, QColor, QPen
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from .._version_ import compare_version, __version__, get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
 from ..utils.exceptions import FileOperationError
 from ..core.update_utils import fetch_manifest, download_with_progress, sha256_file, launch_self_update
 from ..utils.app_config import get_app_config
+from ..utils.paths import get_cache_dir, get_update_dir
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles.theme import default_theme
-from .components.styles import ButtonStyles
+from .components.styles import ButtonStyles, DialogStyles
 from .update_dialog import UpdateInfoDialog
 from .components.widgets.switch import Switch
 
@@ -126,8 +128,6 @@ class CategoryShortcutDialog(QDialog):
         self.setModal(True)
 
         # 应用主题样式
-        from .components.styles import DialogStyles
-        from .components.styles.theme import default_theme
         c = default_theme.colors
         self.setStyleSheet(DialogStyles.get_form_dialog_style())
 
@@ -159,7 +159,6 @@ class CategoryShortcutDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
 
         # 应用按钮样式
-        from .components.styles import ButtonStyles
         ok_btn.setStyleSheet(ButtonStyles.get_primary_button_style())
         cancel_btn.setStyleSheet(ButtonStyles.get_secondary_button_style(""))
 
@@ -279,8 +278,6 @@ class AddCategoriesDialog(QDialog):
         """初始化UI"""
         try:
             # 应用主题样式
-            from .components.styles import DialogStyles, ButtonStyles
-            from .components.styles.theme import default_theme
             c = default_theme.colors
             self.setStyleSheet(DialogStyles.get_form_dialog_style())
 
@@ -1702,8 +1699,6 @@ class ProgressDialog(QDialog):
         self.logger = logging.getLogger(__name__)
 
         # 应用主题样式
-        from .components.styles import DialogStyles
-        from .components.styles.theme import default_theme
         c = default_theme.colors
 
         layout = QVBoxLayout(self)
@@ -1831,7 +1826,6 @@ class ManageIgnoredCategoriesDialog(QDialog):
         self.setMinimumSize(500, 400)
 
         # 使用统一样式
-        from .components.styles import DialogStyles
         self.setStyleSheet(DialogStyles.get_form_dialog_style())
 
         self.init_ui()
@@ -1839,7 +1833,6 @@ class ManageIgnoredCategoriesDialog(QDialog):
 
     def init_ui(self):
         """初始化UI"""
-        from .components.styles.theme import default_theme
         c = default_theme.colors
 
         layout = QVBoxLayout(self)
@@ -1958,7 +1951,6 @@ class ManageIgnoredCategoriesDialog(QDialog):
 
     def create_list_item(self, category_name):
         """创建列表项（类别名 + 恢复按钮）"""
-        from .components.styles.theme import default_theme
         c = default_theme.colors
 
         # 创建容器widget
@@ -2003,7 +1995,6 @@ class ManageIgnoredCategoriesDialog(QDialog):
 
         # 添加到列表
         list_item = QListWidgetItem(self.list_widget)
-        from PyQt6.QtCore import QSize
         list_item.setSizeHint(QSize(0, 45))  # 设置列表项高度与widget一致
         list_item.setData(Qt.ItemDataRole.UserRole, category_name)  # 存储类别名
         self.list_widget.addItem(list_item)
@@ -2116,7 +2107,6 @@ class SettingsDialog(QDialog):
 
     def create_appearance_section(self) -> QGroupBox:
         """创建外观设置区域"""
-        from .components.widgets import Switch
 
         group = QGroupBox("🎨 外观设置")
         layout = QVBoxLayout(group)
@@ -2419,7 +2409,6 @@ class SettingsDialog(QDialog):
 
     def create_basic_update_section(self) -> QGroupBox:
         """创建基本更新设置区域（仅包含开关和手动检查）"""
-        from .components.widgets import Switch
 
         group = QGroupBox("🔄 更新设置")
         layout = QVBoxLayout(group)
@@ -2761,7 +2750,6 @@ class SettingsDialog(QDialog):
         if last_dir:
             path_type_icon = "🌐" if is_network else "💾"
             path_type_text = "网络路径" if is_network else "本地路径"
-            from pathlib import Path
             drive = Path(last_dir).drive if last_dir else ""
             display_text = f"{path_type_icon} {last_dir}\n({drive} - {path_type_text})"
         else:
@@ -2788,7 +2776,6 @@ class SettingsDialog(QDialog):
 
     def create_smb_section(self) -> QGroupBox:
         """创建SMB缓存设置区域"""
-        from utils.paths import get_cache_dir
 
         group = QGroupBox("🌐 网络缓存")
         layout = QVBoxLayout(group)
@@ -2863,7 +2850,6 @@ class SettingsDialog(QDialog):
 
     def create_update_section(self) -> QGroupBox:
         """创建更新设置区域"""
-        from .components.widgets import Switch
 
         group = QGroupBox("🔄 更新设置")
         layout = QVBoxLayout(group)
@@ -3602,10 +3588,6 @@ class SettingsDialog(QDialog):
     def check_for_updates(self):
         """检查更新"""
         try:
-            import re
-            import subprocess
-            from ..utils.paths import get_update_dir
-            from .._version_ import compare_version, __version__
 
             # 1. 首先检查本地是否有待安装的更新包
             local_pending_version = None
@@ -4113,8 +4095,6 @@ class SettingsDialog(QDialog):
 
         同时，对于所有QLabel和QCheckBox，明确设置它们的颜色以确保正确渲染。
         """
-        from PyQt6.QtWidgets import QLabel, QCheckBox
-        import re
         c = default_theme.colors
 
         # 获取所有QLabel和QCheckBox

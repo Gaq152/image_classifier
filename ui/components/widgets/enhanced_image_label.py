@@ -5,14 +5,18 @@
 """
 
 import logging
+import math
+import os
+from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (QLabel, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
                             QTextEdit, QApplication)
 from PyQt6.QtCore import Qt, QTimer, QPoint, QFileInfo
-from PyQt6.QtGui import QPixmap, QPainter
+from PyQt6.QtGui import QPixmap, QPainter, QFont
 
 from ..toast import toast_floating
 from ..styles import apply_enhanced_image_label_style
+from ..styles.widget_styles import WidgetStyles
 from ....utils.app_config import get_app_config
 
 
@@ -78,9 +82,6 @@ class EnhancedImageLabel(QLabel):
     def create_info_button(self):
         """创建信息按钮"""
         try:
-            from PyQt6.QtWidgets import QPushButton
-            from PyQt6.QtCore import Qt
-            from ..styles.widget_styles import WidgetStyles
 
             # 创建圆形信息按钮
             self.info_button = QPushButton("ℹ️", self)
@@ -114,8 +115,6 @@ class EnhancedImageLabel(QLabel):
     def create_status_badge(self):
         """创建状态标记"""
         try:
-            from PyQt6.QtWidgets import QLabel
-            from PyQt6.QtCore import Qt
 
             # 创建状态标签
             self.status_badge = QLabel("", self)
@@ -531,9 +530,6 @@ class EnhancedImageLabel(QLabel):
     def create_info_panel(self):
         """创建图片信息面板"""
         try:
-            from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel, QPushButton
-            from PyQt6.QtCore import Qt
-            from PyQt6.QtGui import QFont
 
             # 创建半透明面板
             self.info_panel = QFrame(self)
@@ -682,8 +678,6 @@ class EnhancedImageLabel(QLabel):
 
             current_image_path = main_window.image_files[main_window.current_index]
 
-            import os
-            from datetime import datetime
 
             # 收集图片信息
             file_info = QFileInfo(str(current_image_path))
@@ -749,7 +743,6 @@ class EnhancedImageLabel(QLabel):
             if size_bytes == 0:
                 return "0 B"
             size_names = ["B", "KB", "MB", "GB"]
-            import math
             i = int(math.floor(math.log(size_bytes, 1024)))
             p = math.pow(1024, i)
             s = round(size_bytes / p, 2)
@@ -761,8 +754,6 @@ class EnhancedImageLabel(QLabel):
     def create_path_info_widget(self):
         """创建路径信息组件（带复制按钮）"""
         try:
-            from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QTextEdit, QPushButton, QFrame, QLabel
-            from PyQt6.QtCore import Qt
 
             # 创建路径信息容器
             path_container = QFrame()

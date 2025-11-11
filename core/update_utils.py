@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -22,6 +23,11 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, Optional
 from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from PyQt6.QtWidgets import QApplication
+
+from utils.paths import get_update_dir
 
 # 可选：在企业内网环境下内置只读访问令牌，默认为空
 BUILTIN_UPDATE_TOKEN = "Bearer gldt-GFPBbdC1zTZrrsGtVg6S"
@@ -33,7 +39,6 @@ def resolve_token(preferred: Optional[str] = None) -> Optional[str]:
     if env_val:
         return env_val
     return BUILTIN_UPDATE_TOKEN or None
-from urllib.request import Request, urlopen
 
 
 def sha256_file(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -51,7 +56,6 @@ def sha256_file(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
             chunk_count += 1
             if chunk_count % 5 == 0:
                 try:
-                    from PyQt6.QtWidgets import QApplication
                     QApplication.processEvents()
                 except Exception:
                     # 如果不在Qt环境中（如命令行），忽略错误
@@ -73,7 +77,6 @@ def _build_request(url: str, token: Optional[str]) -> Request:
                 req.add_header('Authorization', token)
             elif ':' in token:
                 # user:token -> Basic
-                import base64
                 b64 = base64.b64encode(token.encode('utf-8')).decode('ascii')
                 req.add_header('Authorization', f'Basic {b64}')
             elif token.lower().startswith('bearer '):
@@ -231,8 +234,6 @@ def ensure_persistent_updater(target_exe: Path) -> Path:
     - 无参数：自行从 update/ 目录寻找最新包；若不存在则联机下载 latest/manifest.json 并保存到 update/；完成后安装并删除安装包
     - 有参数：使用传入的新包路径进行安装（程序内调用），完成后删除该包
     """
-    from utils.paths import get_update_dir
-
     exe_path = target_exe.resolve()
     exe_dir = exe_path.parent
     # 使用统一的用户目录下的 update 目录

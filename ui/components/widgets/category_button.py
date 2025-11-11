@@ -11,8 +11,10 @@ from PyQt6.QtCore import Qt
 
 from ....utils.file_operations import normalize_folder_name, retry_file_operation
 from ....utils.exceptions import FileOperationError
+from ...dialogs import CategoryShortcutDialog
 from ..toast import toast_warning, toast_error, toast_floating
 from ..styles import apply_category_button_style, WidgetStyles, ButtonStyles
+from ..styles.theme import default_theme
 
 
 class CategoryButton(QPushButton):
@@ -101,8 +103,6 @@ class CategoryButton(QPushButton):
     def update_label_colors(self):
         """更新标签颜色以匹配当前主题"""
         try:
-            from ..styles.theme import default_theme
-
             # 获取当前按钮状态
             is_classified = self.property("classified")
             is_removed = self.property("removed")
@@ -178,7 +178,6 @@ class CategoryButton(QPushButton):
     def rename_category(self):
         """重命名类别"""
         try:
-            from PyQt6.QtWidgets import QHBoxLayout
 
             # 创建自定义对话框
             dialog = QDialog(self)
@@ -242,7 +241,6 @@ class CategoryButton(QPushButton):
     def change_shortcut(self):
         """修改快捷键"""
         try:
-            from ...dialogs import CategoryShortcutDialog
 
             main_window = self.window()
             if main_window and hasattr(main_window, 'config'):
@@ -297,7 +295,6 @@ class CategoryButton(QPushButton):
         """忽略类别"""
         try:
             from ..styles.theme import default_theme
-            c = default_theme.colors
 
             # 创建自定义消息框
             msg_box = QMessageBox(self)
@@ -353,7 +350,6 @@ class CategoryButton(QPushButton):
         """删除类别"""
         try:
             from ..styles.theme import default_theme
-            c = default_theme.colors
 
             # 创建自定义消息框
             msg_box = QMessageBox(self)
