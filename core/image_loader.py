@@ -228,27 +228,25 @@ class HighPerformanceImageLoader(QThread):
             return None
     
     def _load_from_local_cache(self, image_path):
-        """从本地缓存加载图片"""
+        """从本地缓存加载图片
+
+        性能优化: 完全信任缓存，不检查原文件修改时间
+        理由:
+        1. 图片文件是只读资源，极少修改
+        2. 避免网络stat()调用，每次节省100-500ms
+        3. 如需重建缓存，用户可手动清理缓存目录
+        """
         cache_path = self._get_local_cache_path(image_path)
         if not cache_path or not cache_path.exists():
             return None
-            
+
         try:
-            # 检查缓存是否比原文件新
-            original_mtime = Path(image_path).stat().st_mtime
-            cache_mtime = cache_path.stat().st_mtime
-            
-            # 如果原文件更新了，删除缓存
-            if original_mtime > cache_mtime:
-                cache_path.unlink()
-                return None
-            
-            # 从缓存加载
+            # 直接从缓存加载，不检查原文件
             pixmap = self._load_with_opencv(str(cache_path))
             if self._is_valid_pixmap(pixmap):
                 self.logger.info(f"[SMB缓存] 命中本地缓存: {Path(image_path).name}")
                 return pixmap
-                
+
         except Exception as e:
             self.logger.debug(f"[SMB缓存] 加载失败: {e}")
             # 删除损坏的缓存文件
@@ -257,35 +255,49 @@ class HighPerformanceImageLoader(QThread):
                     cache_path.unlink()
             except:
                 pass
-        
+
         return None
     
     def _save_to_local_cache(self, image_path, image_data):
         """保存图片到本地缓存"""
         if not self.smb_optimization['enable_local_cache']:
             return
-            
+
+        # 检查PIL是否可用
+        if not PIL_AVAILABLE:
+            self.logger.debug("[SMB缓存] PIL不可用，无法保存缓存")
+            return
+
         cache_path = self._get_local_cache_path(image_path)
         if not cache_path:
             return
-            
+
         try:
             # 确保缓存目录存在
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # 保存图片数据
-            if isinstance(image_data, bytes):
+            if NUMPY_AVAILABLE and isinstance(image_data, np.ndarray):
+                # numpy array -> PIL Image -> 保存为JPEG
+                pil_image = Image.fromarray(image_data)
+                pil_image.save(cache_path, format='JPEG', quality=95, optimize=True)
+                # 记录缓存大小
+                cache_size_mb = cache_path.stat().st_size / 1024 / 1024
+                self.logger.info(f"[SMB缓存] 已缓存: {Path(image_path).name} ({cache_size_mb:.2f}MB)")
+            elif isinstance(image_data, bytes):
                 with open(cache_path, 'wb') as f:
                     f.write(image_data)
+                cache_size_mb = cache_path.stat().st_size / 1024 / 1024
+                self.logger.info(f"[SMB缓存] 已缓存: {Path(image_path).name} ({cache_size_mb:.2f}MB)")
+            elif hasattr(image_data, 'save'):
+                # PIL Image或其他格式
+                image_data.save(cache_path, quality=95, optimize=True)
+                cache_size_mb = cache_path.stat().st_size / 1024 / 1024
+                self.logger.info(f"[SMB缓存] 已缓存: {Path(image_path).name} ({cache_size_mb:.2f}MB)")
             else:
-                # 如果是PIL Image或其他格式，先转换
-                if hasattr(image_data, 'save'):
-                    image_data.save(cache_path, quality=95, optimize=True)
-                else:
-                    return  # 不支持的格式
-            
-            self.logger.debug(f"[SMB缓存] 已缓存: {Path(image_path).name}")
-            
+                self.logger.debug(f"[SMB缓存] 不支持的数据格式: {type(image_data)}")
+                return
+
         except Exception as e:
             self.logger.debug(f"[SMB缓存] 保存失败: {e}")
     
@@ -485,6 +497,15 @@ class HighPerformanceImageLoader(QThread):
     def load_image(self, image_path, priority=True):
         """智能图片加载调度 - 使用线程池并行加载"""
         try:
+            # 快速检查内存缓存，避免不必要的线程池任务
+            # 这可以显著减少线程切换开销和并发计数操作
+            cache_key = self._get_cache_key(image_path)
+            cached_pixmap = self._get_from_cache(cache_key)
+            if self._is_valid_pixmap(cached_pixmap):
+                # 内存缓存命中，直接返回，不进入线程池
+                # 这避免了：线程锁操作、Future对象创建、回调函数添加、线程切换
+                return
+
             # 检查并发限制，网络环境使用更保守策略
             is_network_env = is_network_path(image_path)
             
@@ -556,13 +577,23 @@ class HighPerformanceImageLoader(QThread):
         try:
             cache_key = self._get_cache_key(image_path)
             
-            # 检查缓存
+            # 检查内存缓存
             cached_pixmap = self._get_from_cache(cache_key)
             if self._is_valid_pixmap(cached_pixmap):
                 load_time = (time.time() - load_start) * 1000
-                self.logger.debug(f"[并行加载-缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
+                self.logger.debug(f"[并行加载-内存缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
                 return {'image_data': cached_pixmap, 'cached': True, 'load_time': load_time}
-            
+
+            # 检查本地磁盘缓存（仅对网络路径）
+            if is_network_path(image_path):
+                cached_pixmap = self._load_from_local_cache(image_path)
+                if self._is_valid_pixmap(cached_pixmap):
+                    # 更新内存缓存，避免下次再读磁盘
+                    self._update_cache(cache_key, cached_pixmap)
+                    load_time = (time.time() - load_start) * 1000
+                    self.logger.info(f"[并行加载-磁盘缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
+                    return {'image_data': cached_pixmap, 'cached': True, 'load_time': load_time}
+
             # 根据文件大小和环境选择加载策略
             file_size = Path(image_path).stat().st_size
             file_size_mb = file_size / 1024 / 1024
@@ -585,10 +616,19 @@ class HighPerformanceImageLoader(QThread):
             
             # 检查加载结果
             if self._is_valid_pixmap(pixmap):
-                # 缓存原始数据
+                # 缓存原始数据到内存
                 self._update_cache(cache_key, pixmap)
+
+                # 保存到本地磁盘缓存（仅对网络路径）
+                if is_network_path(image_path):
+                    try:
+                        self._save_to_local_cache(image_path, pixmap)
+                    except Exception as e:
+                        # 缓存保存失败不影响正常加载
+                        self.logger.debug(f"[并行加载] 保存磁盘缓存失败: {e}")
+
                 load_time = (time.time() - load_start) * 1000
-                    
+
                 # 记录性能统计
                 self.load_times.append(load_time)
                 if len(self.load_times) > 100:
