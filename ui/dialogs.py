@@ -2845,6 +2845,21 @@ class SettingsDialog(QDialog):
         self.cache_path_label.setWordWrap(True)
         smb_layout.addWidget(self.cache_path_label)
 
+        # 缓存大小显示
+        self.cache_size_label = QLabel()
+        self.cache_size_label.setObjectName("cacheSizeLabel")
+        self.cache_size_label.setStyleSheet(f"""
+            color: {c.TEXT_SECONDARY};
+            padding: 8px 10px;
+            background-color: {c.BACKGROUND_SECONDARY};
+            border-radius: 4px;
+            font-size: 12px;
+        """)
+        smb_layout.addWidget(self.cache_size_label)
+
+        # 初始化缓存大小显示
+        self._update_cache_size_display()
+
         layout.addWidget(smb_group)
 
         # 配置文件信息
@@ -3778,7 +3793,7 @@ class SettingsDialog(QDialog):
         """清除SMB缓存"""
         msgBox = QMessageBox(self)
         msgBox.setWindowTitle("确认清除")
-        msgBox.setText("确定要清除SMB/NAS网络路径的图片缓存吗？")
+        msgBox.setText("确定要清除SMB/NAS网络路径的图片缓存吗？\n这将删除本地缓存目录中的所有文件。")
         msgBox.setIcon(QMessageBox.Icon.Question)
         yes_btn = msgBox.addButton("是", QMessageBox.ButtonRole.YesRole)
         no_btn = msgBox.addButton("否", QMessageBox.ButtonRole.NoRole)
@@ -3787,16 +3802,66 @@ class SettingsDialog(QDialog):
 
         if msgBox.clickedButton() == yes_btn:
             try:
-                # 调用主窗口的图片加载器清除缓存
+                # 清除内存缓存
                 if self.parent() and hasattr(self.parent(), 'image_loader'):
                     self.parent().image_loader.clear_cache()
-                    toast_success(self, "SMB缓存已清除")
-                    self.logger.warning("用户手动清除了SMB缓存")
-                else:
-                    toast_warning(self, "无法访问图片加载器")
+
+                # 清除磁盘缓存
+                cache_dir = get_cache_dir()
+                if cache_dir.exists():
+                    import shutil
+                    for item in cache_dir.iterdir():
+                        try:
+                            if item.is_file():
+                                item.unlink()
+                            elif item.is_dir():
+                                shutil.rmtree(item)
+                        except Exception as e:
+                            self.logger.warning(f"删除缓存文件失败 {item}: {e}")
+
+                # 更新缓存大小显示
+                self._update_cache_size_display()
+
+                toast_success(self, "SMB缓存已清除")
+                self.logger.warning("用户手动清除了SMB缓存")
             except Exception as e:
                 self.logger.error(f"清除SMB缓存失败: {e}")
                 toast_error(self, f"清除缓存失败: {str(e)}")
+
+    def _update_cache_size_display(self):
+        """更新缓存大小显示"""
+        try:
+            cache_dir = get_cache_dir()
+            if not cache_dir.exists():
+                self.cache_size_label.setText("缓存大小：0 B（0 个文件）")
+                return
+
+            total_size = 0
+            file_count = 0
+
+            for item in cache_dir.rglob('*'):
+                if item.is_file():
+                    try:
+                        total_size += item.stat().st_size
+                        file_count += 1
+                    except Exception:
+                        continue
+
+            # 格式化大小显示
+            if total_size < 1024:
+                size_str = f"{total_size} B"
+            elif total_size < 1024 * 1024:
+                size_str = f"{total_size / 1024:.2f} KB"
+            elif total_size < 1024 * 1024 * 1024:
+                size_str = f"{total_size / (1024 * 1024):.2f} MB"
+            else:
+                size_str = f"{total_size / (1024 * 1024 * 1024):.2f} GB"
+
+            self.cache_size_label.setText(f"📦 缓存大小：{size_str}（{file_count} 个文件）")
+
+        except Exception as e:
+            self.logger.error(f"更新缓存大小显示失败: {e}")
+            self.cache_size_label.setText("缓存大小：计算失败")
 
     def _save_zoom_config(self):
         """保存缩放配置到磁盘（防抖定时器触发）"""
@@ -4171,10 +4236,21 @@ class SettingsDialog(QDialog):
                 font-family: monospace;
             """)
 
+        # 手动更新缓存大小标签
+        cache_size_labels = [label for label in all_labels if label.objectName() == "cacheSizeLabel"]
+        for cache_size_label in cache_size_labels:
+            cache_size_label.setStyleSheet(f"""
+                color: {c.TEXT_SECONDARY};
+                padding: 8px 10px;
+                background-color: {c.BACKGROUND_SECONDARY};
+                border-radius: 4px;
+                font-size: 12px;
+            """)
+
         # 处理所有QLabel
         for label in all_labels:
             # 跳过特殊的状态标签（它有自己的颜色处理）
-            if label.objectName() in ("tutorialStatusLabel", "lastDirLabel", "cacheDirLabel"):
+            if label.objectName() in ("tutorialStatusLabel", "lastDirLabel", "cacheDirLabel", "cacheSizeLabel"):
                 continue
 
             current_style = label.styleSheet()

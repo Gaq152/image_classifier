@@ -1,6 +1,7 @@
-# claude 文档
+# 开发 文档
 .claude
 claude.md
+docs/
 
 # Python缓存文件
 __pycache__/
@@ -38,6 +39,7 @@ ENV/
 
 # 日志文件
 *.log
+*.txt
 
 # 系统文件
 .DS_Store

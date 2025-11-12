@@ -2275,20 +2275,29 @@ class ImageClassifier(QMainWindow):
             # 如果缓存命中，直接显示；否则显示占位符
             if is_cached:
                 # 直接从缓存加载，避免闪烁
-                cached_pixmap = self.image_loader._get_from_cache(cache_key)
+                cached_data = self.image_loader._get_from_cache(cache_key)
                 # 安全检查缓存数据类型
-                if cached_pixmap is not None:
+                if cached_data is not None:
                     # 检查是否为QPixmap类型
-                    if isinstance(cached_pixmap, QPixmap) and not cached_pixmap.isNull():
-                        self.image_label.set_image(cached_pixmap)
+                    if isinstance(cached_data, QPixmap) and not cached_data.isNull():
+                        self.image_label.set_image(cached_data)
                         self.statusBar.showMessage(f"📷 {Path(img_path).name}")
                     else:
-                        # 如果是其他类型数据（如numpy数组），显示占位符等待转换
-                        self.show_loading_placeholder(img_path)
+                        # 缓存中可能是numpy数组或其他格式，转换为QPixmap后显示
+                        cached_pixmap = self.convert_to_pixmap(cached_data)
+                        if cached_pixmap is not None and not cached_pixmap.isNull():
+                            self.image_label.set_image(cached_pixmap)
+                            self.statusBar.showMessage(f"📷 {Path(img_path).name}")
+                        else:
+                            # 转换失败，显示占位符等待异步加载
+                            self.show_loading_placeholder(img_path)
                 else:
                     self.show_loading_placeholder(img_path)
             else:
                 self.show_loading_placeholder(img_path)
+
+            # 记录当前请求的图片路径（用于回调时判断）
+            self._current_requested_image = str(Path(real_path).resolve())
 
             # 异步加载完整图片（使用真实路径）
             self.image_loader.load_image(real_path, priority=True)
@@ -4374,17 +4383,20 @@ class ImageClassifier(QMainWindow):
     def on_image_loaded(self, image_path, image_data):
         """图像加载完成回调 - 只显示当前选中的图片"""
         try:
-            # 关键修复：只有当前选中的图片才显示，其他都是预加载缓存
-            if self.image_files and 0 <= self.current_index < len(self.image_files):
-                current_path = str(self.image_files[self.current_index])
-                # 计算当前图片的实际路径（移动模式下可能在分类目录）
-                current_real_path = str(self.get_real_file_path(current_path))
+            # 关键修复：只显示最后一次请求的图片，其他都是预加载缓存
+            # 使用保存的请求路径而不是当前索引，避免异步加载时索引变化导致判断错误
+            normalized_loaded = str(Path(image_path).resolve())
 
-                # 比较实际路径而不是原始路径
-                if current_real_path != image_path:
+            # 检查是否有记录的当前请求图片
+            if hasattr(self, '_current_requested_image'):
+                # 比较路径
+                if self._current_requested_image != normalized_loaded:
                     # 不是当前图片，只是预加载缓存，不显示UI
                     self.logger.debug(f"预加载完成(不显示): {Path(image_path).name}")
                     return
+            else:
+                # 没有记录的请求路径（比如程序刚启动），也显示
+                pass
             
             # 只有当前图片才进行UI显示
             # 转换图像数据为QPixmap
@@ -4430,15 +4442,19 @@ class ImageClassifier(QMainWindow):
     
     def convert_to_pixmap(self, image_data):
         """将图像数据转换为QPixmap"""
-        try:         
+        try:
             if isinstance(image_data, np.ndarray):
                 # numpy数组图像数据
                 height, width, channel = image_data.shape
                 bytes_per_line = 3 * width
-                
-                # 直接使用numpy数组创建QImage，因为image_loader已经将BGR转为RGB
-                # 避免二次颜色通道转换
-                q_image = QImage(image_data.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+
+                # 确保数组是C连续的，并复制数据避免生命周期问题
+                # 这对于从磁盘缓存加载的图片非常重要
+                if not image_data.flags['C_CONTIGUOUS']:
+                    image_data = np.ascontiguousarray(image_data)
+
+                # 创建QImage并立即复制数据，避免numpy数组被释放后QImage引用无效内存
+                q_image = QImage(image_data.data, width, height, bytes_per_line, QImage.Format.Format_RGB888).copy()
                 return QPixmap.fromImage(q_image)
                 
             elif hasattr(image_data, 'mode'):
@@ -4447,7 +4463,13 @@ class ImageClassifier(QMainWindow):
                     rgb_array = np.array(image_data)
                     height, width, channel = rgb_array.shape
                     bytes_per_line = 3 * width
-                    q_image = QImage(rgb_array.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+
+                    # 确保数组是C连续的
+                    if not rgb_array.flags['C_CONTIGUOUS']:
+                        rgb_array = np.ascontiguousarray(rgb_array)
+
+                    # 创建QImage并复制数据
+                    q_image = QImage(rgb_array.data, width, height, bytes_per_line, QImage.Format.Format_RGB888).copy()
                     return QPixmap.fromImage(q_image)
                 else:
                     # 转换为RGB
