@@ -1240,6 +1240,13 @@ class ImageClassifier(QMainWindow):
                 self.logger.warning(f"获取盘符缓存失败: {e}，使用直接检测")
                 is_network = is_network_path(self.current_dir)
 
+            # Task 1.1：通知图像加载器当前工作路径类型
+            # 本地路径将跳过磁盘缓存清理，节省100%清理开销
+            try:
+                self.image_loader.set_working_path(self.current_dir)
+            except Exception as e:
+                self.logger.warning(f"设置图像加载器工作路径失败: {e}")
+
             # 设置配置文件路径为图片目录的父目录
             # 这个操作可能会因为权限问题失败（尤其是网络路径）
             try:
@@ -4649,6 +4656,12 @@ class ImageClassifier(QMainWindow):
             # 检查是否为网络路径
             path_str = str(self.current_dir)
             is_network_path = path_str.startswith('\\\\')
+
+            # Task 1.1修复：通知图像加载器当前工作路径类型
+            try:
+                self.image_loader.set_working_path(self.current_dir)
+            except Exception as e:
+                self.logger.warning(f"设置图像加载器工作路径失败: {e}")
 
             if is_network_path:
                 # 网络路径提醒

@@ -380,12 +380,12 @@ class TutorialBubble(QWidget):
                 secondary_pos_in_parent.x() + secondary_rect.width() // 2,
                 secondary_pos_in_parent.y() + secondary_rect.height() // 2
             )
-            logger.debug(f"[Bubble] secondary_global_pos: {secondary_global_pos}")
+            self.logger.debug(f"[Bubble] secondary_global_pos: {secondary_global_pos}")
 
         # DEBUG
-        logger.debug(f"[Bubble] target_pos_in_parent: {target_pos_in_parent}")
-        logger.debug(f"[Bubble] target_rect: {target_rect}")
-        logger.debug(f"[Bubble] target_global_pos: {target_global_pos}")
+        self.logger.debug(f"[Bubble] target_pos_in_parent: {target_pos_in_parent}")
+        self.logger.debug(f"[Bubble] target_rect: {target_rect}")
+        self.logger.debug(f"[Bubble] target_global_pos: {target_global_pos}")
 
         # 根据箭头位置计算气泡位置
         bubble_width = self.width()
@@ -424,7 +424,7 @@ class TutorialBubble(QWidget):
             y = target_global_pos.y() - bubble_height // 2 + offset_y
 
         # DEBUG：记录计算出来的气泡位置
-        logger.debug(f"[Bubble] 计算出的气泡位置(修正前): x={x}, y={y}")
+        self.logger.debug(f"[Bubble] 计算出的气泡位置(修正前): x={x}, y={y}")
 
         # 确保气泡不超出父窗口边界
         if self.parent():
@@ -432,7 +432,7 @@ class TutorialBubble(QWidget):
             x = max(10, min(x, parent_rect.width() - bubble_width - 10))
             y = max(10, min(y, parent_rect.height() - bubble_height - 10))
 
-        logger.debug(f"[Bubble] 最终气泡位置(修正后): x={x}, y={y}")
+        self.logger.debug(f"[Bubble] 最终气泡位置(修正后): x={x}, y={y}")
 
         self.move(x, y)
         self.show()
