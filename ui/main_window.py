@@ -191,7 +191,11 @@ class ImageClassifier(QMainWindow):
         try:
             # 配置管理器
             self.config = Config()
-            
+
+            # 应用配置管理器（优化8）
+            from utils.app_config import get_app_config
+            self.app_config = get_app_config()
+
             # 文件扫描器
             self.file_scanner = FileScannerThread()
             self.file_scanner.files_found.connect(self.on_files_found)
@@ -205,8 +209,7 @@ class ImageClassifier(QMainWindow):
             self.image_loader.image_loaded.connect(self.on_image_loaded)
             self.image_loader.thumbnail_loaded.connect(self.on_thumbnail_loaded)
             self.image_loader.loading_progress.connect(self.on_loading_progress)
-            self.image_loader.cache_status.connect(self.on_cache_status_updated)
-            
+
             # 文件操作管理器
             self.file_manager = FileOperationManager()
 
@@ -232,7 +235,8 @@ class ImageClassifier(QMainWindow):
         self.ordered_categories = []
         self.category_buttons = []
         self.current_category_index = 0
-        
+        self.is_network_working_path = False  # 当前工作路径是否为网络路径（默认本地）
+
         # 操作模式
         self.is_copy_mode = True  # 复制/移动模式
         self.is_multi_category = False  # 多分类模式：False=单分类，True=多分类
@@ -1264,6 +1268,9 @@ class ImageClassifier(QMainWindow):
                 self.current_dir = None
                 return  # 提前退出，不执行后续操作
 
+            # 保存路径类型到实例变量，供循环翻页等功能使用
+            self.is_network_working_path = is_network
+
             if is_network:
                 # 网络路径提醒
                 toast_info(self,'🚀 检测到网络路径，已启用专项优化')
@@ -1716,6 +1723,12 @@ class ImageClassifier(QMainWindow):
         # 检查是否需要提示用户跳转到上次位置
         QTimer.singleShot(500, self._check_and_prompt_last_position)
 
+        # 优化8：启动缓存预热（仅网络路径且已启用）
+        if is_network_path and self.app_config.cache_warmup_enabled:
+            warmup_count = self.app_config.cache_warmup_count
+            if actual_count > 0:
+                QTimer.singleShot(1000, lambda: self._start_cache_warmup(warmup_count))
+
     def _check_and_prompt_last_position(self):
         """检查并提示用户是否跳转到上次处理的位置"""
         try:
@@ -1800,6 +1813,68 @@ class ImageClassifier(QMainWindow):
 
         except Exception as e:
             self.logger.error(f"检查上次位置失败: {e}")
+
+    def _start_cache_warmup(self, count: int):
+        """启动缓存预热（优化8 + 循环翻页末尾预热）
+
+        Args:
+            count: 预热图片数量
+        """
+        try:
+            if not self.image_files:
+                return
+
+            # 检查是否开启网络路径循环翻页
+            enable_tail_warmup = (
+                self.app_config.network_loop_enabled and
+                hasattr(self, 'is_network_working_path') and
+                self.is_network_working_path
+            )
+
+            # 调用图片加载器的预热方法
+            success = self.image_loader.warmup_cache(
+                self.image_files,
+                count=count,
+                enable_tail_warmup=enable_tail_warmup,
+                callback=self._on_warmup_progress
+            )
+
+            if success:
+                if enable_tail_warmup:
+                    tail_count = count // 2
+                    total_warmup = count + tail_count
+                    self.logger.info(f"[循环翻页] 网络循环已开启，预热前{count}张+末尾{tail_count}张，共{total_warmup}张")
+                    toast_info(self, f"开始预热缓存（前{count}张+末尾{tail_count}张）...")
+                else:
+                    self.logger.info(f"[优化8-预热] 开始预热前 {count} 张图片...")
+                    toast_info(self, f"开始预热缓存（{count}张图片）...")
+            else:
+                self.logger.info("[优化8-预热] 本地路径无需预热，已跳过")
+
+        except Exception as e:
+            self.logger.error(f"[优化8-预热] 启动预热失败: {e}")
+
+    def _on_warmup_progress(self, current: int, total: int, filename: str):
+        """预热进度回调（优化8）
+
+        Args:
+            current: 当前进度
+            total: 总数
+            filename: 当前文件名
+
+        注意：此方法在后台线程中调用，Toast等UI操作需要通过QTimer发送到主线程
+        """
+        try:
+            if current == total:
+                # 预热完成
+                self.logger.info(f"[优化8-预热] 预热完成: {total}/{total}张图片")
+                # 修复BUG：使用QTimer将Toast发送到主线程
+                QTimer.singleShot(0, lambda: toast_success(self, f"缓存预热完成（{total}张图片）"))
+            elif current % 10 == 0:
+                # 每10张输出一次进度日志
+                self.logger.debug(f"[优化8-预热] 预热进度: {current}/{total} | {filename}")
+        except Exception as e:
+            self.logger.error(f"[优化8-预热] 进度回调错误: {e}")
 
     def jump_to_image(self, index):
         """跳转到指定索引的图片
@@ -2459,14 +2534,40 @@ class ImageClassifier(QMainWindow):
             self.logger.debug(f"同步图片列表选中状态失败: {e}")
     
     def preload_adjacent_images(self):
-        """预加载相邻图片"""
+        """预加载相邻图片（优化3：智能预加载范围）"""
         if not self.image_files or self.current_index < 0:
             return
 
-        # 计算预加载范围
-        preload_range = 5  # 前后各5张图片
-        start_idx = max(0, self.current_index - preload_range)
-        end_idx = min(len(self.image_files), self.current_index + preload_range + 1)
+        # 优化3：判断翻页方向（基于最近10次翻页的众数）
+        direction_history = self.user_behavior.get('direction_history', [])
+        if len(direction_history) >= 3:
+            # 计算众数方向：1=向前（下一张），-1=向后（上一张）
+            from collections import Counter
+            direction_counts = Counter(direction_history[-10:])  # 最近10次
+            primary_direction = direction_counts.most_common(1)[0][0]
+        else:
+            # 历史不足，默认向前
+            primary_direction = 1
+
+        # 优化3：根据网络/本地环境调整预加载范围
+        is_network = self.is_network_working_path if hasattr(self, 'is_network_working_path') else False
+
+        if is_network:
+            # 网络路径：保守策略
+            forward_range = 10  # 主方向10张
+            backward_range = 3  # 反方向3张
+        else:
+            # 本地路径：激进策略（本地快，可多预加载）
+            forward_range = 30  # 主方向30张
+            backward_range = 10  # 反方向10张
+
+        # 根据主方向调整范围
+        if primary_direction == 1:  # 向前翻页
+            start_idx = max(0, self.current_index - backward_range)
+            end_idx = min(len(self.image_files), self.current_index + forward_range + 1)
+        else:  # 向后翻页
+            start_idx = max(0, self.current_index - forward_range)
+            end_idx = min(len(self.image_files), self.current_index + backward_range + 1)
 
         # 预加载指定范围内的图片
         for i in range(start_idx, end_idx):
@@ -2518,24 +2619,85 @@ class ImageClassifier(QMainWindow):
             self.logger.debug(f"图片信息记录失败: {e}")
     
     # ===== 导航方法 =====
-    
+
+    def _should_enable_loop(self) -> bool:
+        """判断当前是否应该启用循环翻页
+
+        Returns:
+            bool: True表示启用循环，False表示不启用
+        """
+        try:
+            # 动态刷新配置，确保开关即时生效（避免重启才能应用）
+            if hasattr(self, 'app_config'):
+                self.app_config.reload_config()
+        except Exception as e:
+            self.logger.debug(f"[循环翻页] 刷新配置失败: {e}")
+
+        # 检查是否为网络路径
+        is_network = hasattr(self, 'is_network_working_path') and self.is_network_working_path
+
+        if is_network:
+            # 网络路径：使用网络循环开关
+            loop_enabled = self.app_config.network_loop_enabled
+            self.logger.debug(f"[循环翻页] 网络路径，循环开关：{'开启' if loop_enabled else '关闭'}")
+            return loop_enabled
+        else:
+            # 本地路径：使用本地循环开关
+            loop_enabled = self.app_config.local_loop_enabled
+            self.logger.debug(f"[循环翻页] 本地路径，循环开关：{'开启' if loop_enabled else '关闭'}")
+            return loop_enabled
+
     def prev_image(self):
-        """上一张图片"""
+        """上一张图片（支持循环翻页）"""
         if self.current_index > 0:
             self.current_index -= 1
+
+            # 优化3：记录翻页方向（-1表示向后/上一张）
+            if 'direction_history' not in self.user_behavior:
+                self.user_behavior['direction_history'] = []
+            self.user_behavior['direction_history'].append(-1)
+            # 保留最近10次
+            if len(self.user_behavior['direction_history']) > 10:
+                self.user_behavior['direction_history'] = self.user_behavior['direction_history'][-10:]
+
             self.show_current_image()
         else:
-            # 已经是第一张，显示提示
-            toast_info(self,"已经是第一张图片了！")
-    
+            # 已经是第一张，检查是否开启循环翻页
+            loop_enabled = self._should_enable_loop()
+            if loop_enabled:
+                # 循环到最后一张
+                self.current_index = len(self.image_files) - 1
+                self.logger.debug(f"[循环翻页] 第1张 -> 第{self.current_index + 1}张（最后一张）")
+                self.show_current_image()
+            else:
+                # 显示边界提示
+                toast_info(self, "已经是第一张图片了！")
+
     def next_image(self):
-        """下一张图片"""
+        """下一张图片（支持循环翻页）"""
         if self.current_index < len(self.image_files) - 1:
             self.current_index += 1
+
+            # 优化3：记录翻页方向（1表示向前/下一张）
+            if 'direction_history' not in self.user_behavior:
+                self.user_behavior['direction_history'] = []
+            self.user_behavior['direction_history'].append(1)
+            # 保留最近10次
+            if len(self.user_behavior['direction_history']) > 10:
+                self.user_behavior['direction_history'] = self.user_behavior['direction_history'][-10:]
+
             self.show_current_image()
         else:
-            # 已经是最后一张，显示提示
-            toast_info(self,"已经是最后一张图片了！")
+            # 已经是最后一张，检查是否开启循环翻页
+            loop_enabled = self._should_enable_loop()
+            if loop_enabled:
+                # 循环到第一张
+                self.current_index = 0
+                self.logger.debug(f"[循环翻页] 第{len(self.image_files)}张（最后一张） -> 第1张")
+                self.show_current_image()
+            else:
+                # 显示边界提示
+                toast_info(self, "已经是最后一张图片了！")
     
     def prev_category(self):
         """选择上一个类别 - 参考原始实现"""
@@ -4436,16 +4598,6 @@ class ImageClassifier(QMainWindow):
     def on_loading_progress(self, message):
         """加载进度回调"""
         self.statusBar.showMessage(message)
-    
-    def on_cache_status_updated(self, status):
-        """缓存状态更新回调"""
-        try:
-            # 更新统计面板中的缓存信息
-            if hasattr(self, 'statistics_panel'):
-                # StatisticsPanel没有update_cache_info方法，暂时跳过
-                pass
-        except Exception as e:
-            self.logger.error(f"更新缓存状态时出错: {e}")
     
     def convert_to_pixmap(self, image_data):
         """将图像数据转换为QPixmap"""
