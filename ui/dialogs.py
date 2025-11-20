@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                             QPushButton, QTextEdit, QListWidget, QListWidgetItem,
                             QMessageBox, QTabWidget, QProgressBar, QApplication,
                             QWidget, QTextBrowser, QCheckBox, QGroupBox, QScrollArea, QComboBox,
-                            QDoubleSpinBox)
+                            QDoubleSpinBox,QSpinBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer, QSize
 from PyQt6.QtGui import QKeySequence, QIcon, QDesktopServices, QPainter, QColor, QPen
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
@@ -2862,6 +2862,127 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(smb_group)
 
+        # 缓存预热设置（优化8）
+        warmup_group = QWidget()
+        warmup_layout = QVBoxLayout(warmup_group)
+        warmup_layout.setSpacing(10)
+
+        # 标题和开关（横向布局）
+        warmup_header = QWidget()
+        warmup_header_layout = QHBoxLayout(warmup_header)
+        warmup_header_layout.setContentsMargins(0, 0, 0, 0)
+        warmup_header_layout.setSpacing(10)
+
+        warmup_title = QLabel("🔥 缓存预热")
+        warmup_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        warmup_header_layout.addWidget(warmup_title)
+
+        warmup_header_layout.addStretch()
+
+        # 预热开关
+        warmup_switch_label = QLabel("启用预热")
+        warmup_switch_label.setStyleSheet("font-size: 13px;")
+        warmup_header_layout.addWidget(warmup_switch_label)
+
+        self.warmup_enabled_switch = Switch()
+        self.warmup_enabled_switch.setChecked(self.app_config.cache_warmup_enabled)
+        self.warmup_enabled_switch.toggled.connect(self.on_warmup_enabled_changed)
+        warmup_header_layout.addWidget(self.warmup_enabled_switch)
+
+        warmup_layout.addWidget(warmup_header)
+
+        # 预热图片数量设置（横向布局）
+        warmup_count_widget = QWidget()
+        warmup_count_layout = QHBoxLayout(warmup_count_widget)
+        warmup_count_layout.setContentsMargins(0, 0, 0, 0)
+        warmup_count_layout.setSpacing(10)
+
+        warmup_count_label = QLabel("预热图片数量：")
+        warmup_count_label.setStyleSheet("font-size: 13px;")
+        warmup_count_layout.addWidget(warmup_count_label)
+
+        self.warmup_count_spinbox = QSpinBox()
+        self.warmup_count_spinbox.setRange(10, 500)
+        self.warmup_count_spinbox.setSingleStep(10)
+        self.warmup_count_spinbox.setValue(self.app_config.cache_warmup_count)
+        self.warmup_count_spinbox.setSuffix(" 张")
+        self.warmup_count_spinbox.setMinimumHeight(32)
+        self.warmup_count_spinbox.setMinimumWidth(120)
+        self.warmup_count_spinbox.valueChanged.connect(self.on_warmup_count_changed)
+        warmup_count_layout.addWidget(self.warmup_count_spinbox)
+
+        warmup_count_layout.addStretch()
+
+        warmup_layout.addWidget(warmup_count_widget)
+
+        # 预热说明
+        warmup_desc = QLabel("💡 预热功能会在打开网络目录时，主动预加载前N张图片到缓存，加快首次浏览速度。")
+        warmup_desc.setWordWrap(True)
+        warmup_desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 5px 0;")
+        warmup_layout.addWidget(warmup_desc)
+
+        layout.addWidget(warmup_group)
+
+        # 循环翻页设置
+        loop_group = QWidget()
+        loop_layout = QVBoxLayout(loop_group)
+        loop_layout.setSpacing(10)
+
+        # 标题
+        loop_title = QLabel("🔄 循环翻页")
+        loop_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        loop_layout.addWidget(loop_title)
+
+        # 本地路径循环开关
+        local_loop_widget = QWidget()
+        local_loop_layout = QHBoxLayout(local_loop_widget)
+        local_loop_layout.setContentsMargins(0, 0, 0, 0)
+        local_loop_layout.setSpacing(10)
+
+        local_loop_label = QLabel("本地路径循环：")
+        local_loop_label.setStyleSheet("font-size: 13px;")
+        local_loop_layout.addWidget(local_loop_label)
+
+        self.local_loop_switch = Switch()
+        self.local_loop_switch.setChecked(self.app_config.local_loop_enabled)
+        self.local_loop_switch.toggled.connect(self.on_local_loop_changed)
+        local_loop_layout.addWidget(self.local_loop_switch)
+
+        local_loop_layout.addStretch()
+        loop_layout.addWidget(local_loop_widget)
+
+        # 本地循环说明
+        local_loop_desc = QLabel("💡 本地文件读取速度快，建议开启循环翻页")
+        local_loop_desc.setWordWrap(True)
+        local_loop_desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 5px 0;")
+        loop_layout.addWidget(local_loop_desc)
+
+        # 网络路径循环开关
+        network_loop_widget = QWidget()
+        network_loop_layout = QHBoxLayout(network_loop_widget)
+        network_loop_layout.setContentsMargins(0, 0, 0, 0)
+        network_loop_layout.setSpacing(10)
+
+        network_loop_label = QLabel("网络路径循环：")
+        network_loop_label.setStyleSheet("font-size: 13px;")
+        network_loop_layout.addWidget(network_loop_label)
+
+        self.network_loop_switch = Switch()
+        self.network_loop_switch.setChecked(self.app_config.network_loop_enabled)
+        self.network_loop_switch.toggled.connect(self.on_network_loop_changed)
+        network_loop_layout.addWidget(self.network_loop_switch)
+
+        network_loop_layout.addStretch()
+        loop_layout.addWidget(network_loop_widget)
+
+        # 网络循环说明
+        network_loop_desc = QLabel("⚠️ 开启后将额外预热末尾图片（约增加预热时间50%），建议按需开启")
+        network_loop_desc.setWordWrap(True)
+        network_loop_desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 5px 0;")
+        loop_layout.addWidget(network_loop_desc)
+
+        layout.addWidget(loop_group)
+
         # 配置文件信息
         info_group = QWidget()
         info_layout = QVBoxLayout(info_group)
@@ -3418,6 +3539,33 @@ class SettingsDialog(QDialog):
                          f"是否同一实例={self.app_config is verify_config}")
 
         toast_success(self, f"Toast提示级别已设置为 {level}")
+
+    def on_warmup_enabled_changed(self, checked: bool):
+        """缓存预热开关改变事件（优化8）"""
+        self.app_config.cache_warmup_enabled = checked
+        status = "启用" if checked else "禁用"
+        toast_success(self, f"缓存预热功能已{status}（仅网络路径有效）")
+
+    def on_warmup_count_changed(self, value: int):
+        """预热图片数量改变事件（优化8）"""
+        self.app_config.cache_warmup_count = value
+        toast_success(self, f"预热图片数量已设置为 {value} 张")
+
+    def on_local_loop_changed(self, checked: bool):
+        """本地路径循环翻页开关改变事件"""
+        self.app_config.local_loop_enabled = checked
+        status = "启用" if checked else "禁用"
+        toast_success(self, f"本地路径循环翻页已{status}（翻页到边界时生效）")
+
+    def on_network_loop_changed(self, checked: bool):
+        """网络路径循环翻页开关改变事件"""
+        self.app_config.network_loop_enabled = checked
+        status = "启用" if checked else "禁用"
+
+        if checked:
+            toast_success(self, f"网络路径循环翻页已{status}\n翻页到边界时生效，末尾预热需重新打开目录")
+        else:
+            toast_success(self, f"网络路径循环翻页已{status}（翻页到边界时生效）")
 
     def select_theme(self, mode: str):
         """选择主题模式并立即应用

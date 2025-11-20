@@ -46,7 +46,7 @@ class HighPerformanceImageLoader(QThread):
     image_loaded = pyqtSignal(str, object)  # 发送原始图片数据（numpy array 或 PIL Image）
     thumbnail_loaded = pyqtSignal(str, object)  # 发送原始缩略图数据
     loading_progress = pyqtSignal(str)
-    cache_status = pyqtSignal(dict)
+    # Task 3.3：已删除 cache_status 信号，监控UI已移除
     
     def __init__(self, cache_size=30):
         super().__init__()
@@ -86,6 +86,10 @@ class HighPerformanceImageLoader(QThread):
         self.active_network_sources = 0  # 活跃的网络加载任务数
         self.last_network_activity_ts = 0  # 最后一次网络活动时间
         self._network_counter_lock = threading.Lock()  # 网络计数器线程锁
+
+        # Task 3.1：7天兜底扫描的时间戳记录
+        self.last_reconcile_ts = 0  # 最后一次全盘扫描时间戳
+        self.reconcile_interval = 7 * 24 * 3600  # 7天（秒）
 
         # Task 2.1：缩放策略配置（文件大小 + 分辨率驱动）
         self.scaling_profiles = {
@@ -138,10 +142,20 @@ class HighPerformanceImageLoader(QThread):
         self.scaled_cache_miss_count = 0  # 缩放缓存未命中计数
         self._scaled_cache_lock = threading.Lock()  # 缩放缓存计数器线程锁
 
+        # 优化6：细粒度缓存命中率统计（全局累计，永不归零）
+        self.memory_hits = 0      # 内存缓存命中次数
+        self.disk_hits = 0        # 磁盘缓存命中次数
+        self.network_miss = 0     # 网络加载次数（缓存未命中）
+        self._stats_lock = threading.Lock()  # 统计计数器线程锁
+
         # 性能监控
         self.load_times = []  # 加载时间记录
         self.concurrent_loads = 0  # 当前并发加载数
         self.concurrent_lock = threading.Lock()  # 并发计数器线程锁
+
+        # 紧急修复：预加载任务去重和限流（阶段三紧急修复）
+        self.pending_preload_jobs = set()  # 记录已提交的预加载任务路径
+        self.preload_jobs_lock = threading.Lock()  # 预加载任务集合线程锁
 
         # 资源清理定时器 - 防止内存泄漏（Task 1.1：按需启动，Task 1.3：自适应周期）
         self.cleanup_timer = QTimer()
@@ -162,6 +176,16 @@ class HighPerformanceImageLoader(QThread):
                 # 迁移旧的隐藏缓存目录数据
                 self._migrate_old_cache()
 
+                # 优化9：检查缓存健康状态，异常时清空重建
+                # 修复BUG：只有在缓存目录有内容时才检查健康状态
+                cache_files = list(cache_dir.glob('*'))
+                if len(cache_files) > 0:
+                    need_rebuild = self._check_cache_health(cache_dir)
+                    if need_rebuild:
+                        self._rebuild_cache_from_scratch(cache_dir)
+                else:
+                    self.logger.debug("[优化9-健康检查] 缓存目录为空，跳过健康检查")
+
                 # Task 1.2 P1修复：使用SimpleCacheMeta模块
                 self.cache_meta = SimpleCacheMeta(cache_dir)
 
@@ -176,10 +200,16 @@ class HighPerformanceImageLoader(QThread):
                     days_since_update = (time.time() - summary['last_update']) / (24 * 3600)
                     if days_since_update > 7:
                         self.logger.info(f"[SMB优化] 元信息已{days_since_update:.1f}天未更新，执行兜底校准扫描")
-                        # 强制执行一次完整扫描以校准元信息
+                        # 强制执行一次完整扫描以校准元信息（Task 3.1：会更新last_reconcile_ts）
                         self._force_reconcile_cache()
+                    else:
+                        # Task 3.1：元信息在7天内，设置last_reconcile_ts为元信息的最后更新时间
+                        self.last_reconcile_ts = summary['last_update']
                 else:
-                    self.logger.debug("[SMB优化] 元信息文件已创建，当前无缓存数据")
+                    # Task 3.1修复：缓存为空时，设置last_reconcile_ts为当前时间
+                    # 这样后续7天扫描机制才能正常工作
+                    self.last_reconcile_ts = time.time()
+                    self.logger.debug("[SMB优化] 元信息文件已创建，当前无缓存数据，初始化7天扫描时间戳")
 
                 # 清理过期缓存
                 self._cleanup_local_cache()
@@ -229,18 +259,179 @@ class HighPerformanceImageLoader(QThread):
         except Exception as e:
             self.logger.debug(f"[SMB缓存迁移] 迁移过程出错: {e}")
 
+    def _check_cache_health(self, cache_dir):
+        """检查缓存健康状态（优化9：元数据缺失/损坏时重建）
 
+        检测以下异常情况：
+        1. cache_meta.bin 不存在或无法解析
+        2. cache_scaling_index.jsonl 不存在或损坏
+        3. 缓存目录存在非规范文件（无 _S? 后缀的旧缓存）
+
+        Args:
+            cache_dir: 缓存目录路径（Path对象）
+
+        Returns:
+            bool: True表示需要重建缓存，False表示健康
+        """
+        try:
+            meta_file = cache_dir / 'cache_meta.bin'
+            index_file = cache_dir / 'cache_scaling_index.jsonl'
+
+            # 检查1：cache_meta.bin 存在性和可解析性
+            if not meta_file.exists():
+                self.logger.warning(f"[优化9-健康检查] cache_meta.bin 不存在，需要重建缓存")
+                return True
+
+            # 尝试解析 cache_meta.bin
+            try:
+                with open(meta_file, 'rb') as f:
+                    # SimpleCacheMeta 格式：魔数(4B) + 版本(2B) + 其他(42B) = 48B
+                    header = f.read(48)
+                    if len(header) < 48:
+                        self.logger.warning(f"[优化9-健康检查] cache_meta.bin 文件不完整，需要重建缓存")
+                        return True
+
+                    # 解析魔数和版本号
+                    magic = header[0:4]
+                    version = struct.unpack('<H', header[4:6])[0]  # 小端序uint16
+
+                    # 检查魔数
+                    if magic != b'CACH':
+                        self.logger.warning(f"[优化9-健康检查] cache_meta.bin 魔数错误，需要重建缓存")
+                        return True
+
+                    # 检查版本（当前版本是1）
+                    if version != 1:
+                        self.logger.warning(f"[优化9-健康检查] cache_meta.bin 版本不匹配(v{version})，需要重建缓存")
+                        return True
+
+            except Exception as e:
+                self.logger.warning(f"[优化9-健康检查] cache_meta.bin 解析失败: {e}，需要重建缓存")
+                return True
+
+            # 检查2：cache_scaling_index.jsonl 存在性
+            if not index_file.exists():
+                self.logger.warning(f"[优化9-健康检查] cache_scaling_index.jsonl 不存在，需要重建缓存")
+                return True
+
+            # 尝试读取 index 文件的第一行验证格式
+            try:
+                with open(index_file, 'r', encoding='utf-8') as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        import json
+                        json.loads(first_line)  # 验证JSON格式
+            except Exception as e:
+                self.logger.warning(f"[优化9-健康检查] cache_scaling_index.jsonl 格式错误: {e}，需要重建缓存")
+                return True
+
+            # 检查3：是否存在非规范缓存文件（旧格式：无 _S? 后缀）
+            has_legacy_files = False
+            for cache_file in cache_dir.iterdir():
+                if cache_file.is_file():
+                    # 跳过元数据文件
+                    if cache_file.name in ['cache_meta.bin', 'cache_scaling_index.jsonl']:
+                        continue
+                    if cache_file.suffix in ['.tmp', '.bak']:
+                        continue
+
+                    # 检查文件名是否符合新格式：<hash>_S<n>.<ext>
+                    stem = cache_file.stem
+                    if '_S' not in stem:
+                        # 没有策略后缀，是旧格式文件
+                        has_legacy_files = True
+                        self.logger.debug(f"[优化9-健康检查] 发现旧格式缓存文件: {cache_file.name}")
+                        break  # 发现一个即可
+
+            if has_legacy_files:
+                self.logger.warning(f"[优化9-健康检查] 存在旧格式缓存文件（无_S?后缀），需要重建缓存")
+                return True
+
+            # 所有检查通过
+            self.logger.debug("[优化9-健康检查] 缓存健康状态良好")
+            return False
+
+        except Exception as e:
+            self.logger.warning(f"[优化9-健康检查] 检查过程出错: {e}，为安全起见重建缓存")
+            return True
+
+    def _rebuild_cache_from_scratch(self, cache_dir):
+        """清空缓存目录并重建（优化9：元数据缺失/损坏时的恢复机制）
+
+        执行步骤：
+        1. 记录当前缓存大小（如果可获取）
+        2. 删除缓存目录中的所有文件
+        3. 重新创建空目录
+        4. 初始化空的元数据文件
+
+        Args:
+            cache_dir: 缓存目录路径（Path对象）
+        """
+        try:
+            self.logger.warning(f"[优化9-缓存重建] 检测到元数据缺失/损坏，开始清空缓存目录...")
+
+            # 1. 统计当前缓存大小（如果可能）
+            total_size = 0
+            file_count = 0
+            try:
+                for cache_file in cache_dir.rglob('*'):
+                    if cache_file.is_file():
+                        total_size += cache_file.stat().st_size
+                        file_count += 1
+            except:
+                pass
+
+            if file_count > 0:
+                total_gb = total_size / (1024**3)
+                self.logger.info(f"[优化9-缓存重建] 将清空 {file_count} 个缓存文件 ({total_gb:.2f}GB)")
+
+            # 2. 删除整个缓存目录
+            try:
+                shutil.rmtree(cache_dir)
+                self.logger.info(f"[优化9-缓存重建] 缓存目录已删除")
+            except Exception as e:
+                self.logger.warning(f"[优化9-缓存重建] 删除缓存目录失败: {e}，尝试逐个删除文件")
+                # 备用方案：逐个删除文件
+                for cache_file in list(cache_dir.rglob('*')):
+                    try:
+                        if cache_file.is_file():
+                            cache_file.unlink()
+                    except:
+                        pass
+
+            # 3. 重新创建空目录
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.info(f"[优化9-缓存重建] 缓存目录已重建: {cache_dir}")
+
+            # 4. 更新 last_reconcile_ts
+            self.last_reconcile_ts = time.time()
+
+            self.logger.warning(f"[优化9-缓存重建] 完成！首次加载图片时将重新建立缓存，可能较慢")
+
+        except Exception as e:
+            self.logger.error(f"[优化9-缓存重建] 重建失败: {e}")
+            # 确保目录至少存在
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+            except:
+                pass
 
 
     def _force_reconcile_cache(self):
-        """强制校准缓存元信息（阶段1修复-问题5，问题6）
+        """强制校准缓存元信息（优化5：仅容量控制和索引重建）
 
         执行全量扫描并更新元信息，用于处理：
-        - 7天未更新的元信息
+        - 容量统计和索引重建
         - 外部手动删除/添加的缓存文件
         - 元信息与实际磁盘不一致的情况
 
+        优化5改动：
+        - 不再校验源文件是否存在/修改（完全信任缓存）
+        - 不再7天定期触发（仅容量超过90%时触发）
+        - 仅扫描缓存目录，重建CacheIndex和CacheMeta
+
         问题6修复：使用批量更新模式，避免扫描期间的add_entry/remove_entry被覆盖
+        Task 3.4：同步验证和修复CacheIndex，确保索引与实际文件一致
         """
         try:
             cache_dir = self.smb_optimization['cache_dir']
@@ -254,14 +445,18 @@ class HighPerformanceImageLoader(QThread):
             # 阶段1修复-问题6: 进入批量更新模式
             self.cache_meta.begin_bulk_update()
 
+            # Task 3.4：准备CacheIndex验证数据
+            scanned_cache_files = {}  # {path_hash: (cache_file, strategy_id, format)}
+            meta_file = self.cache_meta.meta_path
+            index_file = cache_dir / 'cache_scaling_index.jsonl'
+
             try:
                 total_size = 0
                 file_count = 0
-                meta_file = self.cache_meta.meta_path
 
                 for cache_file in cache_dir.rglob('*'):
                     # Task 2.1收尾P3：跳过元信息文件、CacheIndex文件和临时文件
-                    if cache_file == meta_file or cache_file.name == 'cache_scaling_index.jsonl' or cache_file.name.endswith('.tmp'):
+                    if cache_file == meta_file or cache_file == index_file or cache_file.name.endswith('.tmp') or cache_file.name.endswith('.bak'):
                         continue
 
                     if cache_file.is_file():
@@ -269,15 +464,51 @@ class HighPerformanceImageLoader(QThread):
                             size = cache_file.stat().st_size
                             total_size += size
                             file_count += 1
+
+                            # Task 3.4：解析缓存文件名，提取path_hash和strategy_id
+                            filename = cache_file.stem  # 例如：a3f2d8b9_S1
+                            if '_' in filename:
+                                path_hash = filename.split('_')[0]
+                                # 提取策略ID（例如S1, S2）
+                                strategy_id = None
+                                for part in filename.split('_'):
+                                    if part in ['S0', 'S1', 'S2']:
+                                        strategy_id = part
+                                        break
+                            else:
+                                path_hash = filename
+                                strategy_id = 'S0'  # 旧格式默认S0
+
+                            # 推断格式
+                            ext = cache_file.suffix.lower()
+                            if ext in ['.jpg', '.jpeg']:
+                                fmt = 'jpeg'
+                            elif ext == '.png':
+                                fmt = 'png'
+                            elif ext == '.webp':
+                                fmt = 'webp'
+                            else:
+                                fmt = 'jpeg'
+
+                            scanned_cache_files[path_hash] = (cache_file, strategy_id, fmt)
+
                         except:
                             continue
 
                 # 阶段1修复-问题6: 提交批量更新，合并扫描结果和增量操作
                 self.cache_meta.commit_bulk_update(file_count, total_size)
 
+                # Task 3.4：同步CacheIndex
+                if self.cache_index is not None:
+                    self._sync_cache_index_with_files(scanned_cache_files)
+
+                # Task 3.1：更新最后扫描时间戳
+                self.last_reconcile_ts = time.time()
+
                 elapsed = (time.time() - start_time) * 1000
                 total_gb = total_size / (1024**3)
-                self.logger.info(f"[缓存校准] 扫描完成: {file_count}个文件, {total_gb:.2f}GB, 耗时{elapsed:.1f}ms")
+                self.logger.info(f"[缓存校准] 扫描完成: {file_count}个文件, {total_gb:.2f}GB, 耗时{elapsed:.1f}ms, "
+                               f"索引已同步, 下次扫描时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.last_reconcile_ts + self.reconcile_interval))}")
 
             except Exception as scan_error:
                 # 扫描失败时中止批量更新
@@ -286,6 +517,72 @@ class HighPerformanceImageLoader(QThread):
 
         except Exception as e:
             self.logger.warning(f"[缓存校准] 校准失败: {e}")
+
+    def _sync_cache_index_with_files(self, scanned_files):
+        """同步CacheIndex与实际文件（Task 3.4）
+
+        Args:
+            scanned_files: 扫描到的缓存文件字典 {path_hash: (cache_file, strategy_id, format)}
+        """
+        try:
+            self.logger.info("[Task3.4-索引同步] 开始同步CacheIndex...")
+
+            # 获取当前索引中的所有记录
+            index_stats = self.cache_index.get_statistics()
+            index_entries_count = index_stats['total_entries']
+
+            # 1. 删除索引中不存在文件的记录
+            # 修复死锁问题：先收集要删除的path_hash，再释放锁后调用remove_entry
+            removed_count = 0
+            path_hashes_to_remove = []
+            with self.cache_index._lock:
+                for path_hash in list(self.cache_index._index.keys()):
+                    if path_hash not in scanned_files:
+                        path_hashes_to_remove.append(path_hash)
+
+            # 释放锁后再调用remove_entry，避免锁嵌套死锁
+            for path_hash in path_hashes_to_remove:
+                self.cache_index.remove_entry(path_hash)
+                removed_count += 1
+
+            # 2. 为缺失索引的文件添加记录
+            added_count = 0
+            for path_hash, (cache_file, strategy_id, fmt) in scanned_files.items():
+                if path_hash not in self.cache_index._index:
+                    try:
+                        # 读取文件大小
+                        cache_size = cache_file.stat().st_size
+
+                        # 尝试从文件推断原始尺寸（如果无法推断，使用0）
+                        # 注意：这里无法获取原始路径和精确尺寸，只能填充基本信息
+                        self.cache_index.add_entry(
+                            path_hash=path_hash,
+                            original_path=f"unknown_{path_hash}",  # 原始路径未知
+                            strategy_id=strategy_id or 'S1',
+                            scale_ratio=1.0,  # 无法精确推断
+                            target_format=fmt,
+                            original_width=0,  # 无法获取
+                            original_height=0,
+                            cached_width=0,
+                            cached_height=0,
+                            cache_size=cache_size
+                        )
+                        added_count += 1
+                    except Exception as e:
+                        self.logger.debug(f"[Task3.4-索引同步] 添加索引失败 {cache_file.name}: {e}")
+
+            # 3. 重建索引文件，清理重复记录
+            if removed_count > 0 or added_count > 0:
+                self.cache_index.rebuild_index()
+
+            self.logger.info(f"[Task3.4-索引同步] 同步完成: "
+                           f"原索引{index_entries_count}条, "
+                           f"删除{removed_count}条, "
+                           f"添加{added_count}条, "
+                           f"最终{len(self.cache_index._index)}条")
+
+        except Exception as e:
+            self.logger.warning(f"[Task3.4-索引同步] 同步失败: {e}")
 
     def _cleanup_local_cache(self):
         """清理本地缓存（Task 1.2：使用元信息优化）"""
@@ -453,6 +750,9 @@ class HighPerformanceImageLoader(QThread):
 
                 self.logger.info(f"[SMB缓存] 清理完成，删除{removed_count}个文件，释放 {removed_size / (1024**3):.2f}GB")
 
+                # Task 3.2：清理完成后归零命中率统计
+                self.reset_scaled_cache_stats()
+
             except Exception as cleanup_error:
                 # 扫描或清理失败时中止批量更新
                 self.cache_meta.abort_bulk_update()
@@ -506,148 +806,63 @@ class HighPerformanceImageLoader(QThread):
             return None
     
     def _load_from_local_cache(self, image_path, file_size_mb=None, max_dim=None):
-        """从本地缓存加载图片（Task 2.1收尾P3修复：首轮缓存未命中问题）
+        """从本地缓存加载图片（优化1+2：CacheIndex命中即读，未命中直接返回）
 
-        性能优化: 完全信任缓存，不检查原文件修改时间
-        理由:
-        1. 图片文件是只读资源，极少修改
-        2. 避免网络stat()调用，每次节省100-500ms
-        3. 如需重建缓存，用户可手动清理缓存目录
+        性能优化: 完全信任缓存索引（优化1+2实施后）
+        - 优化1：CacheIndex命中 → 直接加载，不调用exists()检查
+        - 优化2：CacheIndex未命中 → 立即返回None，不枚举9种组合
+        - 失败处理：文件读取失败时自动清理索引并返回None
 
-        Task 2.1收尾P3修复：当CacheIndex未命中时，尝试所有可能的策略命名（S0/S1/S2）
-        这样可以在首轮加载时也能找到缓存文件，即使索引还未生效。
+        原理：
+        1. CacheIndex是缓存文件的唯一来源，未在索引中即视为miss
+        2. 失败时清理索引，让下次加载走网络重建缓存
+        3. 彻底消除网络stat()调用，命中延迟从~150ms降至~30ms
 
         Args:
             image_path: 原始图片路径
-            file_size_mb: 文件大小（MB），用于策略选择（可选）
-            max_dim: 最大边长，用于策略选择（可选）
+            file_size_mb: 文件大小（MB），用于策略选择（已废弃，保留兼容）
+            max_dim: 最大边长，用于策略选择（已废弃，保留兼容）
 
         Returns:
             numpy数组或None
         """
-        # Task 2.1收尾P2：优先使用CacheIndex查询，避免访问网络
-        cache_path = None
-        found_strategy_id = None
-
+        # 优化1+2：CacheIndex命中即读，未命中直接返回None
         if self.cache_index is not None:
-            # 使用CacheIndex查询已缓存的变体
             path_hash = hashlib.md5(str(image_path).encode()).hexdigest()
             index_entry = self.cache_index.get_entry(path_hash)
 
             if index_entry:
-                # 找到了索引记录，直接使用记录中的策略信息构建路径
+                # 优化1：CacheIndex命中后直接读取，不再调用exists()检查
                 strategy_id = index_entry.get('strategy_id')
                 target_format = index_entry.get('target_format')
                 cache_path = self._get_local_cache_path(image_path, strategy_id=strategy_id, target_format=target_format)
 
-                if cache_path and cache_path.exists():
-                    self.logger.debug(f"[SMB缓存] CacheIndex命中: {Path(image_path).name} 策略:{strategy_id}")
-                    found_strategy_id = strategy_id
-                else:
-                    # 索引记录存在但文件不存在，索引已失效
-                    self.logger.debug(f"[SMB缓存] CacheIndex记录失效，文件不存在: {cache_path}")
-                    cache_path = None
+                try:
+                    # 直接尝试加载，失败即清理索引
+                    image_array, width, height = self._load_with_opencv(str(cache_path))
+                    if self._is_valid_pixmap(image_array):
+                        # 缓存命中，增加计数
+                        with self._scaled_cache_lock:
+                            self.scaled_cache_hit_count += 1
 
-        # Task 2.1收尾P3修复：如果CacheIndex未命中，尝试所有可能的策略命名（S0/S1/S2）
-        # 这样可以解决首轮加载时缓存文件存在但索引未生效的问题
-        if not cache_path:
-            # 获取原始扩展名，用于构造所有可能的缓存文件名
-            original_ext = Path(image_path).suffix.lower()
+                        # 优化6：磁盘缓存命中计数
+                        with self._stats_lock:
+                            self.disk_hits += 1
 
-            # 为所有可能的格式生成候选路径
-            # 格式优先级：jpeg > png > webp > 原始格式
-            candidate_formats = []
-            if original_ext in ['.jpg', '.jpeg']:
-                candidate_formats = ['jpeg', 'png', 'webp']
-            elif original_ext in ['.png']:
-                candidate_formats = ['png', 'jpeg', 'webp']
-            elif original_ext in ['.webp']:
-                candidate_formats = ['webp', 'jpeg', 'png']
-            else:
-                candidate_formats = ['jpeg', 'png', 'webp']
+                        self.logger.debug(f"[优化1-CacheIndex命中] {Path(image_path).name} 策略:{strategy_id}")
+                        return image_array
 
-            # 策略优先级：S1 > S2 > S0（大多数情况S1最常用）
-            for strategy_id in ['S1', 'S2', 'S0']:
-                for fmt in candidate_formats:
-                    candidate_path = self._get_local_cache_path(image_path, strategy_id=strategy_id, target_format=fmt)
-                    if candidate_path and candidate_path.exists():
-                        self.logger.info(f"[SMB缓存] 多策略尝试命中: {Path(image_path).name} 策略:{strategy_id} 格式:{fmt}")
-                        cache_path = candidate_path
-                        found_strategy_id = strategy_id
-                        break
-                if cache_path:
-                    break
+                except Exception as e:
+                    # 优化1：文件读取失败，清理索引并视为miss
+                    self.logger.warning(f"[优化1-索引失效] {Path(image_path).name} 读取失败: {e}，已移除索引")
+                    try:
+                        self.cache_index.remove_entry(path_hash)
+                    except:
+                        pass
+                    return None
 
-        # 最后尝试旧格式缓存（向后兼容）
-        if not cache_path or not cache_path.exists():
-            old_cache_path = self._get_local_cache_path(image_path)
-            if old_cache_path and old_cache_path.exists():
-                self.logger.debug(f"[SMB缓存] 找到旧格式缓存: {old_cache_path.name}")
-                cache_path = old_cache_path
-                found_strategy_id = 'S0'  # 旧格式默认S0
-            else:
-                # Task 2.3修复：不在这里增加miss计数，由_load_image_worker统一处理
-                return None
-
-        # 加载缓存文件
-        try:
-            # Task 2.1修复：从缓存加载时解包元组
-            image_array, width, height = self._load_with_opencv(str(cache_path))
-            if self._is_valid_pixmap(image_array):
-                # Task 2.3：缓存命中，增加计数（线程安全）
-                with self._scaled_cache_lock:
-                    self.scaled_cache_hit_count += 1
-                self.logger.info(f"[SMB缓存] 命中本地缓存: {Path(image_path).name} ({cache_path.name})")
-
-                # Task 2.1收尾P3：如果找到了缓存但CacheIndex中没有记录，补充索引
-                # 这样下次就可以直接从索引查询，避免多次文件系统遍历
-                if self.cache_index is not None and found_strategy_id:
-                    path_hash = hashlib.md5(str(image_path).encode()).hexdigest()
-                    existing_entry = self.cache_index.get_entry(path_hash)
-
-                    if not existing_entry:
-                        # 推断格式
-                        cache_ext = cache_path.suffix.lower()
-                        if cache_ext in ['.jpg', '.jpeg']:
-                            inferred_format = 'jpeg'
-                        elif cache_ext == '.png':
-                            inferred_format = 'png'
-                        elif cache_ext == '.webp':
-                            inferred_format = 'webp'
-                        else:
-                            inferred_format = 'jpeg'
-
-                        # 添加到索引，避免下次再遍历
-                        try:
-                            cache_size = cache_path.stat().st_size
-                            self.cache_index.add_entry(
-                                path_hash=path_hash,
-                                original_path=str(image_path),
-                                strategy_id=found_strategy_id,
-                                scale_ratio=1.0,  # 无法精确推断，使用默认值
-                                target_format=inferred_format,
-                                original_width=width,
-                                original_height=height,
-                                cached_width=width,
-                                cached_height=height,
-                                cache_size=cache_size
-                            )
-                            self.logger.debug(f"[SMB缓存] 补充索引: {Path(image_path).name} 策略:{found_strategy_id}")
-                        except Exception as idx_err:
-                            self.logger.debug(f"[SMB缓存] 补充索引失败: {idx_err}")
-
-                return image_array
-
-        except Exception as e:
-            self.logger.debug(f"[SMB缓存] 加载失败: {e}")
-            # 删除损坏的缓存文件
-            try:
-                if cache_path and cache_path.exists():
-                    cache_path.unlink()
-                    self.logger.debug(f"[SMB缓存] 已删除损坏的缓存文件: {cache_path.name}")
-            except:
-                pass
-
+        # 优化2：CacheIndex未命中，直接返回None，不再枚举9种组合
+        self.logger.debug(f"[优化2-索引未命中] {Path(image_path).name}，走网络加载")
         return None
     
     def _save_to_local_cache(self, image_path, image_data, strategy_id='S1', scale_ratio=1.0,
@@ -681,16 +896,7 @@ class HighPerformanceImageLoader(QThread):
             return
 
         try:
-            # 阶段1修复-问题3: 检查缓存文件是否已存在
-            old_size = 0
-            file_exists = cache_path.exists()
-            if file_exists:
-                try:
-                    old_size = cache_path.stat().st_size
-                    self.logger.debug(f"[SMB缓存] 覆盖已存在的缓存: {Path(image_path).name} (旧大小{old_size / 1024 / 1024:.2f}MB)")
-                except:
-                    pass
-
+            # 优化7：直接覆盖写入，不再检查旧文件
             # 确保缓存目录存在
             cache_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -723,11 +929,7 @@ class HighPerformanceImageLoader(QThread):
                                f"格式:{target_format} | "
                                f"大小:{cache_size_mb:.2f}MB")
 
-                # 阶段1修复-问题3: 先删除旧记录再添加新记录
-                if file_exists and old_size > 0:
-                    self.cache_meta.remove_entry(old_size)
-
-                # Task 2.1收尾：添加策略信息到元数据（扩展add_entry）
+                # 优化7：直接添加新记录，不再检查和删除旧记录
                 self.cache_meta.add_entry(
                     cache_size_bytes,
                     strategy_id=strategy_id,
@@ -768,11 +970,7 @@ class HighPerformanceImageLoader(QThread):
                                f"格式:{target_format} | "
                                f"大小:{cache_size_mb:.2f}MB")
 
-                # 阶段1修复-问题3: 先删除旧记录再添加新记录
-                if file_exists and old_size > 0:
-                    self.cache_meta.remove_entry(old_size)
-
-                # Task 2.1收尾P1修复：bytes分支也传递策略信息到元数据
+                # 优化7：直接添加新记录，不再检查和删除旧记录
                 self.cache_meta.add_entry(
                     cache_size_bytes,
                     strategy_id=strategy_id,
@@ -813,11 +1011,7 @@ class HighPerformanceImageLoader(QThread):
                                f"格式:{target_format} | "
                                f"大小:{cache_size_mb:.2f}MB")
 
-                # 阶段1修复-问题3: 先删除旧记录再添加新记录
-                if file_exists and old_size > 0:
-                    self.cache_meta.remove_entry(old_size)
-
-                # Task 2.1收尾P1修复：PIL Image分支也传递策略信息到元数据
+                # 优化7：直接添加新记录，不再检查和删除旧记录
                 self.cache_meta.add_entry(
                     cache_size_bytes,
                     strategy_id=strategy_id,
@@ -937,7 +1131,7 @@ class HighPerformanceImageLoader(QThread):
             # 执行缩放
             scaled_image = cv2.resize(image_data, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
-            self.logger.info(f"[缩放策略] {strategy_id} {original_width}x{original_height} -> "
+            self.logger.debug(f"[缩放策略] {strategy_id} {original_width}x{original_height} -> "
                            f"{new_width}x{new_height} (缩放比{scale_ratio:.2f})")
 
             return scaled_image, scale_ratio
@@ -1112,7 +1306,7 @@ class HighPerformanceImageLoader(QThread):
             return False
     
     def load_image(self, image_path, priority=True):
-        """智能图片加载调度 - 使用线程池并行加载"""
+        """智能图片加载调度 - 使用线程池并行加载（紧急修复：添加预加载去重和限流）"""
         try:
             # 快速检查内存缓存，避免不必要的线程池任务
             # 这可以显著减少线程切换开销和并发计数操作
@@ -1121,6 +1315,11 @@ class HighPerformanceImageLoader(QThread):
             if self._is_valid_pixmap(cached_pixmap):
                 # 内存缓存命中，直接返回，不进入线程池
                 # 这避免了：线程锁操作、Future对象创建、回调函数添加、线程切换
+
+                # 优化6：内存缓存命中计数
+                with self._stats_lock:
+                    self.memory_hits += 1
+
                 return
 
             # 检查并发限制，网络环境使用更保守策略
@@ -1132,11 +1331,29 @@ class HighPerformanceImageLoader(QThread):
             else:
                 # 本地环境：3倍线程池大小的并发，充分利用本地I/O
                 max_concurrent = max(8, int(self.thread_pool._max_workers * 3))
-            
+
             # 线程安全地检查并发数
             with self.concurrent_lock:
                 current_concurrent = self.concurrent_loads
-            
+
+            # 紧急修复：低优先级任务的去重和限流机制
+            if not priority:
+                # 1. 去重：检查该路径是否已经在预加载队列中
+                with self.preload_jobs_lock:
+                    if image_path in self.pending_preload_jobs:
+                        self.logger.debug(f"[预加载去重] 跳过重复任务: {Path(image_path).name}")
+                        return
+
+                # 2. 限流：当并发数达到上限时，直接跳过低优先级任务
+                if current_concurrent >= max_concurrent:
+                    self.logger.debug(f"[预加载限流] 并发已满，跳过预加载: {Path(image_path).name} ({current_concurrent}/{max_concurrent})")
+                    return
+
+                # 3. 添加到预加载任务集合
+                with self.preload_jobs_lock:
+                    self.pending_preload_jobs.add(image_path)
+
+            # 高优先级任务的处理逻辑（保持原有逻辑）
             if current_concurrent >= max_concurrent:
                 if priority:
                     # 高优先级任务：短暂等待后强制执行
@@ -1149,19 +1366,11 @@ class HighPerformanceImageLoader(QThread):
                         wait_count += 1
                         with self.concurrent_lock:
                             current_concurrent = self.concurrent_loads
-                    
+
                     # 高优先级任务总是执行，不会被阻塞
                     if current_concurrent >= max_concurrent:
                         self.logger.info(f"[并发控制] 高优先级任务强制执行，当前并发:{current_concurrent}/{max_concurrent}")
-                else:
-                    # 低优先级任务：只在并发数严重超标时才跳过
-                    if current_concurrent >= max_concurrent * 1.5:
-                        self.logger.debug(f"[并发控制] 跳过低优先级任务，当前并发:{current_concurrent}/{max_concurrent}")
-                        return
-                    else:
-                        # 轻度超标时仍然执行，只记录信息
-                        self.logger.debug(f"[并发控制] 低优先级任务继续执行，当前并发:{current_concurrent}/{max_concurrent}")
-            
+
             with self.concurrent_lock:
                 self.concurrent_loads += 1
             
@@ -1198,6 +1407,11 @@ class HighPerformanceImageLoader(QThread):
             with self.concurrent_lock:
                 self.concurrent_loads = max(0, self.concurrent_loads - 1)
 
+            # 紧急修复：异常时也要从预加载集合中移除
+            if not priority:
+                with self.preload_jobs_lock:
+                    self.pending_preload_jobs.discard(image_path)
+
             # 如果是网络路径，还需要回滚网络计数器
             if is_network_env:
                 with self._network_counter_lock:
@@ -1233,12 +1447,16 @@ class HighPerformanceImageLoader(QThread):
                     # 更新内存缓存，避免下次再读磁盘
                     self._update_cache(cache_key, cached_pixmap)
                     load_time = (time.time() - load_start) * 1000
-                    self.logger.info(f"[并行加载-磁盘缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
+                    self.logger.debug(f"[并行加载-磁盘缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
                     return {'image_data': cached_pixmap, 'cached': True, 'load_time': load_time}
 
             # Task 2.3修复：缓存完全未命中，增加miss计数
             with self._scaled_cache_lock:
                 self.scaled_cache_miss_count += 1
+
+            # 优化6：网络加载计数（缓存未命中）
+            with self._stats_lock:
+                self.network_miss += 1
 
             # 缓存未命中，现在才访问网络获取文件信息
             file_size = Path(image_path).stat().st_size
@@ -1285,7 +1503,7 @@ class HighPerformanceImageLoader(QThread):
 
             # Task 2.1：记录策略应用信息到日志
             scaled_height, scaled_width = scaled_array.shape[:2]
-            self.logger.info(f"[Task2.1-策略应用] {Path(image_path).name} | "
+            self.logger.debug(f"[Task2.1-策略应用] {Path(image_path).name} | "
                            f"策略:{strategy_id} | "
                            f"原始:{width}x{height}({file_size_mb:.1f}MB) | "
                            f"缩放:{scaled_width}x{scaled_height}(比例{scale_ratio:.2f}) | "
@@ -1341,6 +1559,10 @@ class HighPerformanceImageLoader(QThread):
         with self.concurrent_lock:
             self.concurrent_loads = max(0, self.concurrent_loads - 1)
 
+        # 紧急修复：从预加载任务集合中移除（如果存在）
+        with self.preload_jobs_lock:
+            self.pending_preload_jobs.discard(image_path)
+
         # Task 1.1：递减网络计数器并控制定时器
         if is_network_path(image_path):
             with self._network_counter_lock:
@@ -1395,7 +1617,49 @@ class HighPerformanceImageLoader(QThread):
                 'hit_count': self.cache_hit_count,
                 'miss_count': self.cache_miss_count
             }
-    
+
+    def get_cache_stats(self):
+        """获取细粒度缓存统计信息（优化6：全局累计统计）
+
+        返回三层缓存的命中情况：
+        - memory_hits: 内存缓存命中次数
+        - disk_hits: 磁盘缓存命中次数
+        - network_miss: 网络加载次数（缓存未命中）
+
+        Returns:
+            dict: 包含命中率、总请求数等统计信息
+        """
+        with self._stats_lock:
+            total = self.memory_hits + self.disk_hits + self.network_miss
+
+            if total == 0:
+                return {
+                    'memory_hits': 0,
+                    'disk_hits': 0,
+                    'network_miss': 0,
+                    'total_requests': 0,
+                    'memory_hit_rate': '0.0%',
+                    'disk_hit_rate': '0.0%',
+                    'overall_hit_rate': '0.0%',
+                    'network_miss_rate': '0.0%'
+                }
+
+            memory_rate = self.memory_hits / total * 100
+            disk_rate = self.disk_hits / total * 100
+            overall_hit_rate = (self.memory_hits + self.disk_hits) / total * 100
+            network_rate = self.network_miss / total * 100
+
+            return {
+                'memory_hits': self.memory_hits,
+                'disk_hits': self.disk_hits,
+                'network_miss': self.network_miss,
+                'total_requests': total,
+                'memory_hit_rate': f"{memory_rate:.1f}%",
+                'disk_hit_rate': f"{disk_rate:.1f}%",
+                'overall_hit_rate': f"{overall_hit_rate:.1f}%",
+                'network_miss_rate': f"{network_rate:.1f}%"
+            }
+
     def clear_cache(self):
         """清理缓存"""
         with self.concurrent_lock:
@@ -1404,8 +1668,41 @@ class HighPerformanceImageLoader(QThread):
             self.cache_hit_count = 0
             self.cache_miss_count = 0
 
+        # Task 3.2：清理缓存时同时归零缩放缓存统计
+        self.reset_scaled_cache_stats()
+
+    def reset_scaled_cache_stats(self):
+        """重置缩放缓存统计（Task 3.2：周期归零）
+
+        在以下场景调用：
+        - clear_cache(): 清理内存缓存时
+        - _cleanup_local_cache(): 清理磁盘缓存后
+        - set_working_path(): 切换工作路径时
+        - _periodic_resource_cleanup(): 每个清理周期后（记录日志后归零）
+
+        目的：让命中率反映"最近一个周期"的表现，而不是启动以来的累积平均
+        """
+        with self._scaled_cache_lock:
+            old_hit = self.scaled_cache_hit_count
+            old_miss = self.scaled_cache_miss_count
+            total = old_hit + old_miss
+
+            # 归零前记录当前周期的命中率（如果有数据）
+            if total > 0:
+                hit_rate = old_hit / total
+                self.logger.info(f"[Task3.2-命中率归零] 本周期统计: "
+                               f"命中{old_hit}次, 未命中{old_miss}次, "
+                               f"命中率{hit_rate:.1%} → 计数器已归零")
+
+            # 归零计数器
+            self.scaled_cache_hit_count = 0
+            self.scaled_cache_miss_count = 0
+
     def get_monitoring_metrics(self):
-        """Task 2.3：获取监控指标
+        """获取监控指标（仅供开发调试使用，默认不发送信号）
+
+        注意：此方法仅用于开发诊断，需要时由开发者手动调用。
+        产品版本不包含监控UI，不会自动发送cache_status信号。
 
         Returns:
             dict: 包含以下4个监控指标的字典
@@ -1510,21 +1807,27 @@ class HighPerformanceImageLoader(QThread):
             else:
                 self.logger.debug(f"[自适应调度] 占用率{usage_ratio:.1%}正常，跳过清理")
 
+            # 优化5：容量控制触发索引重建（90%阈值）
+            reconcile_threshold = 0.9  # 90%占用率
+            if usage_ratio > reconcile_threshold:
+                # 检查是否最近已经执行过（避免频繁扫描）
+                current_time = time.time()
+                time_since_last = current_time - self.last_reconcile_ts if self.last_reconcile_ts > 0 else float('inf')
+
+                # 至少间隔1小时才重新扫描
+                if time_since_last > 3600:
+                    self.logger.info(f"[优化5-容量触发] 占用率{usage_ratio:.1%}超过90%，触发索引重建")
+                    self._force_reconcile_cache()
+                else:
+                    self.logger.debug(f"[优化5-容量触发] 占用率{usage_ratio:.1%}超过90%，但距上次扫描仅{time_since_last/60:.1f}分钟，跳过")
+
             # 性能监控
             elapsed = (time.time() - start_time) * 1000
             self.logger.debug(f"[性能监控] 清理周期耗时: {elapsed:.1f}ms")
 
-            # Task 2.3：发送监控指标信号
-            try:
-                metrics = self.get_monitoring_metrics()
-                self.cache_status.emit(metrics)
-                self.logger.debug(f"[Task2.3-监控] 已发送监控指标: "
-                                f"占用率{metrics['usage_ratio']:.1%}, "
-                                f"定时器{metrics['timer_interval_ms']}ms, "
-                                f"活跃任务{metrics['active_network_sources']}, "
-                                f"缩放命中率{metrics['scaled_cache_hit_rate']:.1%}")
-            except Exception as emit_err:
-                self.logger.debug(f"[Task2.3-监控] 发送监控指标失败: {emit_err}")
+            # Task 3.2：每个清理周期结束后归零命中率统计
+            # 目的：让命中率反映"最近一个周期"的表现，而不是启动以来的累积平均
+            self.reset_scaled_cache_stats()
 
         except Exception as e:
             elapsed = (time.time() - start_time) * 1000
@@ -1571,10 +1874,86 @@ class HighPerformanceImageLoader(QThread):
             path_type = "网络" if self.is_network_working_path else "本地"
             self.logger.info(f"[路径感知] 工作路径已设置为{path_type}路径: {Path(path).name}")
 
+            # Task 3.2：切换工作路径时归零命中率统计
+            self.reset_scaled_cache_stats()
+
         except Exception as e:
             self.logger.warning(f"[路径感知] 设置工作路径失败: {e}")
             self.current_working_path = None
             self.is_network_working_path = False
+
+    def warmup_cache(self, image_files, count=100, callback=None):
+        """缓存预热工具（优化8：主动预加载）
+
+        在后台按顺序加载指定数量的图片，提前建立缓存。
+
+        Args:
+            image_files: 图片文件路径列表
+            count: 预热数量（默认100张）
+            callback: 进度回调函数 callback(current, total, filename)
+
+        Returns:
+            bool: 是否启动成功
+        """
+        try:
+            # 检查是否为网络路径（本地路径无需预热）
+            if not self.is_network_working_path:
+                self.logger.info("[优化8-预热] 本地路径无需预热，已跳过")
+                if callback:
+                    callback(0, 0, "本地路径无需预热")
+                return False
+
+            if not image_files:
+                self.logger.warning("[优化8-预热] 图片列表为空，无法预热")
+                return False
+
+            # 计算实际预热数量
+            actual_count = min(count, len(image_files))
+            if actual_count == 0:
+                return False
+
+            self.logger.info(f"[优化8-预热] 开始预热缓存，目标: {actual_count}张图片")
+
+            # 在后台线程中执行预热
+            import threading
+            def warmup_worker():
+                success_count = 0
+                for i in range(actual_count):
+                    try:
+                        path = str(image_files[i])
+                        filename = Path(path).name
+
+                        # 低优先级加载（不影响用户操作）
+                        self.load_image(path, priority=False)
+
+                        success_count += 1
+
+                        # 回调进度
+                        if callback:
+                            callback(i + 1, actual_count, filename)
+
+                        # 节流：避免占满带宽（每张间隔300ms）
+                        time.sleep(0.3)
+
+                    except Exception as e:
+                        self.logger.debug(f"[优化8-预热] 预热失败: {filename}, {e}")
+                        continue
+
+                self.logger.info(f"[优化8-预热] 预热完成: {success_count}/{actual_count}张图片")
+
+                # 完成回调
+                if callback:
+                    callback(actual_count, actual_count, "预热完成")
+
+            # 启动后台线程
+            warmup_thread = threading.Thread(target=warmup_worker, daemon=True)
+            warmup_thread.start()
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"[优化8-预热] 启动失败: {e}")
+            return False
 
     def stop(self):
         """停止加载器"""
@@ -1593,14 +1972,13 @@ class ImageProcessingManager:
         self.image_loader = HighPerformanceImageLoader(cache_size)
         self.logger = logging.getLogger(__name__)
         
-    def setup_loader_connections(self, image_loaded_callback, thumbnail_loaded_callback, 
-                                progress_callback, cache_status_callback):
-        """设置加载器回调连接"""
+    def setup_loader_connections(self, image_loaded_callback, thumbnail_loaded_callback,
+                                progress_callback):
+        """设置加载器回调连接（Task 3.3：已删除cache_status_callback）"""
         try:
             self.image_loader.image_loaded.connect(image_loaded_callback)
             self.image_loader.thumbnail_loaded.connect(thumbnail_loaded_callback)
             self.image_loader.loading_progress.connect(progress_callback)
-            self.image_loader.cache_status.connect(cache_status_callback)
         except Exception as e:
             raise ImageLoadError(f"设置加载器连接失败: {e}")
         

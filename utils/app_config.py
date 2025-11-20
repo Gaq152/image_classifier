@@ -46,7 +46,13 @@ class AppConfig:
             "image_zoom_max": 3.0,  # 最大缩放倍数（范围：1.0-20.0）
             "image_zoom_min": 0.1,  # 最小缩放倍数（范围：0.01-1.0）
             "global_zoom_enabled": False,  # 是否启用全局缩放（将缩放倍数应用到所有图片）
-            "last_zoom_factor": 1.0  # 最后使用的缩放倍数（自动记录）
+            "last_zoom_factor": 1.0,  # 最后使用的缩放倍数（自动记录）
+            # 缓存预热相关配置（优化8）
+            "cache_warmup_enabled": True,  # 缓存预热开关（仅网络路径有效）
+            "cache_warmup_count": 100,  # 预热图片数量（范围：10-500）
+            # 循环翻页相关配置
+            "local_loop_enabled": True,  # 本地路径循环翻页（默认开启）
+            "network_loop_enabled": False  # 网络路径循环翻页（默认关闭，开启后会预热末尾图片）
         }
 
     def _load_config(self) -> Dict[str, Any]:
@@ -439,6 +445,62 @@ class AppConfig:
         """设置最后使用的缩放倍数（自动记录，无需手动调用）"""
         self._config["last_zoom_factor"] = value
         self._save_config()
+
+    # ==================== 缓存预热配置（优化8） ====================
+
+    @property
+    def cache_warmup_enabled(self) -> bool:
+        """获取缓存预热开关（仅网络路径有效）"""
+        return self._config.get("cache_warmup_enabled", True)
+
+    @cache_warmup_enabled.setter
+    def cache_warmup_enabled(self, value: bool):
+        """设置缓存预热开关"""
+        self._config["cache_warmup_enabled"] = value
+        self._save_config()
+        self.logger.info(f"缓存预热功能已{'启用' if value else '禁用'}")
+
+    @property
+    def cache_warmup_count(self) -> int:
+        """获取预热图片数量（范围：10-500）"""
+        return self._config.get("cache_warmup_count", 100)
+
+    @cache_warmup_count.setter
+    def cache_warmup_count(self, value: int):
+        """设置预热图片数量"""
+        # 限制范围：10 - 500
+        if 10 <= value <= 500:
+            self._config["cache_warmup_count"] = value
+            self._save_config()
+            self.logger.info(f"预热图片数量已设置为: {value}")
+        else:
+            self.logger.warning(f"无效的预热图片数量: {value}，应在 10-500 之间")
+
+    # ==================== 循环翻页配置 ====================
+
+    @property
+    def local_loop_enabled(self) -> bool:
+        """获取本地路径循环翻页开关"""
+        return self._config.get("local_loop_enabled", True)
+
+    @local_loop_enabled.setter
+    def local_loop_enabled(self, value: bool):
+        """设置本地路径循环翻页开关"""
+        self._config["local_loop_enabled"] = value
+        self._save_config()
+        self.logger.info(f"本地路径循环翻页已{'启用' if value else '禁用'}")
+
+    @property
+    def network_loop_enabled(self) -> bool:
+        """获取网络路径循环翻页开关"""
+        return self._config.get("network_loop_enabled", False)
+
+    @network_loop_enabled.setter
+    def network_loop_enabled(self, value: bool):
+        """设置网络路径循环翻页开关"""
+        self._config["network_loop_enabled"] = value
+        self._save_config()
+        self.logger.info(f"网络路径循环翻页已{'启用' if value else '禁用'}")
 
     # ==================== 其他方法 ====================
 
