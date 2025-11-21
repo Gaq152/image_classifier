@@ -173,6 +173,10 @@ class HighPerformanceImageLoader(QThread):
         self.pending_preload_jobs = set()  # 记录已提交的预加载任务路径
         self.preload_jobs_lock = threading.Lock()  # 预加载任务集合线程锁
 
+        # 修复问题2：缓存清理后台执行标志
+        self.cleanup_in_progress = False  # 是否有清理任务正在执行
+        self.cleanup_lock = threading.Lock()  # 清理任务锁
+
         # 资源清理定时器 - 防止内存泄漏（Task 1.1：按需启动，Task 1.3：自适应周期）
         self.cleanup_timer = QTimer()
         self.cleanup_timer.timeout.connect(self._periodic_resource_cleanup)
@@ -776,7 +780,20 @@ class HighPerformanceImageLoader(QThread):
 
         except Exception as e:
             self.logger.warning(f"[SMB缓存] 清理失败: {e}")
-    
+
+    def _cleanup_local_cache_worker(self):
+        """修复问题2：后台线程执行缓存清理的包装方法"""
+        try:
+            self.logger.debug("[后台清理] 开始执行缓存清理")
+            self._cleanup_local_cache()
+            self.logger.debug("[后台清理] 缓存清理完成")
+        except Exception as e:
+            self.logger.error(f"[后台清理] 执行失败: {e}")
+        finally:
+            # 无论成功失败，都重置标志位
+            with self.cleanup_lock:
+                self.cleanup_in_progress = False
+
     def _get_local_cache_path(self, image_path, strategy_id=None, target_format=None):
         """获取本地缓存文件路径（Task 2.1收尾：支持策略后缀）
 
@@ -1880,8 +1897,21 @@ class HighPerformanceImageLoader(QThread):
             # 4. 只有超过阈值才执行清理（避免不必要的文件扫描）
             threshold = 1.0  # 100%占用率
             if usage_ratio > threshold:
-                self.logger.info(f"[自适应调度] 占用率{usage_ratio:.1%}超限，开始清理")
-                self._cleanup_local_cache()
+                # 修复问题2：检查是否已有清理任务在执行
+                with self.cleanup_lock:
+                    if self.cleanup_in_progress:
+                        self.logger.debug("[自适应调度] 清理任务已在执行，跳过")
+                        return
+                    self.cleanup_in_progress = True
+
+                self.logger.info(f"[自适应调度] 占用率{usage_ratio:.1%}超限，提交后台清理任务")
+                # 提交到后台线程执行
+                try:
+                    self.thread_pool.submit(self._cleanup_local_cache_worker)
+                except Exception as e:
+                    self.logger.error(f"[自适应调度] 提交清理任务失败: {e}")
+                    with self.cleanup_lock:
+                        self.cleanup_in_progress = False
             else:
                 self.logger.debug(f"[自适应调度] 占用率{usage_ratio:.1%}正常，跳过清理")
 

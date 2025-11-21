@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                             , QSizePolicy, QFileDialog,
                             QMessageBox, QApplication, QListWidget,
                             QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu, QDialog)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent, QThread
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush, QFont
 from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
                                 StatisticsPanel)
@@ -48,6 +48,34 @@ from ..core.update_utils import fetch_manifest, launch_self_update
 from ..utils.performance import performance_monitor
 from ..utils.paths import get_update_dir
 from .._version_ import __version__, get_manifest_url, compare_version
+
+
+class UpdateCheckerThread(QThread):
+    """修复问题4：后台检查更新的线程，避免阻塞UI"""
+
+    # 信号：检查成功 (manifest字典, endpoint, token)
+    check_success = pyqtSignal(dict, str, str)
+    # 信号：检查失败 (错误信息)
+    check_failed = pyqtSignal(str)
+
+    def __init__(self, endpoint, token=None):
+        super().__init__()
+        self.endpoint = endpoint
+        self.token = token
+        self.logger = logging.getLogger(__name__)
+
+    def run(self):
+        """在后台线程中执行更新检查"""
+        try:
+            self.logger.debug(f"[后台更新检查] 开始检查: {self.endpoint}")
+            manifest = fetch_manifest(self.endpoint, self.token or None)
+            self.logger.debug(f"[后台更新检查] 检查成功: v{manifest.get('version', 'unknown')}")
+            # 发送成功信号
+            self.check_success.emit(manifest, self.endpoint, self.token or '')
+        except Exception as e:
+            self.logger.debug(f"[后台更新检查] 检查失败: {e}")
+            # 发送失败信号
+            self.check_failed.emit(str(e))
 
 
 class DisabledButtonEventFilter(QObject):
@@ -278,6 +306,9 @@ class ImageClassifier(QMainWindow):
 
         # 文件状态管理器（延迟初始化）
         self.file_state_manager = None
+
+        # 修复问题4：后台更新检查线程
+        self.update_checker_thread = None
 
         # 快捷键管理器
         self.shortcut_manager = None
@@ -5379,6 +5410,22 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.debug(f"定期检查更新失败: {e}")
 
+    def _on_update_check_success(self, manifest, endpoint, token):
+        """修复问题4：后台更新检查成功的回调"""
+        try:
+            online_version = str(manifest.get('version', '')).strip()
+            self.logger.info(f"检查线上更新：发现版本 v{online_version}")
+            # 调用原有逻辑，传递线上版本信息
+            self._process_update_result(online_version, manifest, endpoint, token)
+        except Exception as e:
+            self.logger.error(f"处理更新检查结果失败: {e}")
+
+    def _on_update_check_failed(self, error_message):
+        """修复问题4：后台更新检查失败的回调"""
+        self.logger.debug(f"检查线上更新失败: {error_message}")
+        # 检查失败时，继续处理本地更新包（如果有的话）
+        self._process_update_result(None, None, None, None)
+
     def _auto_check_update_once(self):
         """执行一次静默检查，有更新则弹窗提示"""
 
@@ -5415,10 +5462,9 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.debug(f"检查本地更新目录失败: {e}")
 
-        # 检查线上最新版本
-        online_version = None
+        # 修复问题4：使用后台线程检查线上最新版本，避免阻塞UI
         try:
-            self.logger.debug("检查线上更新：开始")
+            self.logger.debug("检查线上更新：开始（后台线程）")
             endpoint = None
             token = ''
             if self.config:
@@ -5427,11 +5473,38 @@ class ImageClassifier(QMainWindow):
             if not endpoint:
                 endpoint = get_manifest_url(latest=True)
 
-            manifest = fetch_manifest(endpoint, token or None)
-            online_version = str(manifest.get('version', '')).strip()
-            self.logger.info(f"检查线上更新：发现版本 v{online_version}")
+            # 停止旧的检查线程（如果存在）
+            if self.update_checker_thread and self.update_checker_thread.isRunning():
+                self.logger.debug("停止旧的更新检查线程")
+                self.update_checker_thread.quit()
+                self.update_checker_thread.wait()
+
+            # 创建新的后台检查线程
+            self.update_checker_thread = UpdateCheckerThread(endpoint, token)
+            self.update_checker_thread.check_success.connect(self._on_update_check_success)
+            self.update_checker_thread.check_failed.connect(self._on_update_check_failed)
+
+            # 保存本地更新包信息，供回调使用
+            self._local_update_info = {
+                'version': local_pending_version,
+                'path': local_download_path,
+                'batch_path': local_batch_path
+            }
+
+            self.update_checker_thread.start()
+            self.logger.debug("后台更新检查线程已启动")
         except Exception as e:
-            self.logger.debug(f"检查线上更新失败: {e}")
+            self.logger.debug(f"启动后台更新检查失败: {e}")
+            # 失败时调用回调处理
+            self._on_update_check_failed(str(e))
+
+    def _process_update_result(self, online_version, manifest, endpoint, token):
+        """处理更新检查结果"""
+        # 从保存的信息中恢复本地更新包数据
+        local_info = getattr(self, '_local_update_info', {})
+        local_pending_version = local_info.get('version')
+        local_download_path = local_info.get('path')
+        local_batch_path = local_info.get('batch_path')
 
         # 判断是使用本地更新包还是下载新版本
         if local_pending_version and local_download_path:
