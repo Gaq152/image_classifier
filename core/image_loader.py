@@ -128,6 +128,18 @@ class HighPerformanceImageLoader(QThread):
         # 多线程优化 - 自适应线程池配置
         self.thread_pool = self._create_adaptive_thread_pool()
 
+        # 优化4：创建高优先级主图专用线程池
+        self.priority_pool = None  # 默认为None，表示未启用双线程池模式
+        self.use_dual_thread_pools = False  # 标志是否启用双线程池模式
+        try:
+            self.priority_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ImageLoaderPriority")
+            self.use_dual_thread_pools = True
+            self.logger.info("[优化4-双线程池] 成功创建主图专用线程池 (2个工作线程)")
+        except Exception as e:
+            self.logger.warning(f"[优化4-双线程池] 创建主图线程池失败，回退到单线程池模式: {e}")
+            self.priority_pool = None
+            self.use_dual_thread_pools = False
+
         # 初始化图片加载器 - 网络路径优化策略
         self.use_opencv = True  # 网络路径下OpenCV性能更好
 
@@ -150,8 +162,12 @@ class HighPerformanceImageLoader(QThread):
 
         # 性能监控
         self.load_times = []  # 加载时间记录
-        self.concurrent_loads = 0  # 当前并发加载数
+        self.concurrent_loads = 0  # 当前并发加载数（全局计数）
         self.concurrent_lock = threading.Lock()  # 并发计数器线程锁
+
+        # 优化4：双线程池统计字段（仅用于诊断，不影响调度逻辑）
+        self.priority_loads = 0  # 主图线程池当前任务数
+        self.background_loads = 0  # 预加载线程池当前任务数
 
         # 紧急修复：预加载任务去重和限流（阶段三紧急修复）
         self.pending_preload_jobs = set()  # 记录已提交的预加载任务路径
@@ -1371,24 +1387,72 @@ class HighPerformanceImageLoader(QThread):
                     if current_concurrent >= max_concurrent:
                         self.logger.info(f"[并发控制] 高优先级任务强制执行，当前并发:{current_concurrent}/{max_concurrent}")
 
+            # 优化4：根据优先级选择线程池
+            if priority and self.use_dual_thread_pools:
+                pool = self.priority_pool
+                pool_name = "主图"
+            else:
+                pool = self.thread_pool
+                pool_name = "预加载" if not priority else "主图"
+
+            # 增加全局并发计数，同时增加对应的统计字段
             with self.concurrent_lock:
                 self.concurrent_loads += 1
-            
+                # 优化4：根据优先级增加对应的统计字段
+                if priority:
+                    self.priority_loads += 1
+                else:
+                    self.background_loads += 1
+
             # 检查线程池状态，避免在关闭后提交任务
             if not self.running or not hasattr(self, 'thread_pool') or self.thread_pool._shutdown:
                 self.logger.debug(f"[并行加载] 线程池已关闭，跳过任务: {Path(image_path).name}")
                 with self.concurrent_lock:
                     self.concurrent_loads -= 1  # 恢复计数器
+                    if priority:
+                        self.priority_loads -= 1
+                    else:
+                        self.background_loads -= 1
                 return
-            
-            # 使用线程池并行加载
-            if priority:
-                self.current_task = image_path
-                future = self.thread_pool.submit(self._load_image_worker, image_path, True)
-                future.add_done_callback(lambda f: self._on_load_complete(image_path, f))
-            else:
-                future = self.thread_pool.submit(self._load_image_worker, image_path, False)
-                future.add_done_callback(lambda f: self._on_load_complete(image_path, f))
+
+            # 如果使用主图线程池，还需要检查它的状态
+            if priority and self.use_dual_thread_pools:
+                if not hasattr(self, 'priority_pool') or self.priority_pool is None or self.priority_pool._shutdown:
+                    self.logger.warning(f"[优化4-双线程池] 主图线程池不可用，回退到预加载线程池")
+                    pool = self.thread_pool
+                    pool_name = "主图(回退)"
+
+            # 使用选定的线程池并行加载
+            try:
+                if priority:
+                    self.current_task = image_path
+
+                future = pool.submit(self._load_image_worker, image_path, priority)
+                # 优化4：回调函数传入is_priority参数
+                future.add_done_callback(lambda f, p=priority: self._on_load_complete(image_path, p, f))
+
+                # 优化4：日志输出线程池信息和统计
+                self.logger.debug(f"[优化4-{pool_name}] 提交任务: {Path(image_path).name} "
+                               f"并发:{self.concurrent_loads} (主图:{self.priority_loads}/预加载:{self.background_loads})")
+            except Exception as submit_error:
+                # 提交失败时需要回滚计数器
+                with self.concurrent_lock:
+                    self.concurrent_loads = max(0, self.concurrent_loads - 1)
+                    if priority:
+                        self.priority_loads = max(0, self.priority_loads - 1)
+                    else:
+                        self.background_loads = max(0, self.background_loads - 1)
+
+                # 从预加载集合中移除
+                if not priority:
+                    with self.preload_jobs_lock:
+                        self.pending_preload_jobs.discard(image_path)
+
+                # 如果是网络路径，回滚网络计数器（在下面的代码中会增加）
+                # 这里先不处理，因为网络计数器在任务成功提交后才增加
+
+                self.logger.error(f"[优化4-{pool_name}] 提交任务失败: {submit_error}")
+                raise submit_error
 
             # Task 1.1 P0修复：任务成功提交后再增加网络计数器
             # 这样可以避免在任务被拒绝或提交失败时需要回滚计数器
@@ -1404,8 +1468,13 @@ class HighPerformanceImageLoader(QThread):
 
         except Exception as e:
             # Task 1.1 P0修复：异常时需要同时回滚两个计数器
+            # 优化4：同时回滚统计字段
             with self.concurrent_lock:
                 self.concurrent_loads = max(0, self.concurrent_loads - 1)
+                if priority:
+                    self.priority_loads = max(0, self.priority_loads - 1)
+                else:
+                    self.background_loads = max(0, self.background_loads - 1)
 
             # 紧急修复：异常时也要从预加载集合中移除
             if not priority:
@@ -1421,8 +1490,11 @@ class HighPerformanceImageLoader(QThread):
             raise ImageLoadError(f"提交加载任务失败: {e}")
     
     def _load_image_worker(self, image_path, is_priority):
-        """线程池工作函数"""
+        """线程池工作函数（优化4：根据优先级使用不同的日志前缀）"""
         load_start = time.time()
+        # 优化4：根据优先级选择日志前缀
+        log_prefix = "[主图加载]" if is_priority else "[预加载]"
+
         try:
             cache_key = self._get_cache_key(image_path)
 
@@ -1433,7 +1505,7 @@ class HighPerformanceImageLoader(QThread):
                 with self._scaled_cache_lock:
                     self.scaled_cache_hit_count += 1
                 load_time = (time.time() - load_start) * 1000
-                self.logger.debug(f"[并行加载-内存缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
+                self.logger.debug(f"{log_prefix}-内存缓存命中 {Path(image_path).name} 耗时:{load_time:.1f}ms")
                 return {'image_data': cached_pixmap, 'cached': True, 'load_time': load_time}
 
             # Task 2.1收尾P2修复：先检查磁盘缓存，避免在缓存命中前访问网络
@@ -1447,7 +1519,7 @@ class HighPerformanceImageLoader(QThread):
                     # 更新内存缓存，避免下次再读磁盘
                     self._update_cache(cache_key, cached_pixmap)
                     load_time = (time.time() - load_start) * 1000
-                    self.logger.debug(f"[并行加载-磁盘缓存命中] {Path(image_path).name} 耗时:{load_time:.1f}ms")
+                    self.logger.debug(f"{log_prefix}-磁盘缓存命中 {Path(image_path).name} 耗时:{load_time:.1f}ms")
                     return {'image_data': cached_pixmap, 'cached': True, 'load_time': load_time}
 
             # Task 2.3修复：缓存完全未命中，增加miss计数
@@ -1540,24 +1612,30 @@ class HighPerformanceImageLoader(QThread):
 
                 avg_load_time = sum(self.load_times) / len(self.load_times)
 
-                self.logger.debug(f"[并行加载-成功] {Path(image_path).name} {file_size_mb:.1f}MB "
-                               f"耗时:{load_time:.1f}ms 平均:{avg_load_time:.1f}ms 优先级:{is_priority}")
+                self.logger.debug(f"{log_prefix}-成功 {Path(image_path).name} {file_size_mb:.1f}MB "
+                               f"耗时:{load_time:.1f}ms 平均:{avg_load_time:.1f}ms")
 
                 # 返回缩放后的numpy数组（不是QPixmap！由UI层负责转换）
                 return {'image_data': scaled_array, 'cached': False, 'load_time': load_time}
             else:
                 raise ImageLoadError("图片加载失败")
-                
+
         except Exception as e:
             load_time = (time.time() - load_start) * 1000
-            self.logger.error(f"[并行加载-失败] {Path(image_path).name} 耗时:{load_time:.1f}ms 错误:{e}")
+            self.logger.error(f"{log_prefix}-失败 {Path(image_path).name} 耗时:{load_time:.1f}ms 错误:{e}")
             return {'image_data': None, 'error': str(e), 'load_time': load_time}
     
-    def _on_load_complete(self, image_path, future):
-        """加载完成回调"""
+    def _on_load_complete(self, image_path, is_priority, future):
+        """加载完成回调（优化4：增加is_priority参数）"""
         # 先减少并发计数，避免重复减少，线程安全
         with self.concurrent_lock:
             self.concurrent_loads = max(0, self.concurrent_loads - 1)
+
+            # 优化4：根据优先级减少对应的统计字段
+            if is_priority:
+                self.priority_loads = max(0, self.priority_loads - 1)
+            else:
+                self.background_loads = max(0, self.background_loads - 1)
 
         # 紧急修复：从预加载任务集合中移除（如果存在）
         with self.preload_jobs_lock:
@@ -1882,14 +1960,16 @@ class HighPerformanceImageLoader(QThread):
             self.current_working_path = None
             self.is_network_working_path = False
 
-    def warmup_cache(self, image_files, count=100, callback=None):
-        """缓存预热工具（优化8：主动预加载）
+    def warmup_cache(self, image_files, count=100, enable_tail_warmup=False, callback=None):
+        """缓存预热工具（优化8：主动预加载 + 循环翻页末尾预热）
 
         在后台按顺序加载指定数量的图片，提前建立缓存。
+        如果开启循环翻页，还会预热末尾 count//2 张图片。
 
         Args:
             image_files: 图片文件路径列表
-            count: 预热数量（默认100张）
+            count: 前段预热数量（默认100张）
+            enable_tail_warmup: 是否开启末尾预热（循环翻页功能）
             callback: 进度回调函数 callback(current, total, filename)
 
         Returns:
@@ -1907,8 +1987,22 @@ class HighPerformanceImageLoader(QThread):
                 self.logger.warning("[优化8-预热] 图片列表为空，无法预热")
                 return False
 
-            # 计算实际预热数量
-            actual_count = min(count, len(image_files))
+            total_files = len(image_files)
+
+            # 计算预热范围
+            head_count = min(count, total_files)
+            head_indices = list(range(head_count))
+
+            tail_indices = []
+            if enable_tail_warmup and total_files > count:
+                tail_count = count // 2
+                tail_start = max(head_count, total_files - tail_count)
+                tail_indices = list(range(tail_start, total_files))
+                self.logger.info(f"[循环翻页] 开启末尾预热: 前{head_count}张 + 末尾{len(tail_indices)}张")
+
+            # 合并预热列表（去重）
+            warmup_indices = list(dict.fromkeys(head_indices + tail_indices))
+            actual_count = len(warmup_indices)
             if actual_count == 0:
                 return False
 
@@ -1918,9 +2012,9 @@ class HighPerformanceImageLoader(QThread):
             import threading
             def warmup_worker():
                 success_count = 0
-                for i in range(actual_count):
+                for idx, file_index in enumerate(warmup_indices):
                     try:
-                        path = str(image_files[i])
+                        path = str(image_files[file_index])
                         filename = Path(path).name
 
                         # 低优先级加载（不影响用户操作）
@@ -1930,10 +2024,10 @@ class HighPerformanceImageLoader(QThread):
 
                         # 回调进度
                         if callback:
-                            callback(i + 1, actual_count, filename)
+                            callback(idx + 1, actual_count, filename)
 
-                        # 节流：避免占满带宽（每张间隔300ms）
-                        time.sleep(0.3)
+                        # 节流：避免占满带宽（每张间隔100ms）
+                        time.sleep(0.1)
 
                     except Exception as e:
                         self.logger.debug(f"[优化8-预热] 预热失败: {filename}, {e}")
@@ -1956,12 +2050,31 @@ class HighPerformanceImageLoader(QThread):
             return False
 
     def stop(self):
-        """停止加载器"""
+        """停止加载器（优化4：按顺序关闭两个线程池）"""
         self.running = False
+
+        # 优化4：先关闭主图线程池
+        if hasattr(self, 'priority_pool') and self.priority_pool is not None:
+            try:
+                self.logger.info("[优化4-双线程池] 正在关闭主图线程池...")
+                self.priority_pool.shutdown(wait=True)
+                self.logger.info("[优化4-双线程池] 主图线程池已关闭")
+            except Exception as e:
+                self.logger.warning(f"[优化4-双线程池] 关闭主图线程池时出错: {e}")
+
+        # 再关闭预加载线程池
         if hasattr(self, 'thread_pool'):
-            self.thread_pool.shutdown(wait=True)
+            try:
+                self.logger.info("[优化4-双线程池] 正在关闭预加载线程池...")
+                self.thread_pool.shutdown(wait=True)
+                self.logger.info("[优化4-双线程池] 预加载线程池已关闭")
+            except Exception as e:
+                self.logger.warning(f"[优化4-双线程池] 关闭预加载线程池时出错: {e}")
+
+        # 停止清理定时器
         if hasattr(self, 'cleanup_timer'):
             self.cleanup_timer.stop()
+
         self.wait()
 
 
