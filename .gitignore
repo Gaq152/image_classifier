@@ -1,6 +1,7 @@
 # 开发 文档
 .claude
 claude.md
+AGENTS.md
 docs/
 
 # Python缓存文件

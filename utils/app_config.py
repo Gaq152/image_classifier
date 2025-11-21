@@ -14,13 +14,35 @@ from _version_ import __version__
 
 
 class AppConfig:
-    """应用配置管理器"""
+    """应用配置管理器（单例模式）
+
+    修复问题1：使用类级单例模式，避免多实例问题
+    无论通过何种导入路径访问，都确保只有一个实例存在
+    """
+
+    # 类级变量：存储唯一实例和初始化标志
+    _instance = None
+    _initialized = False
+
+    def __new__(cls):
+        """单例模式：确保只创建一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self):
+        # 避免重复初始化（__new__每次都会调用__init__）
+        if AppConfig._initialized:
+            return
+
         self.logger = logging.getLogger(__name__)
         self._config_dir = get_config_dir()  # 使用统一的路径管理
         self._config_file = self._config_dir / "app_config.json"
         self._config = self._load_config()
+
+        # 标记已初始化
+        AppConfig._initialized = True
+        self.logger.debug("[单例模式] AppConfig实例已创建并初始化")
 
     def _get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
@@ -541,13 +563,10 @@ class AppConfig:
         return f"AppConfig(theme={self.theme}, tutorial_completed={self.tutorial_completed}, tutorial_skipped={self.tutorial_skipped})"
 
 
-# 全局单例
-_app_config_instance = None
-
-
 def get_app_config() -> AppConfig:
-    """获取应用配置单例"""
-    global _app_config_instance
-    if _app_config_instance is None:
-        _app_config_instance = AppConfig()
-    return _app_config_instance
+    """获取应用配置单例
+
+    修复问题1：直接调用AppConfig()即可获得单例
+    单例逻辑在类的__new__方法中实现，无需模块级变量
+    """
+    return AppConfig()
