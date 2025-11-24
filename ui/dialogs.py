@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                             QMessageBox, QTabWidget, QProgressBar, QApplication,
                             QWidget, QTextBrowser, QCheckBox, QGroupBox, QScrollArea, QComboBox,
                             QDoubleSpinBox,QSpinBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer, QSize, QThread
 from PyQt6.QtGui import QKeySequence, QIcon, QDesktopServices, QPainter, QColor, QPen
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from .._version_ import compare_version, __version__, get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
@@ -31,6 +31,34 @@ from .components.styles.theme import default_theme
 from .components.styles import ButtonStyles, DialogStyles
 from .update_dialog import UpdateInfoDialog
 from .components.widgets.switch import Switch
+
+
+class UpdateCheckerThread(QThread):
+    """修复问题4：后台检查更新的线程，避免阻塞UI"""
+
+    # 信号：检查成功 (manifest字典, endpoint, token)
+    check_success = pyqtSignal(dict, str, str)
+    # 信号：检查失败 (错误信息)
+    check_failed = pyqtSignal(str)
+
+    def __init__(self, endpoint, token=None):
+        super().__init__()
+        self.endpoint = endpoint
+        self.token = token
+        self.logger = logging.getLogger(__name__)
+
+    def run(self):
+        """在后台线程中执行更新检查"""
+        try:
+            self.logger.debug(f"[后台更新检查] 开始检查: {self.endpoint}")
+            manifest = fetch_manifest(self.endpoint, self.token or None)
+            self.logger.debug(f"[后台更新检查] 检查成功: v{manifest.get('version', 'unknown')}")
+            # 发送成功信号
+            self.check_success.emit(manifest, self.endpoint, self.token or '')
+        except Exception as e:
+            self.logger.debug(f"[后台更新检查] 检查失败: {e}")
+            # 发送失败信号
+            self.check_failed.emit(str(e))
 
 
 class AnimatedToggle(QWidget):
@@ -2066,6 +2094,9 @@ class SettingsDialog(QDialog):
         self.zoom_save_timer.setSingleShot(True)
         self.zoom_save_timer.timeout.connect(self._save_zoom_config)
 
+        # 修复问题4：后台更新检查线程
+        self.update_checker_thread = None
+
         self.initUI()
 
     def initUI(self):
@@ -3894,16 +3925,31 @@ class SettingsDialog(QDialog):
             # 2. 没有本地更新包，检查线上更新
             toast_info(self, "正在检查更新...")
 
-            # 获取manifest
+            # 修复问题4：使用后台线程检查更新，避免阻塞UI
             manifest_url = get_manifest_url(latest=True)
-            endpoint = self.app_config.update_endpoint
+            endpoint = self.app_config.update_endpoint or manifest_url
             token = self.app_config.update_token
 
-            manifest = fetch_manifest(manifest_url, token)
-            if not manifest:
-                toast_warning(self, "无法获取更新信息")
-                return
+            # 停止旧的检查线程（如果存在）
+            if self.update_checker_thread and self.update_checker_thread.isRunning():
+                self.logger.debug("停止旧的更新检查线程")
+                self.update_checker_thread.quit()
+                self.update_checker_thread.wait()
 
+            # 创建新的后台检查线程
+            self.update_checker_thread = UpdateCheckerThread(endpoint, token)
+            self.update_checker_thread.check_success.connect(self._on_update_check_success)
+            self.update_checker_thread.check_failed.connect(self._on_update_check_failed)
+            self.update_checker_thread.start()
+            self.logger.debug("后台更新检查线程已启动")
+
+        except Exception as e:
+            self.logger.error(f"检查更新失败: {e}")
+            toast_error(self, f"检查更新失败: {str(e)}")
+
+    def _on_update_check_success(self, manifest, endpoint, token):
+        """修复问题4：后台更新检查成功的回调"""
+        try:
             new_ver = manifest.get('version')
             if not new_ver:
                 toast_warning(self, "更新信息格式错误")
@@ -3913,7 +3959,7 @@ class SettingsDialog(QDialog):
             cmp_result = compare_version(new_ver, __version__)
 
             if cmp_result > 0:
-                # 有新版本 - 显示红点并显示详细信息对话框
+                # 有新版本 - 显示详细信息对话框
                 size_bytes = int(manifest.get('size_bytes', 0) or 0)
                 notes = str(manifest.get('notes', '')).strip()
 
@@ -3932,10 +3978,14 @@ class SettingsDialog(QDialog):
                 toast_success(self, f"当前已是最新版本 v{__version__}")
             else:
                 toast_info(self, f"当前版本 v{__version__} 高于线上版本 v{new_ver}")
-
         except Exception as e:
-            self.logger.error(f"检查更新失败: {e}")
-            toast_error(self, f"检查更新失败: {str(e)}")
+            self.logger.error(f"处理更新检查结果失败: {e}")
+            toast_error(self, f"处理更新失败: {str(e)}")
+
+    def _on_update_check_failed(self, error_message):
+        """修复问题4：后台更新检查失败的回调"""
+        self.logger.debug(f"检查线上更新失败: {error_message}")
+        toast_warning(self, "无法获取更新信息")
 
     def clear_smb_cache(self):
         """清除SMB缓存"""

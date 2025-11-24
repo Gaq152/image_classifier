@@ -128,11 +128,49 @@ class HighPerformanceImageLoader(QThread):
         # 多线程优化 - 自适应线程池配置
         self.thread_pool = self._create_adaptive_thread_pool()
 
+        # 修复问题2/5：保存线程池大小，避免依赖私有属性_max_workers
+        # 从_create_adaptive_thread_pool的逻辑中提取
+        try:
+            cpu_count = psutil.cpu_count(logical=False) or 4
+            memory_gb = psutil.virtual_memory().total / (1024**3)
+            is_network_env = hasattr(self, 'current_directory') and is_network_path(getattr(self, 'current_directory', ''))
+
+            if is_network_env:
+                base_threads = max(2, int(cpu_count * 0.5))
+                max_limit = 3
+            else:
+                base_threads = min(int(cpu_count * 1.5), psutil.cpu_count(logical=True))
+                max_limit = 8
+
+            if memory_gb >= 16:
+                max_threads = min(base_threads + 1, max_limit)
+            elif memory_gb >= 8:
+                max_threads = min(base_threads, max_limit - 1)
+            else:
+                max_threads = min(base_threads, max_limit - 2)
+
+            max_threads = max(2, max_threads)
+
+            if hasattr(sys, 'frozen'):
+                if is_network_env:
+                    max_threads = min(max_threads, 2)
+                else:
+                    max_threads = min(max_threads, 3)
+
+            self.thread_pool_size = max_threads
+        except Exception:
+            self.thread_pool_size = 3  # 默认值
+
+        # 修复问题2/5：线程池关闭状态标志，避免依赖私有属性_shutdown
+        self.thread_pool_shutdown = False
+        self.priority_pool_shutdown = False
+
         # 优化4：创建高优先级主图专用线程池
         self.priority_pool = None  # 默认为None，表示未启用双线程池模式
         self.use_dual_thread_pools = False  # 标志是否启用双线程池模式
+        self.priority_pool_size = 2  # 主图线程池固定2个工作线程
         try:
-            self.priority_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ImageLoaderPriority")
+            self.priority_pool = ThreadPoolExecutor(max_workers=self.priority_pool_size, thread_name_prefix="ImageLoaderPriority")
             self.use_dual_thread_pools = True
             self.logger.info("[优化4-双线程池] 成功创建主图专用线程池 (2个工作线程)")
         except Exception as e:
@@ -176,6 +214,10 @@ class HighPerformanceImageLoader(QThread):
         # 修复问题2：缓存清理后台执行标志
         self.cleanup_in_progress = False  # 是否有清理任务正在执行
         self.cleanup_lock = threading.Lock()  # 清理任务锁
+
+        # 修复问题3：缓存校准后台执行标志
+        self.reconcile_in_progress = False  # 是否有校准任务正在执行
+        self.reconcile_lock = threading.Lock()  # 校准任务锁
 
         # 资源清理定时器 - 防止内存泄漏（Task 1.1：按需启动，Task 1.3：自适应周期）
         self.cleanup_timer = QTimer()
@@ -537,6 +579,19 @@ class HighPerformanceImageLoader(QThread):
 
         except Exception as e:
             self.logger.warning(f"[缓存校准] 校准失败: {e}")
+
+    def _force_reconcile_cache_worker(self):
+        """修复问题3：后台线程执行缓存校准的包装方法"""
+        try:
+            self.logger.debug("[后台校准] 开始执行缓存校准")
+            self._force_reconcile_cache()
+            self.logger.debug("[后台校准] 缓存校准完成")
+        except Exception as e:
+            self.logger.error(f"[后台校准] 执行失败: {e}")
+        finally:
+            # 无论成功失败，都重置标志位
+            with self.reconcile_lock:
+                self.reconcile_in_progress = False
 
     def _sync_cache_index_with_files(self, scanned_files):
         """同步CacheIndex与实际文件（Task 3.4）
@@ -1360,10 +1415,12 @@ class HighPerformanceImageLoader(QThread):
 
             if is_network_env:
                 # 网络环境：2倍线程池大小的并发，提高响应性
-                max_concurrent = max(4, self.thread_pool._max_workers * 2)
+                # 修复问题2/5：使用自维护的thread_pool_size，避免依赖私有属性_max_workers
+                max_concurrent = max(4, self.thread_pool_size * 2)
             else:
                 # 本地环境：3倍线程池大小的并发，充分利用本地I/O
-                max_concurrent = max(8, int(self.thread_pool._max_workers * 3))
+                # 修复问题2/5：使用自维护的thread_pool_size，避免依赖私有属性_max_workers
+                max_concurrent = max(8, int(self.thread_pool_size * 3))
 
             # 线程安全地检查并发数
             with self.concurrent_lock:
@@ -1404,13 +1461,38 @@ class HighPerformanceImageLoader(QThread):
                     if current_concurrent >= max_concurrent:
                         self.logger.info(f"[并发控制] 高优先级任务强制执行，当前并发:{current_concurrent}/{max_concurrent}")
 
-            # 优化4：根据优先级选择线程池
+            # 优化4：根据优先级选择线程池（包含回退逻辑）
             if priority and self.use_dual_thread_pools:
-                pool = self.priority_pool
-                pool_name = "主图"
+                # 检查主图线程池是否可用
+                if hasattr(self, 'priority_pool') and self.priority_pool is not None:
+                    # 使用自维护的状态标志，避免依赖私有属性_shutdown（问题5修复）
+                    if not getattr(self, 'priority_pool_shutdown', False):
+                        pool = self.priority_pool
+                        pool_name = "主图"
+                    else:
+                        # 主图池已关闭，回退到预加载池
+                        self.logger.warning(f"[优化4-双线程池] 主图线程池已关闭，回退到预加载线程池")
+                        pool = self.thread_pool
+                        pool_name = "主图(回退)"
+                else:
+                    # 主图池不存在，回退到预加载池
+                    pool = self.thread_pool
+                    pool_name = "主图(回退)"
             else:
                 pool = self.thread_pool
                 pool_name = "预加载" if not priority else "主图"
+
+            # 修复问题1：检查所选池的状态，而非总是检查thread_pool
+            # 使用自维护的状态标志，避免依赖私有属性_shutdown（问题5修复）
+            pool_shutdown = False
+            if pool is self.priority_pool:
+                pool_shutdown = getattr(self, 'priority_pool_shutdown', False)
+            else:
+                pool_shutdown = getattr(self, 'thread_pool_shutdown', False)
+
+            if not self.running or pool is None or pool_shutdown:
+                self.logger.debug(f"[并行加载] 线程池已关闭，跳过任务: {Path(image_path).name} (池:{pool_name})")
+                return
 
             # 增加全局并发计数，同时增加对应的统计字段
             with self.concurrent_lock:
@@ -1420,24 +1502,6 @@ class HighPerformanceImageLoader(QThread):
                     self.priority_loads += 1
                 else:
                     self.background_loads += 1
-
-            # 检查线程池状态，避免在关闭后提交任务
-            if not self.running or not hasattr(self, 'thread_pool') or self.thread_pool._shutdown:
-                self.logger.debug(f"[并行加载] 线程池已关闭，跳过任务: {Path(image_path).name}")
-                with self.concurrent_lock:
-                    self.concurrent_loads -= 1  # 恢复计数器
-                    if priority:
-                        self.priority_loads -= 1
-                    else:
-                        self.background_loads -= 1
-                return
-
-            # 如果使用主图线程池，还需要检查它的状态
-            if priority and self.use_dual_thread_pools:
-                if not hasattr(self, 'priority_pool') or self.priority_pool is None or self.priority_pool._shutdown:
-                    self.logger.warning(f"[优化4-双线程池] 主图线程池不可用，回退到预加载线程池")
-                    pool = self.thread_pool
-                    pool_name = "主图(回退)"
 
             # 使用选定的线程池并行加载
             try:
@@ -1924,8 +1988,21 @@ class HighPerformanceImageLoader(QThread):
 
                 # 至少间隔1小时才重新扫描
                 if time_since_last > 3600:
-                    self.logger.info(f"[优化5-容量触发] 占用率{usage_ratio:.1%}超过90%，触发索引重建")
-                    self._force_reconcile_cache()
+                    # 修复问题3：检查是否已有校准任务在执行
+                    with self.reconcile_lock:
+                        if self.reconcile_in_progress:
+                            self.logger.debug("[优化5-容量触发] 校准任务已在执行，跳过")
+                            return
+                        self.reconcile_in_progress = True
+
+                    self.logger.info(f"[优化5-容量触发] 占用率{usage_ratio:.1%}超过90%，提交后台校准任务")
+                    # 提交到后台线程执行
+                    try:
+                        self.thread_pool.submit(self._force_reconcile_cache_worker)
+                    except Exception as e:
+                        self.logger.error(f"[优化5-容量触发] 提交校准任务失败: {e}")
+                        with self.reconcile_lock:
+                            self.reconcile_in_progress = False
                 else:
                     self.logger.debug(f"[优化5-容量触发] 占用率{usage_ratio:.1%}超过90%，但距上次扫描仅{time_since_last/60:.1f}分钟，跳过")
 
@@ -2087,6 +2164,8 @@ class HighPerformanceImageLoader(QThread):
         if hasattr(self, 'priority_pool') and self.priority_pool is not None:
             try:
                 self.logger.info("[优化4-双线程池] 正在关闭主图线程池...")
+                # 修复问题2/5：先设置标志，再关闭线程池
+                self.priority_pool_shutdown = True
                 self.priority_pool.shutdown(wait=True)
                 self.logger.info("[优化4-双线程池] 主图线程池已关闭")
             except Exception as e:
@@ -2096,6 +2175,8 @@ class HighPerformanceImageLoader(QThread):
         if hasattr(self, 'thread_pool'):
             try:
                 self.logger.info("[优化4-双线程池] 正在关闭预加载线程池...")
+                # 修复问题2/5：先设置标志，再关闭线程池
+                self.thread_pool_shutdown = True
                 self.thread_pool.shutdown(wait=True)
                 self.logger.info("[优化4-双线程池] 预加载线程池已关闭")
             except Exception as e:

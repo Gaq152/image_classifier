@@ -5523,17 +5523,8 @@ class ImageClassifier(QMainWindow):
                 except Exception as e:
                     self.logger.warning(f"清理旧更新包失败: {e}")
 
-                # 获取完整的manifest信息并显示更新对话框
+                # 修复问题5：直接使用已传入的manifest参数，避免重复同步调用
                 try:
-                    endpoint = None
-                    token = ''
-                    if self.config:
-                        endpoint = getattr(self.config, 'update_endpoint', None)
-                        token = getattr(self.config, 'update_token', '')
-                    if not endpoint:
-                        endpoint = get_manifest_url(latest=True)
-
-                    manifest = fetch_manifest(endpoint, token or None)
                     if manifest:
                         size_bytes = int(manifest.get('size_bytes', 0) or 0)
                         notes = str(manifest.get('notes', '')).strip()
@@ -5550,7 +5541,7 @@ class ImageClassifier(QMainWindow):
                         )
                         update_dialog.exec()
                     else:
-                        self.logger.warning("无法获取线上更新详情")
+                        self.logger.warning("无法获取线上更新详情（manifest为空）")
                 except Exception as e:
                     self.logger.error(f"处理线上更新失败: {e}")
             else:
@@ -5665,16 +5656,7 @@ class ImageClassifier(QMainWindow):
                         # 有新版本，弹窗提示
                         self.logger.info(f"检测到新版本 v{online_version}，当前版本 v{__version__}")
 
-                        # 获取完整的manifest信息
-                        endpoint = None
-                        token = ''
-                        if self.config:
-                            endpoint = getattr(self.config, 'update_endpoint', None)
-                            token = getattr(self.config, 'update_token', '')
-                        if not endpoint:
-                            endpoint = get_manifest_url(latest=True)
-
-                        manifest = fetch_manifest(endpoint, token or None)
+                        # 修复问题5：直接使用已传入的manifest参数，避免重复同步调用
                         if manifest:
                             size_bytes = int(manifest.get('size_bytes', 0) or 0)
                             notes = str(manifest.get('notes', '')).strip()
@@ -5691,7 +5673,7 @@ class ImageClassifier(QMainWindow):
                             )
                             update_dialog.exec()
                         else:
-                            self.logger.warning("无法获取更新详情")
+                            self.logger.warning("无法获取更新详情（manifest为空）")
                     else:
                         self.logger.debug(f"当前版本已是最新: v{__version__}")
                 except Exception as e:

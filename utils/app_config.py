@@ -7,6 +7,7 @@
 
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, Any
 from .paths import get_config_dir
@@ -18,31 +19,47 @@ class AppConfig:
 
     修复问题1：使用类级单例模式，避免多实例问题
     无论通过何种导入路径访问，都确保只有一个实例存在
+
+    修复：添加线程安全保护，使用双重检查锁定模式（Double-Checked Locking）
+    确保多线程并发首次获取时也只创建一个实例
     """
 
-    # 类级变量：存储唯一实例和初始化标志
+    # 类级变量：存储唯一实例、初始化标志和线程锁
     _instance = None
     _initialized = False
+    _lock = threading.Lock()  # 类级锁，保护实例创建和初始化
 
     def __new__(cls):
-        """单例模式：确保只创建一个实例"""
+        """单例模式：确保只创建一个实例（线程安全）"""
+        # 第一次检查（快速路径，无锁）
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            # 加锁进入临界区
+            with cls._lock:
+                # 第二次检查（防止多个线程同时通过第一次检查）
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):
-        # 避免重复初始化（__new__每次都会调用__init__）
+        """初始化配置（线程安全，只执行一次）"""
+        # 第一次检查（快速路径，无锁）
         if AppConfig._initialized:
             return
 
-        self.logger = logging.getLogger(__name__)
-        self._config_dir = get_config_dir()  # 使用统一的路径管理
-        self._config_file = self._config_dir / "app_config.json"
-        self._config = self._load_config()
+        # 加锁进入临界区
+        with AppConfig._lock:
+            # 第二次检查（防止多个线程同时通过第一次检查）
+            if AppConfig._initialized:
+                return
 
-        # 标记已初始化
-        AppConfig._initialized = True
-        self.logger.debug("[单例模式] AppConfig实例已创建并初始化")
+            self.logger = logging.getLogger(__name__)
+            self._config_dir = get_config_dir()  # 使用统一的路径管理
+            self._config_file = self._config_dir / "app_config.json"
+            self._config = self._load_config()
+
+            # 标记已初始化（必须在锁内设置）
+            AppConfig._initialized = True
+            self.logger.debug("[单例模式-线程安全] AppConfig实例已创建并初始化")
 
     def _get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
