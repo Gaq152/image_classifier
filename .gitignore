@@ -2,6 +2,7 @@
 .claude
 claude.md
 AGENTS.md
+GEMINI.md
 docs/
 
 # Python缓存文件
