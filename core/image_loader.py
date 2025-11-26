@@ -13,6 +13,7 @@ import time
 import threading
 import shutil
 import struct
+from collections import OrderedDict
 from pathlib import Path
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
@@ -52,7 +53,8 @@ class HighPerformanceImageLoader(QThread):
         super().__init__()
         self.queue = Queue()
         self.preload_queue = Queue()
-        self.cache = {}  # 全尺寸图片缓存
+        self.cache = OrderedDict()  # 全尺寸图片缓存（LRU）
+        self.cache_sizes = {}  # 记录每个缓存项的内存大小
         self.thumbnail_cache = {}  # 缩略图缓存（快速预览）
         self.cache_size = cache_size
         self.thumbnail_cache_size = 500  # 大幅增加缩略图缓存（占用内存很少）
@@ -125,57 +127,30 @@ class HighPerformanceImageLoader(QThread):
         # 初始化SMB优化
         self._init_smb_optimization()
 
-        # 多线程优化 - 自适应线程池配置
-        self.thread_pool = self._create_adaptive_thread_pool()
-
-        # 修复问题2/5：保存线程池大小，避免依赖私有属性_max_workers
-        # 从_create_adaptive_thread_pool的逻辑中提取
-        try:
-            cpu_count = psutil.cpu_count(logical=False) or 4
-            memory_gb = psutil.virtual_memory().total / (1024**3)
-            is_network_env = hasattr(self, 'current_directory') and is_network_path(getattr(self, 'current_directory', ''))
-
-            if is_network_env:
-                base_threads = max(2, int(cpu_count * 0.5))
-                max_limit = 3
-            else:
-                base_threads = min(int(cpu_count * 1.5), psutil.cpu_count(logical=True))
-                max_limit = 8
-
-            if memory_gb >= 16:
-                max_threads = min(base_threads + 1, max_limit)
-            elif memory_gb >= 8:
-                max_threads = min(base_threads, max_limit - 1)
-            else:
-                max_threads = min(base_threads, max_limit - 2)
-
-            max_threads = max(2, max_threads)
-
-            if hasattr(sys, 'frozen'):
-                if is_network_env:
-                    max_threads = min(max_threads, 2)
-                else:
-                    max_threads = min(max_threads, 3)
-
-            self.thread_pool_size = max_threads
-        except Exception:
-            self.thread_pool_size = 3  # 默认值
+        # 多线程优化 - 自适应线程池配置（同步实际创建的大小）
+        self.thread_pool, self.thread_pool_size = self._create_adaptive_thread_pool()
 
         # 修复问题2/5：线程池关闭状态标志，避免依赖私有属性_shutdown
         self.thread_pool_shutdown = False
         self.priority_pool_shutdown = False
 
-        # 优化4：创建高优先级主图专用线程池
+        # 优化4：创建高优先级主图专用线程池（同步实际大小）
         self.priority_pool = None  # 默认为None，表示未启用双线程池模式
         self.use_dual_thread_pools = False  # 标志是否启用双线程池模式
-        self.priority_pool_size = 2  # 主图线程池固定2个工作线程
+        requested_priority_workers = 2  # 请求创建2个工作线程
+        self.priority_pool_size = 0  # 与实际创建结果同步，回退时保持0
+
         try:
-            self.priority_pool = ThreadPoolExecutor(max_workers=self.priority_pool_size, thread_name_prefix="ImageLoaderPriority")
+            priority_pool = ThreadPoolExecutor(max_workers=requested_priority_workers, thread_name_prefix="ImageLoaderPriority")
+            # max_workers参数就是实际创建的线程数，同步到priority_pool_size
+            self.priority_pool_size = requested_priority_workers
+            self.priority_pool = priority_pool
             self.use_dual_thread_pools = True
-            self.logger.info("[优化4-双线程池] 成功创建主图专用线程池 (2个工作线程)")
+            self.logger.info(f"[优化4-双线程池] 成功创建主图专用线程池 ({self.priority_pool_size}个工作线程)")
         except Exception as e:
             self.logger.warning(f"[优化4-双线程池] 创建主图线程池失败，回退到单线程池模式: {e}")
             self.priority_pool = None
+            self.priority_pool_size = 0  # 回退时设为0，确保与实际状态一致
             self.use_dual_thread_pools = False
 
         # 初始化图片加载器 - 网络路径优化策略
@@ -1336,11 +1311,15 @@ class HighPerformanceImageLoader(QThread):
             self.logger.debug(f"[线程池配置] {env_type}环境 CPU核心:{cpu_count}物理/{logical_cpu_count}逻辑 "
                              f"内存:{memory_gb:.1f}GB 线程池大小:{max_threads}")
             
-            return ThreadPoolExecutor(max_workers=max_threads, thread_name_prefix="ImageLoader")
-            
+            pool = ThreadPoolExecutor(max_workers=max_threads, thread_name_prefix="ImageLoader")
+            # max_workers参数就是实际创建的线程数，无需读取私有属性
+            actual_size = max_threads
+            return pool, actual_size
+
         except Exception as e:
             self.logger.warning(f"线程池自适应配置失败，使用默认配置: {e}")
-            return ThreadPoolExecutor(max_workers=3, thread_name_prefix="ImageLoader")
+            pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ImageLoader")
+            return pool, 3
         
     def _get_optimal_cache_size(self):
         """根据系统内存动态确定缓存大小 - 针对17-20MB大图片优化"""
@@ -1413,14 +1392,19 @@ class HighPerformanceImageLoader(QThread):
             # 检查并发限制，网络环境使用更保守策略
             is_network_env = is_network_path(image_path)
 
+            pool_size = self.thread_pool_size
+
             if is_network_env:
-                # 网络环境：2倍线程池大小的并发，提高响应性
-                # 修复问题2/5：使用自维护的thread_pool_size，避免依赖私有属性_max_workers
-                max_concurrent = max(4, self.thread_pool_size * 2)
+                # 网络环境：2倍线程池大小的并发，限制上限避免过度排队
+                base = max(4, pool_size * 2)
+                max_concurrent = min(base, pool_size * 2)  # 不超过池的2倍
             else:
                 # 本地环境：3倍线程池大小的并发，充分利用本地I/O
-                # 修复问题2/5：使用自维护的thread_pool_size，避免依赖私有属性_max_workers
-                max_concurrent = max(8, int(self.thread_pool_size * 3))
+                base = max(8, int(pool_size * 3))
+                max_concurrent = min(base, pool_size * 3)  # 不超过池的3倍
+
+            # 确保不低于池大小，避免过度限制
+            max_concurrent = max(pool_size, max_concurrent)
 
             # 线程安全地检查并发数
             with self.concurrent_lock:
@@ -1443,23 +1427,29 @@ class HighPerformanceImageLoader(QThread):
                 with self.preload_jobs_lock:
                     self.pending_preload_jobs.add(image_path)
 
-            # 高优先级任务的处理逻辑（保持原有逻辑）
+            # 高优先级任务的处理逻辑（阶段1修复：添加绝对上限，移除UI阻塞）
             if current_concurrent >= max_concurrent:
                 if priority:
-                    # 高优先级任务：短暂等待后强制执行
                     env_type = "网络" if is_network_env else "本地"
-                    self.logger.info(f"[并发控制] {env_type}环境高优先级任务等待，当前并发:{current_concurrent}/{max_concurrent}")
-                    # 只等待很短时间，避免UI卡死
-                    wait_count = 0
-                    while current_concurrent >= max_concurrent and wait_count < 5:  # 最多等待0.5秒
-                        time.sleep(0.1)
-                        wait_count += 1
-                        with self.concurrent_lock:
-                            current_concurrent = self.concurrent_loads
+                    # 计算高优先级任务的绝对并发上限（max_concurrent的1.5倍）
+                    max_priority_concurrent = int(max_concurrent * 1.5)
 
-                    # 高优先级任务总是执行，不会被阻塞
-                    if current_concurrent >= max_concurrent:
-                        self.logger.info(f"[并发控制] 高优先级任务强制执行，当前并发:{current_concurrent}/{max_concurrent}")
+                    # 检查是否超过绝对上限
+                    if current_concurrent >= max_priority_concurrent:
+                        # 超过绝对上限，拒绝任务以防止并发失控
+                        self.logger.warning(
+                            f"[并发控制-阶段1修复] {env_type}环境高优先级任务被拒绝，"
+                            f"当前并发:{current_concurrent}/{max_concurrent}，"
+                            f"绝对上限:{max_priority_concurrent}"
+                        )
+                        return None
+
+                    # 在max_concurrent和绝对上限之间，允许高优先级任务放行
+                    self.logger.info(
+                        f"[并发控制-阶段1修复] {env_type}环境高优先级任务放行，"
+                        f"当前并发:{current_concurrent}/{max_concurrent}，"
+                        f"绝对上限:{max_priority_concurrent}"
+                    )
 
             # 优化4：根据优先级选择线程池（包含回退逻辑）
             if priority and self.use_dual_thread_pools:
@@ -1751,21 +1741,162 @@ class HighPerformanceImageLoader(QThread):
     def _get_cache_key(self, image_path):
         """生成缓存键"""
         return str(image_path)
-        
+
+    def _estimate_cache_item_size(self, obj):
+        """估算缓存对象的内存大小（字节）
+
+        支持的对象类型：
+        - numpy.ndarray: 使用nbytes属性
+        - QPixmap: 转换为QImage并使用byteCount()
+        - PIL.Image: 根据尺寸和通道数计算
+
+        Args:
+            obj: 要估算大小的对象
+
+        Returns:
+            int: 估算的内存大小（字节），失败返回sys.getsizeof()作为下限保护
+        """
+        if obj is None:
+            return 0
+
+        try:
+            estimated_size = 0
+
+            # numpy.ndarray
+            if NUMPY_AVAILABLE and hasattr(obj, 'nbytes'):
+                estimated_size = int(obj.nbytes)
+                if estimated_size > 0:
+                    return estimated_size
+
+            # QPixmap (PyQt6需要转换为QImage)
+            if hasattr(obj, 'toImage'):
+                try:
+                    estimated_size = int(obj.toImage().byteCount())
+                    if estimated_size > 0:
+                        return estimated_size
+                except Exception:
+                    pass
+
+                # 回退：width * height * 4（RGBA）
+                if hasattr(obj, 'width') and hasattr(obj, 'height'):
+                    estimated_size = int(obj.width() * obj.height() * 4)
+                    if estimated_size > 0:
+                        return estimated_size
+
+            # PIL Image
+            if PIL_AVAILABLE and hasattr(obj, 'size') and hasattr(obj, 'mode'):
+                width, height = obj.size
+                # 估算通道数
+                mode = getattr(obj, 'mode', 'RGB')
+                if isinstance(mode, str):
+                    channels = len(mode) if mode else 3
+                else:
+                    channels = 3
+
+                # 16位图像需要2字节/通道
+                bytes_per_channel = 2 if mode in ('I;16', 'I;16B', 'I;16L') else 1
+                estimated_size = int(width * height * channels * bytes_per_channel)
+                if estimated_size > 0:
+                    return estimated_size
+
+            # 下限保护：使用sys.getsizeof作为最小估算
+            fallback_size = sys.getsizeof(obj)
+            if fallback_size > 0:
+                self.logger.debug(f"[内存缓存] 使用sys.getsizeof估算: {fallback_size / 1024:.1f}KB")
+                return fallback_size
+
+            # 最后的兜底：返回合理的最小值（1KB）
+            self.logger.warning(f"[内存缓存] 无法估算对象大小，使用默认值1KB")
+            return 1024
+
+        except Exception as e:
+            self.logger.warning(f"[内存缓存] 估算对象大小失败: {e}，使用sys.getsizeof")
+            try:
+                return max(1024, sys.getsizeof(obj))  # 至少1KB
+            except:
+                return 1024  # 最后兜底
+
     def _update_cache(self, cache_key, pixmap):
-        """更新缓存"""
+        """更新缓存（按内存大小LRU淘汰）
+
+        实现细节：
+        1. 估算对象内存大小
+        2. 如果已存在，先移除旧值避免重复统计
+        3. 超大单张（> max_cache_memory）跳过缓存避免thrashing
+        4. 按内存大小LRU淘汰直到有足够空间
+        5. 兼顾条数上限（cache_size）
+        6. 插入新项并更新LRU顺序
+
+        Args:
+            cache_key: 缓存键
+            pixmap: 要缓存的对象（numpy/QPixmap/PIL）
+        """
         with self.concurrent_lock:
-            if len(self.cache) >= self.cache_size:
-                # 简单的LRU策略：删除最旧的条目
-                oldest_key = next(iter(self.cache))
-                del self.cache[oldest_key]
-            
+            # 估算对象大小
+            item_size = self._estimate_cache_item_size(pixmap)
+
+            # 如果已存在，先移除旧值避免重复统计
+            if cache_key in self.cache:
+                old_size = self.cache_sizes.pop(cache_key, 0)
+                self.current_cache_memory = max(0, self.current_cache_memory - old_size)
+                self.cache.pop(cache_key, None)
+
+            # 防御性优化：超大单张跳过缓存，避免thrashing
+            if item_size > self.max_cache_memory:
+                self.logger.warning(
+                    f"[内存缓存] 图片过大跳过缓存: {Path(cache_key).name} "
+                    f"({item_size / 1024 / 1024:.1f}MB > {self.max_cache_memory / 1024 / 1024:.1f}MB)"
+                )
+                return
+
+            # 基于内存大小的LRU淘汰
+            while self.cache and (self.current_cache_memory + item_size > self.max_cache_memory):
+                oldest_key, _ = self.cache.popitem(last=False)
+                removed_size = self.cache_sizes.pop(oldest_key, 0)
+                self.current_cache_memory = max(0, self.current_cache_memory - removed_size)
+                self.logger.debug(
+                    f"[内存缓存淘汰] {Path(oldest_key).name} "
+                    f"({removed_size / 1024 / 1024:.1f}MB)"
+                )
+
+            # 兼顾条数上限
+            while self.cache and len(self.cache) >= self.cache_size:
+                oldest_key, _ = self.cache.popitem(last=False)
+                removed_size = self.cache_sizes.pop(oldest_key, 0)
+                self.current_cache_memory = max(0, self.current_cache_memory - removed_size)
+                self.logger.debug(
+                    f"[内存缓存淘汰-条数] {Path(oldest_key).name} "
+                    f"({removed_size / 1024 / 1024:.1f}MB)"
+                )
+
+            # 插入新项
             self.cache[cache_key] = pixmap
+            self.cache_sizes[cache_key] = item_size
+            self.cache.move_to_end(cache_key)  # 标记为最近使用
+            self.current_cache_memory += item_size
+
+            self.logger.debug(
+                f"[内存缓存] 已缓存: {Path(cache_key).name} "
+                f"({item_size / 1024 / 1024:.1f}MB), "
+                f"当前: {self.current_cache_memory / 1024 / 1024:.1f}MB / "
+                f"{self.max_cache_memory / 1024 / 1024:.1f}MB"
+            )
         
     def _get_from_cache(self, cache_key):
-        """从缓存获取图像"""
+        """从缓存获取图像（更新LRU顺序）
+
+        Args:
+            cache_key: 缓存键
+
+        Returns:
+            缓存的对象，未命中返回None
+        """
         with self.concurrent_lock:
-            return self.cache.get(cache_key)
+            pixmap = self.cache.get(cache_key)
+            if pixmap is not None:
+                # 标记为最近使用
+                self.cache.move_to_end(cache_key)
+            return pixmap
     
     def get_cache_info(self):
         """获取缓存信息"""
@@ -1823,7 +1954,9 @@ class HighPerformanceImageLoader(QThread):
         """清理缓存"""
         with self.concurrent_lock:
             self.cache.clear()
+            self.cache_sizes.clear()  # 清理大小记录
             self.thumbnail_cache.clear()
+            self.current_cache_memory = 0  # 重置内存计数
             self.cache_hit_count = 0
             self.cache_miss_count = 0
 
@@ -1912,7 +2045,8 @@ class HighPerformanceImageLoader(QThread):
 
         try:
             # 内存缓存清理（快速，始终执行）
-            if len(self.cache) > self.cache_size * 0.8:
+            # 使用内存占用率作为触发条件，匹配_gentle_cache_cleanup的内部逻辑
+            if self.max_cache_memory > 0 and self.current_cache_memory > self.max_cache_memory * 0.7:
                 self._gentle_cache_cleanup()
 
             # 磁盘缓存自适应调度
@@ -2019,15 +2153,27 @@ class HighPerformanceImageLoader(QThread):
             self.logger.warning(f"定期资源清理失败（耗时{elapsed:.1f}ms）: {e}")
     
     def _gentle_cache_cleanup(self):
-        """温和的缓存清理"""
+        """温和的缓存清理（使用LRU淘汰）
+
+        周期性调用，当内存占用超过80%时主动淘汰最旧的10%条目，避免频繁触发淘汰
+        """
         with self.concurrent_lock:
-            if len(self.cache) > self.cache_size:
-                # 删除超出的缓存项
-                excess = len(self.cache) - self.cache_size
-                for _ in range(excess):
-                    if self.cache:
-                        oldest_key = next(iter(self.cache))
-                        del self.cache[oldest_key]
+            # 检查内存占用率
+            if self.max_cache_memory > 0:
+                usage_ratio = self.current_cache_memory / self.max_cache_memory
+                if usage_ratio > 0.8:
+                    # 内存占用超过80%，主动淘汰10%的条目
+                    num_to_remove = max(1, int(len(self.cache) * 0.1))
+                    for _ in range(num_to_remove):
+                        if self.cache:
+                            oldest_key, _ = self.cache.popitem(last=False)
+                            removed_size = self.cache_sizes.pop(oldest_key, 0)
+                            self.current_cache_memory = max(0, self.current_cache_memory - removed_size)
+                    self.logger.debug(
+                        f"[温和清理] 淘汰{num_to_remove}项，"
+                        f"当前: {self.current_cache_memory / 1024 / 1024:.1f}MB / "
+                        f"{self.max_cache_memory / 1024 / 1024:.1f}MB"
+                    )
     
     def set_image_files_reference(self, image_files):
         """设置图片文件列表引用（用于索引解析）"""

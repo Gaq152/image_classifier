@@ -287,7 +287,7 @@ class EnhancedImageLabel(QLabel):
             # 计算缩放比例
             scale_x = label_size.width() / pixmap_size.width()
             scale_y = label_size.height() / pixmap_size.height()
-            self.scale_factor = min(scale_x, scale_y, 1.0)  # 不放大，只缩小
+            self.scale_factor = min(scale_x, scale_y, self.max_scale)  # 允许放大，但不超过最大缩放倍数
 
             # 重置偏移
             self.image_offset = QPoint(0, 0)
@@ -304,7 +304,7 @@ class EnhancedImageLabel(QLabel):
         """放大"""
         if self.scale_factor >= self.max_scale:
             self.logger.info("已达到最大缩放倍数，停止放大防止卡顿")
-            toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)", 3000)
+            toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)，可在设置中修改", 3000)
             return
 
         self._fit_to_window_mode = False  # 手动缩放时退出适应窗口模式
@@ -346,7 +346,7 @@ class EnhancedImageLabel(QLabel):
             # 限制缩放范围，防止过度放大导致卡顿
             if new_scale > self.max_scale:
                 self.logger.info(f"缩放倍数 {new_scale:.1f} 超过限制 {self.max_scale}，已限制")
-                toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)", 3000)
+                toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)，可在设置中修改", 3000)
                 new_scale = self.max_scale
 
             self.scale_factor = max(self.min_scale, min(new_scale, self.max_scale))
@@ -418,7 +418,7 @@ class EnhancedImageLabel(QLabel):
                         QTimer.singleShot(50, self.update_info_panel)
                 else:
                     # 已达到最大缩放，显示提示
-                    toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)", 3000)
+                    toast_floating(self, f"📈 已达到最大缩放倍数 ({self.max_scale:.1f}x)，可在设置中修改", 3000)
             else:
                 # 向下滚动 - 缩小
                 if self.scale_factor > self.min_scale:
