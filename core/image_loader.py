@@ -16,7 +16,7 @@ import struct
 from collections import OrderedDict
 from pathlib import Path
 from queue import Queue
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QImage
 
@@ -74,6 +74,11 @@ class HighPerformanceImageLoader(QThread):
             'connection_pool': {},  # SMB连接池
             'read_ahead_mb': 2,  # 预读2MB数据
             'use_memory_mapping': True,  # 使用内存映射
+            # 阶段2.2：I/O超时配置
+            'io_timeout': {
+                'network': 5.0,  # 网络路径超时5秒
+                'local': 2.0,    # 本地路径超时2秒
+            },
         }
 
         # Task 1.2 P1修复：使用独立的SimpleCacheMeta模块管理元信息
@@ -130,6 +135,12 @@ class HighPerformanceImageLoader(QThread):
         # 多线程优化 - 自适应线程池配置（同步实际创建的大小）
         self.thread_pool, self.thread_pool_size = self._create_adaptive_thread_pool()
 
+        # 阶段2.2：创建固定I/O线程池用于超时保护
+        io_workers = max(1, min(4, self.thread_pool_size))
+        self.io_pool = ThreadPoolExecutor(max_workers=io_workers, thread_name_prefix="IOPool")
+        self.io_pool_shutdown = False
+        self.logger.info(f"[I/O超时-2.2] 创建I/O线程池 ({io_workers}个工作线程)")
+
         # 修复问题2/5：线程池关闭状态标志，避免依赖私有属性_shutdown
         self.thread_pool_shutdown = False
         self.priority_pool_shutdown = False
@@ -177,6 +188,26 @@ class HighPerformanceImageLoader(QThread):
         self.load_times = []  # 加载时间记录
         self.concurrent_loads = 0  # 当前并发加载数（全局计数）
         self.concurrent_lock = threading.Lock()  # 并发计数器线程锁
+
+        # 阶段2.1：令牌并发控制
+        # 计算并发上限：线程池大小的2倍，至少4个
+        base_concurrent = max(4, self.thread_pool_size * 2)
+        self.max_concurrent = max(self.thread_pool_size, base_concurrent)
+        self.semaphore = threading.BoundedSemaphore(value=self.max_concurrent)
+        self.running_tasks = 0  # 当前运行中任务数（令牌获取后开始执行）
+        self.running_high = 0  # 当前运行中的高优先级任务数
+        self.queued_tasks = 0  # 阶段2.3：未启用等待队列时固定为0
+
+        # 阶段2.4：优先级缓冲与饥饿保护
+        self.priority_buffer_ratio = 0.5
+        self.priority_buffer = max(
+            0,
+            min(self.max_concurrent - 1, int(self.max_concurrent * self.priority_buffer_ratio)),
+        )
+        self.low_blocked_count = 0
+        self.low_starvation_threshold = 5   # 连续阻止次数阈值
+        self.low_starvation_cooldown = 2.0  # 低优先级执行冷却时间（秒）
+        self.last_low_grant = time.time()   # P1修复：初始化为当前时间
 
         # 优化4：双线程池统计字段（仅用于诊断，不影响调度逻辑）
         self.priority_loads = 0  # 主图线程池当前任务数
@@ -1371,9 +1402,52 @@ class HighPerformanceImageLoader(QThread):
                 return bool(pixmap)
         except (ValueError, TypeError, AttributeError):
             return False
-    
+
+    def _gate_before_acquire(self, priority: bool) -> bool:
+        """阶段2.4：尝试获取信号量前的软门控与饥饿保护"""
+        with self.concurrent_lock:
+            # 使用信号量令牌数而非running_tasks，避免竞态窗口
+            # token_in_use = 已获取令牌的任务数（包括等待执行和正在执行的）
+            token_in_use = self.max_concurrent - self.semaphore._value
+            now = time.time()
+
+            if priority:
+                # 高优先级：只要未达硬上限就可以尝试
+                return token_in_use < self.max_concurrent
+
+            # 低优先级逻辑
+            soft_limit = self.max_concurrent - self.priority_buffer
+            # P1修复：只有经历过阻止后才用冷却放行
+            starvation = (
+                self.low_blocked_count >= self.low_starvation_threshold
+                or (self.low_blocked_count > 0 and (now - self.last_low_grant) >= self.low_starvation_cooldown)
+            )
+
+            if token_in_use < soft_limit:
+                # 允许获取，重置计数
+                self.low_blocked_count = 0
+                return True
+
+            if starvation and token_in_use < self.max_concurrent:
+                # 饥饿保护：临时放开缓冲
+                self.logger.info(
+                    f"[优先级策略-2.4] 饥饿保护生效 令牌使用:{token_in_use}/{self.max_concurrent} "
+                    f"buffer:{self.priority_buffer} blocked:{self.low_blocked_count}"
+                )
+                self.low_blocked_count = 0
+                return True
+
+            # 阻止低优先级，增加计数
+            self.low_blocked_count += 1
+            self.logger.debug(
+                f"[优先级策略-2.4] 低优先级阻止 令牌使用:{token_in_use}/{self.max_concurrent} "
+                f"buffer:{self.priority_buffer} blocked:{self.low_blocked_count}"
+            )
+            return False
+
     def load_image(self, image_path, priority=True):
         """智能图片加载调度 - 使用线程池并行加载（紧急修复：添加预加载去重和限流）"""
+        counts_rolled_back = False  # 阶段2.3 P1修复：初始化计数器回滚标志
         try:
             # 快速检查内存缓存，避免不必要的线程池任务
             # 这可以显著减少线程切换开销和并发计数操作
@@ -1389,67 +1463,27 @@ class HighPerformanceImageLoader(QThread):
 
                 return
 
-            # 检查并发限制，网络环境使用更保守策略
+            # 阶段2.1：令牌并发控制 - 先去重，再获取令牌
             is_network_env = is_network_path(image_path)
 
-            pool_size = self.thread_pool_size
-
-            if is_network_env:
-                # 网络环境：2倍线程池大小的并发，限制上限避免过度排队
-                base = max(4, pool_size * 2)
-                max_concurrent = min(base, pool_size * 2)  # 不超过池的2倍
-            else:
-                # 本地环境：3倍线程池大小的并发，充分利用本地I/O
-                base = max(8, int(pool_size * 3))
-                max_concurrent = min(base, pool_size * 3)  # 不超过池的3倍
-
-            # 确保不低于池大小，避免过度限制
-            max_concurrent = max(pool_size, max_concurrent)
-
-            # 线程安全地检查并发数
-            with self.concurrent_lock:
-                current_concurrent = self.concurrent_loads
-
-            # 紧急修复：低优先级任务的去重和限流机制
+            # 低优先级任务的去重（在令牌获取前，避免无意义的等待）
             if not priority:
-                # 1. 去重：检查该路径是否已经在预加载队列中
                 with self.preload_jobs_lock:
                     if image_path in self.pending_preload_jobs:
                         self.logger.debug(f"[预加载去重] 跳过重复任务: {Path(image_path).name}")
                         return
 
-                # 2. 限流：当并发数达到上限时，直接跳过低优先级任务
-                if current_concurrent >= max_concurrent:
-                    self.logger.debug(f"[预加载限流] 并发已满，跳过预加载: {Path(image_path).name} ({current_concurrent}/{max_concurrent})")
-                    return
+            # 阶段2.4：令牌获取前的软门控
+            if not self._gate_before_acquire(priority):
+                return None
 
-                # 3. 添加到预加载任务集合
+            # 阶段2.3：统一定义env_type（令牌改为在_wrapped_task获取）
+            env_type = "网络" if is_network_env else "本地"
+
+            # 登记预加载任务，避免重复提交
+            if not priority:
                 with self.preload_jobs_lock:
                     self.pending_preload_jobs.add(image_path)
-
-            # 高优先级任务的处理逻辑（阶段1修复：添加绝对上限，移除UI阻塞）
-            if current_concurrent >= max_concurrent:
-                if priority:
-                    env_type = "网络" if is_network_env else "本地"
-                    # 计算高优先级任务的绝对并发上限（max_concurrent的1.5倍）
-                    max_priority_concurrent = int(max_concurrent * 1.5)
-
-                    # 检查是否超过绝对上限
-                    if current_concurrent >= max_priority_concurrent:
-                        # 超过绝对上限，拒绝任务以防止并发失控
-                        self.logger.warning(
-                            f"[并发控制-阶段1修复] {env_type}环境高优先级任务被拒绝，"
-                            f"当前并发:{current_concurrent}/{max_concurrent}，"
-                            f"绝对上限:{max_priority_concurrent}"
-                        )
-                        return None
-
-                    # 在max_concurrent和绝对上限之间，允许高优先级任务放行
-                    self.logger.info(
-                        f"[并发控制-阶段1修复] {env_type}环境高优先级任务放行，"
-                        f"当前并发:{current_concurrent}/{max_concurrent}，"
-                        f"绝对上限:{max_priority_concurrent}"
-                    )
 
             # 优化4：根据优先级选择线程池（包含回退逻辑）
             if priority and self.use_dual_thread_pools:
@@ -1481,7 +1515,18 @@ class HighPerformanceImageLoader(QThread):
                 pool_shutdown = getattr(self, 'thread_pool_shutdown', False)
 
             if not self.running or pool is None or pool_shutdown:
-                self.logger.debug(f"[并行加载] 线程池已关闭，跳过任务: {Path(image_path).name} (池:{pool_name})")
+                with self.concurrent_lock:
+                    current_running = self.running_tasks
+                    current_high = self.running_high
+                    queued_tasks = self.queued_tasks
+                # 从预加载集合中移除
+                if not priority:
+                    with self.preload_jobs_lock:
+                        self.pending_preload_jobs.discard(image_path)
+                self.logger.debug(
+                    f"[并行加载] 线程池已关闭，跳过任务: {Path(image_path).name} (池:{pool_name}) "
+                    f"运行中:{current_running}/{self.max_concurrent} 高优先级:{current_high} 排队:{queued_tasks}"
+                )
                 return
 
             # 增加全局并发计数，同时增加对应的统计字段
@@ -1493,12 +1538,13 @@ class HighPerformanceImageLoader(QThread):
                 else:
                     self.background_loads += 1
 
-            # 使用选定的线程池并行加载
+            # 阶段2.1：提交任务到线程池（使用_wrapped_task包装器）
             try:
                 if priority:
                     self.current_task = image_path
 
-                future = pool.submit(self._load_image_worker, image_path, priority)
+                # 提交到_wrapped_task，由它负责令牌获取、running计数和令牌释放
+                future = pool.submit(self._wrapped_task, image_path, priority, env_type)
                 # 优化4：回调函数传入is_priority参数
                 future.add_done_callback(lambda f, p=priority: self._on_load_complete(image_path, p, f))
 
@@ -1513,17 +1559,19 @@ class HighPerformanceImageLoader(QThread):
                         self.priority_loads = max(0, self.priority_loads - 1)
                     else:
                         self.background_loads = max(0, self.background_loads - 1)
+                counts_rolled_back = True  # 阶段2.3 P1修复：标记已回滚，避免外层except重复
 
                 # 从预加载集合中移除
                 if not priority:
                     with self.preload_jobs_lock:
                         self.pending_preload_jobs.discard(image_path)
 
-                # 如果是网络路径，回滚网络计数器（在下面的代码中会增加）
-                # 这里先不处理，因为网络计数器在任务成功提交后才增加
-
                 self.logger.error(f"[优化4-{pool_name}] 提交任务失败: {submit_error}")
                 raise submit_error
+
+            # 阶段2.3 P3修复：提交成功后立即转移令牌和计数管理权
+            # 令牌和计数器由 _wrapped_task 托管，不应在外层 except 中处理
+            counts_rolled_back = True  # 阶段2.3 P1修复：标记已转移，避免网络计数器段异常时重复回滚
 
             # Task 1.1 P0修复：任务成功提交后再增加网络计数器
             # 这样可以避免在任务被拒绝或提交失败时需要回滚计数器
@@ -1537,20 +1585,25 @@ class HighPerformanceImageLoader(QThread):
                         self.cleanup_timer.start(30000)
                         self.logger.info("[路径感知] 检测到网络路径，启动清理定时器")
 
-        except Exception as e:
-            # Task 1.1 P0修复：异常时需要同时回滚两个计数器
-            # 优化4：同时回滚统计字段
-            with self.concurrent_lock:
-                self.concurrent_loads = max(0, self.concurrent_loads - 1)
-                if priority:
-                    self.priority_loads = max(0, self.priority_loads - 1)
-                else:
-                    self.background_loads = max(0, self.background_loads - 1)
+            # 正常提交流程需要把 Future 返回给调用方，便于等待和校验
+            return future
 
-            # 紧急修复：异常时也要从预加载集合中移除
-            if not priority:
-                with self.preload_jobs_lock:
-                    self.pending_preload_jobs.discard(image_path)
+        except Exception as e:
+            # 阶段2.3 P1修复：只有在未回滚时才回滚计数器
+            if not counts_rolled_back:
+                # Task 1.1 P0修复：异常时需要同时回滚两个计数器
+                # 优化4：同时回滚统计字段
+                with self.concurrent_lock:
+                    self.concurrent_loads = max(0, self.concurrent_loads - 1)
+                    if priority:
+                        self.priority_loads = max(0, self.priority_loads - 1)
+                    else:
+                        self.background_loads = max(0, self.background_loads - 1)
+
+                # 紧急修复：异常时也要从预加载集合中移除
+                if not priority:
+                    with self.preload_jobs_lock:
+                        self.pending_preload_jobs.discard(image_path)
 
             # 如果是网络路径，还需要回滚网络计数器
             if is_network_env:
@@ -1559,7 +1612,137 @@ class HighPerformanceImageLoader(QThread):
 
             self.logger.error(f"[并行加载] 提交加载任务失败，重置并发计数器: {e}")
             raise ImageLoadError(f"提交加载任务失败: {e}")
-    
+
+    def _wrapped_task(self, image_path, priority, env_type="未知"):
+        """阶段2.1：统一任务包装器，负责令牌获取、running计数和令牌释放
+
+        阶段2.3 P2修复：添加env_type以统一日志格式
+        """
+        token_acquired = False
+        started = False
+        wait_cost = 0.0
+        try:
+            # 获取令牌（高优先级等待1秒，普通任务等待0.5秒）
+            token_timeout = 1.0 if priority else 0.5
+            wait_start = time.time()
+            acquired = self.semaphore.acquire(timeout=token_timeout)
+            wait_cost = time.time() - wait_start
+
+            with self.concurrent_lock:
+                current_running = self.running_tasks
+                current_high = self.running_high
+                queued_tasks = self.queued_tasks
+
+            if not acquired:
+                self.logger.warning(
+                    f"[并发度量-2.3][等待] 获取令牌失败: {Path(image_path).name} "
+                    f"优先级:{'高' if priority else '普通'} 环境:{env_type} "
+                    f"等待:{wait_cost:.3f}s 运行中:{current_running}/{self.max_concurrent} "
+                    f"高优先级:{current_high} 排队:{queued_tasks}"
+                )
+                return None
+
+            token_acquired = True
+            self.logger.info(
+                f"[并发度量-2.3][等待] 获取令牌成功: {Path(image_path).name} "
+                f"优先级:{'高' if priority else '普通'} 环境:{env_type} "
+                f"等待:{wait_cost:.3f}s 运行中:{current_running}/{self.max_concurrent} "
+                f"高优先级:{current_high} 排队:{queued_tasks}"
+            )
+
+            # 阶段2.4：成功拿到令牌后更新优先级状态
+            if not priority:
+                with self.concurrent_lock:
+                    self.last_low_grant = time.time()
+                    self.low_blocked_count = 0
+            else:
+                with self.concurrent_lock:
+                    running_snapshot = self.running_tasks
+                if running_snapshot >= (self.max_concurrent - self.priority_buffer):
+                    self.logger.debug(
+                        f"[优先级策略-2.4] 高优先级使用缓冲区 running:{running_snapshot}/{self.max_concurrent} "
+                        f"buffer:{self.priority_buffer}"
+                    )
+
+            # 任务开始：增加运行中计数
+            with self.concurrent_lock:
+                self.running_tasks += 1
+                if priority:
+                    self.running_high += 1
+                current_running = self.running_tasks
+                current_high = self.running_high
+                queued_tasks = self.queued_tasks
+            started = True
+
+            # 记录任务开始日志
+            self.logger.info(
+                f"[并发度量-2.3][开始] 任务开始: {Path(image_path).name} "
+                f"优先级:{'高' if priority else '普通'} 环境:{env_type} "
+                f"等待:{wait_cost:.3f}s 运行中:{current_running}/{self.max_concurrent} "
+                f"高优先级:{current_high} 排队:{queued_tasks}"
+            )
+
+            # 调用原有的加载逻辑
+            return self._load_image_worker(image_path, priority)
+
+        finally:
+            if started:
+                # 任务结束：减少运行中计数
+                with self.concurrent_lock:
+                    self.running_tasks = max(0, self.running_tasks - 1)
+                    if priority:
+                        self.running_high = max(0, self.running_high - 1)
+                    current_running = self.running_tasks
+                    current_high = self.running_high
+                    queued_tasks = self.queued_tasks
+
+                self.logger.info(
+                    f"[并发度量-2.3][结束] 任务结束释放令牌: {Path(image_path).name} "
+                    f"优先级:{'高' if priority else '普通'} 环境:{env_type} "
+                    f"等待:{wait_cost:.3f}s 运行中:{current_running}/{self.max_concurrent} "
+                    f"高优先级:{current_high} 排队:{queued_tasks}"
+                )
+
+            if token_acquired:
+                try:
+                    self.semaphore.release()
+                except Exception as release_error:
+                    self.logger.error(f"[并发度量-2.3] 释放令牌失败: {release_error}")
+
+    def _run_io_with_timeout(self, func, timeout, desc, image_path, is_network):
+        """阶段2.2：执行I/O操作并添加超时保护
+
+        Args:
+            func: I/O操作函数（无参数的lambda或可调用对象）
+            timeout: 超时时间（秒）
+            desc: 操作描述（用于日志，如"stat"或"读取"）
+            image_path: 图片路径（用于日志）
+            is_network: 是否为网络路径（用于日志）
+
+        Returns:
+            I/O操作的返回值
+
+        Raises:
+            TimeoutError: I/O操作超时
+            其他异常: I/O操作失败
+        """
+        future = self.io_pool.submit(func)
+        try:
+            return future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            env_type = "网络" if is_network else "本地"
+            self.logger.warning(
+                f"[I/O超时-2.2] {env_type}{desc}超时: {Path(image_path).name} "
+                f"限制:{timeout:.1f}s"
+            )
+            # 尝试取消任务（可能无效但不影响）
+            future.cancel()
+            raise TimeoutError(f"I/O超时: {image_path}")
+        except Exception as e:
+            # 其他异常也尝试取消
+            future.cancel()
+            raise
+
     def _load_image_worker(self, image_path, is_priority):
         """线程池工作函数（优化4：根据优先级使用不同的日志前缀）"""
         load_start = time.time()
@@ -1601,23 +1784,57 @@ class HighPerformanceImageLoader(QThread):
             with self._stats_lock:
                 self.network_miss += 1
 
-            # 缓存未命中，现在才访问网络获取文件信息
-            file_size = Path(image_path).stat().st_size
+            # 阶段2.2：确定I/O超时配置
+            is_network = is_network_path(image_path)
+            # 从smb_optimization配置读取超时设置，提供默认值
+            timeout_cfg = self.smb_optimization.get('io_timeout', {})
+            if is_network:
+                io_timeout = timeout_cfg.get('network', 5.0)  # 默认网络5秒
+            else:
+                io_timeout = timeout_cfg.get('local', 2.0)  # 默认本地2秒
+
+            # 阶段2.2：使用超时保护获取文件信息
+            stat_obj = self._run_io_with_timeout(
+                lambda: Path(image_path).stat(),
+                io_timeout,
+                "stat",
+                image_path,
+                is_network
+            )
+            file_size = stat_obj.st_size
             file_size_mb = file_size / 1024 / 1024
 
-            # 使用OpenCV或PIL加载（Task 2.1：解包返回的元组）
+            # 阶段2.2：使用超时保护加载图片（Task 2.1：解包返回的元组）
             if self.use_opencv and cv2 is not None:
                 try:
-                    image_array, width, height = self._load_with_opencv(image_path)
+                    image_array, width, height = self._run_io_with_timeout(
+                        lambda: self._load_with_opencv(image_path),
+                        io_timeout,
+                        "读取",
+                        image_path,
+                        is_network
+                    )
                 except ImageLoadError:
                     # OpenCV失败时回退到PIL
                     if PIL_AVAILABLE:
-                        image_array, width, height = self._load_with_pil_optimized(image_path)
+                        image_array, width, height = self._run_io_with_timeout(
+                            lambda: self._load_with_pil_optimized(image_path),
+                            io_timeout,
+                            "读取",
+                            image_path,
+                            is_network
+                        )
                     else:
                         raise
             else:
                 if PIL_AVAILABLE:
-                    image_array, width, height = self._load_with_pil_optimized(image_path)
+                    image_array, width, height = self._run_io_with_timeout(
+                        lambda: self._load_with_pil_optimized(image_path),
+                        io_timeout,
+                        "读取",
+                        image_path,
+                        is_network
+                    )
                 else:
                     raise ImageLoadError("没有可用的图像加载库")
 
@@ -1691,6 +1908,10 @@ class HighPerformanceImageLoader(QThread):
             else:
                 raise ImageLoadError("图片加载失败")
 
+        except TimeoutError:
+            # 阶段2.2：I/O超时异常需要向上抛出，不能被吞掉
+            # 令牌会在_wrapped_task的finally中释放，不会泄漏
+            raise
         except Exception as e:
             load_time = (time.time() - load_start) * 1000
             self.logger.error(f"{log_prefix}-失败 {Path(image_path).name} 耗时:{load_time:.1f}ms 错误:{e}")
@@ -1726,6 +1947,11 @@ class HighPerformanceImageLoader(QThread):
 
         try:
             result = future.result()
+
+            # 方案A修复：处理令牌获取失败导致的None结果
+            if result is None:
+                self.logger.debug(f"[并发度量] 任务未执行（令牌获取失败）: {Path(image_path).name}")
+                return
 
             # 检查加载结果
             image_data = result.get('image_data')
@@ -2305,6 +2531,16 @@ class HighPerformanceImageLoader(QThread):
     def stop(self):
         """停止加载器（优化4：按顺序关闭两个线程池）"""
         self.running = False
+
+        # 阶段2.2：先关闭I/O线程池
+        if hasattr(self, 'io_pool') and self.io_pool is not None:
+            try:
+                self.logger.info("[I/O超时-2.2] 正在关闭I/O线程池...")
+                self.io_pool_shutdown = True
+                self.io_pool.shutdown(wait=False)
+                self.logger.info("[I/O超时-2.2] I/O线程池已关闭")
+            except Exception as e:
+                self.logger.warning(f"[I/O超时-2.2] 关闭I/O线程池时出错: {e}")
 
         # 优化4：先关闭主图线程池
         if hasattr(self, 'priority_pool') and self.priority_pool is not None:
