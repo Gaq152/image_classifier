@@ -307,6 +307,8 @@ class ImageClassifier(QMainWindow):
         # UI更新优化
         self.ui_update_lock = threading.Lock()
         self.pending_ui_updates = set()
+        # Codex方案：F5刷新后等待批量更新完成再套用过滤（避免硬编码延迟）
+        self._pending_reapply_filter = False
 
         # 文件状态管理器（延迟初始化）
         self.file_state_manager = None
@@ -1994,18 +1996,21 @@ class ImageClassifier(QMainWindow):
                 return
             components_to_update = self.pending_ui_updates.copy()
             self.pending_ui_updates.clear()
-            
+
+        # Codex方案：检查是否需要在image_list更新后重新应用过滤
+        reapply_filter = False
+
         try:
             # 暂时阻止重绘
             self.setUpdatesEnabled(False)
-            
+
             # 优化：如果包含current_image更新，只执行一次，并移除其他可能冲突的更新
             if 'current_image' in components_to_update:
                 self._show_current_image_internal()
                 # 移除其他可能导致重复刷新的组件
                 components_to_update.discard('current_image')
                 components_to_update.discard('ui_state')  # ui_state会在current_image中处理
-            
+
             for component in components_to_update:
                 if component == 'category_buttons':
                     self._update_category_buttons_internal()
@@ -2017,11 +2022,20 @@ class ImageClassifier(QMainWindow):
                     self._update_statistics_internal()
                 elif component == 'ui_state':
                     self._update_ui_state_internal()
-        
+
+            # Codex方案：本轮包含image_list更新时，刷新完成后再统一套用过滤
+            if self._pending_reapply_filter and 'image_list' in components_to_update:
+                reapply_filter = True
+
         finally:
             # 恢复重绘
             self.setUpdatesEnabled(True)
             self.update()
+
+        # Codex方案：在批量更新完成后再应用过滤（避免被_update_image_list_internal覆盖）
+        if reapply_filter:
+            self._pending_reapply_filter = False
+            self.apply_image_filter()
     
     def _update_category_buttons_internal(self):
         """内部类别按钮更新方法"""
@@ -3208,9 +3222,11 @@ class ImageClassifier(QMainWindow):
             if isinstance(c, list) and len(c) > 1
         }
 
-        # 过滤图片列表
+        # 过滤图片列表并测量最大文本宽度（Codex+Gemini方案：供横向滚动宽度计算）
         filtered_files = []
         original_indices = []  # 保存原始索引映射
+        font_metrics = self.image_list.fontMetrics()
+        max_text_width = 0
 
         for idx, img_path in enumerate(self.image_files):
             img_path_str = str(img_path)
@@ -3230,6 +3246,9 @@ class ImageClassifier(QMainWindow):
             if should_show:
                 filtered_files.append(img_path)
                 original_indices.append(idx)
+                # Codex方案：记录最长文件名宽度（单次遍历，24k规模可接受）
+                file_name = Path(img_path_str).name
+                max_text_width = max(max_text_width, font_metrics.horizontalAdvance(file_name))
 
         # 更新Model数据（保留缩略图缓存，传递原始索引）
         self.image_list_model.update_data(
@@ -3239,6 +3258,9 @@ class ImageClassifier(QMainWindow):
             multi_classified,  # 使用局部计算的多分类集合
             original_indices  # 传递原始索引，确保ROLE_IMAGE_INDEX返回正确值
         )
+
+        # Codex+Gemini方案：根据最长文件名设置列表项宽度，保证横向滚动显示完整
+        self._update_image_list_grid_width(max_text_width)
 
         # 保存过滤索引映射（用于滚动定位等场景）
         # original_index -> filtered_row
@@ -3250,16 +3272,24 @@ class ImageClassifier(QMainWindow):
 
         # 恢复选中
         # Codex优化：使用Model的_path_map进行O(1)查找而不是线性扫描
+        # Bug修复-P0：处理当前图片被过滤掉的情况（row=None）
         if current_path:
             # O(1)查找路径对应的行
             row = self.image_list_model._path_map.get(str(current_path))
             if row is not None and 0 <= row < self.image_list_model.rowCount():
+                # 当前图片仍在过滤列表中，恢复选中
                 model_index = self.image_list_model.index(row, 0)
                 self.image_list.setCurrentIndex(model_index)
                 # 更新current_index为原始索引（从Model获取）
                 self.current_index = model_index.data(ImageListModel.ROLE_IMAGE_INDEX)
+            elif self.image_list_model.rowCount() > 0:
+                # 当前图片被过滤掉（row=None），回退到第一张可见图片
+                # Gemini建议：自动跳转比清空预览更符合用户工作流
+                model_index = self.image_list_model.index(0, 0)
+                self.image_list.setCurrentIndex(model_index)
+                self.current_index = model_index.data(ImageListModel.ROLE_IMAGE_INDEX)
         elif self.image_list_model.rowCount() > 0:
-            # 默认选中第一项
+            # 没有当前路径（首次加载），默认选中第一项
             model_index = self.image_list_model.index(0, 0)
             self.image_list.setCurrentIndex(model_index)
             # 更新current_index为原始索引（从Model获取）
@@ -3296,6 +3326,43 @@ class ImageClassifier(QMainWindow):
                 stats['unclassified'] += 1
 
         return stats
+
+    def _update_image_list_grid_width(self, max_text_width: int):
+        """
+        Codex+Gemini方案：根据最长文件名计算列表项宽度，保证横向滚动显示完整
+
+        Args:
+            max_text_width: 最长文件名的像素宽度（由QFontMetrics.horizontalAdvance计算）
+        """
+        try:
+            # 获取Delegate的布局常量（紧凑模式：无缩略图）
+            delegate = self.image_list.itemDelegate()
+            padding = getattr(delegate, 'PADDING', 6)
+            icon_size = getattr(delegate, 'ICON_SIZE', 20)
+
+            # 计算基础宽度：padding + 图标 + padding + 文本 + padding（紧凑模式）
+            base_width = padding + icon_size + padding + padding
+            item_width = base_width + max_text_width
+
+            # Gemini建议：设置最大宽度上限（400-500px），防止超长文件名撑爆布局
+            MAX_WIDTH = 500
+            item_width = min(item_width, MAX_WIDTH)
+            # 确保最小宽度
+            item_width = max(item_width, 200)
+
+            # 获取行高（紧凑模式：44px）
+            if self.image_list_model.rowCount() > 0:
+                row_height = self.image_list.sizeHintForRow(0)
+            else:
+                row_height = max(44, icon_size + 2 * padding)
+
+            # 设置统一的GridSize，配合setUniformItemSizes(True)保持性能
+            from PyQt6.QtCore import QSize
+            self.image_list.setGridSize(QSize(item_width, row_height))
+            self.image_list.updateGeometry()
+
+        except Exception as e:
+            self.logger.debug(f"更新列表项宽度失败: {e}")
 
     def select_category(self, category_name):
         """选择类别并更新视觉状态"""
@@ -4145,7 +4212,11 @@ class ImageClassifier(QMainWindow):
                 
                 # 强制更新所有UI组件，无论是否检测到变化
                 self.schedule_ui_update('image_list', 'category_buttons', 'category_counts', 'statistics')
-                
+
+                # Bug修复-P1：F5刷新后重新应用过滤状态（Codex方案：用标志位替代硬编码延迟）
+                # 在perform_batch_ui_update完成image_list更新后自动调用apply_image_filter
+                self._pending_reapply_filter = True
+
                 # 显示同步结果（只有在有变化时才显示）
                 if sync_results['changes_detected']:
                     self._show_sync_results(sync_results)

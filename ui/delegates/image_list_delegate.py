@@ -8,18 +8,19 @@ from ..components.styles.theme import default_theme
 
 class ImageListDelegate(QStyledItemDelegate):
     """
-    高性能列表项代理
-    负责绘制状态图标、缩略图和文本
+    高性能列表项代理（紧凑模式）
+    负责绘制状态图标和文本
     特点：零 paint 时内存分配，全缓存复用
+    Gemini优化：行高44px，图标20px，间距6px
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         # 布局常量（必须在_init_icons()之前定义）
-        self.ICON_SIZE = 36     # 状态图标大小
-        self.THUMB_SIZE = 48    # 缩略图大小
-        self.PADDING = 8        # 间距
+        # Gemini紧凑方案：提高信息密度，状态图标降级为轻量指示器
+        self.ICON_SIZE = 20     # 状态图标大小（原36px）
+        self.PADDING = 6        # 间距（原8px）
 
         # 预生成图标缓存 { status_type: QIcon }
         self._icon_cache: Dict[str, QIcon] = {}
@@ -57,33 +58,37 @@ class ImageListDelegate(QStyledItemDelegate):
         color = QColor(color_str)
         shadow_color = QColor(shadow_str)
 
-        # 绘制阴影
-        painter.setPen(QPen(shadow_color, 2))
+        # 绘制阴影（20px画布，线宽调整为1px）
+        painter.setPen(QPen(shadow_color, 1))
         painter.setBrush(QBrush(shadow_color, Qt.BrushStyle.SolidPattern))
-        painter.drawEllipse(3, 3, 28, 28)
+        painter.drawEllipse(2, 2, 16, 16)
 
         # 绘制主圆形
-        painter.setPen(QPen(color, 2))
+        painter.setPen(QPen(color, 1))
         painter.setBrush(QBrush(color, Qt.BrushStyle.SolidPattern))
-        painter.drawEllipse(2, 2, 28, 28)
+        painter.drawEllipse(1, 1, 16, 16)
 
-        # 绘制状态符号
-        painter.setPen(QPen(Qt.GlobalColor.white, 3))
+        # 绘制状态符号（线宽2px，确保小尺寸下清晰）
+        painter.setPen(QPen(Qt.GlobalColor.white, 2))
 
         if symbol == "check":
-            painter.drawLine(8, 16, 14, 22)
-            painter.drawLine(14, 22, 26, 10)
+            # 对勾：缩小并居中
+            painter.drawLine(5, 9, 8, 12)
+            painter.drawLine(8, 12, 14, 6)
         elif symbol == "cross":
-            painter.drawLine(10, 10, 24, 24)
-            painter.drawLine(24, 10, 10, 24)
+            # 叉号：6,6 <-> 13,13
+            painter.drawLine(6, 6, 13, 13)
+            painter.drawLine(13, 6, 6, 13)
         elif symbol == "multi":
-            painter.setPen(QPen(Qt.GlobalColor.white, 2))
-            painter.drawRect(8, 8, 14, 14)
-            painter.drawRect(14, 14, 14, 14)
+            # 多分类：两个重叠方块
+            painter.setPen(QPen(Qt.GlobalColor.white, 1))
+            painter.drawRect(5, 5, 7, 7)
+            painter.drawRect(8, 8, 7, 7)
         elif symbol == "warning":
-            painter.setPen(QPen(Qt.GlobalColor.white, 2))
-            painter.drawLine(16, 8, 16, 18)
-            painter.drawEllipse(14, 22, 4, 4)
+            # 警告：感叹号（Codex修正：x=9居中）
+            painter.setPen(QPen(Qt.GlobalColor.white, 1))
+            painter.drawLine(9, 5, 9, 11)
+            painter.drawPoint(9, 13)
         # "none" 绘制空圆点或不做额外绘制
 
         painter.end()
@@ -110,14 +115,12 @@ class ImageListDelegate(QStyledItemDelegate):
 
         # 4. 获取数据 (从 Model 快速获取)
         status_type = index.data(ImageListModel.ROLE_STATUS_TYPE)
-        thumbnail = index.data(Qt.ItemDataRole.DecorationRole)
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""  # 空值兜底
 
-        # 5. 布局计算
+        # 5. 布局计算（紧凑模式：无缩略图）
         rect = opt.rect
 
-        # -- A. 状态图标 (左侧固定) --
-        # 垂直居中
+        # -- A. 状态图标 (左侧固定，垂直居中) --
         icon_rect = QRect(rect.left() + self.PADDING,
                           rect.top() + (rect.height() - self.ICON_SIZE) // 2,
                           self.ICON_SIZE, self.ICON_SIZE)
@@ -126,17 +129,8 @@ class ImageListDelegate(QStyledItemDelegate):
         status_icon = self._icon_cache.get(status_type, self._icon_cache["pending"])
         status_icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
 
-        # -- B. 缩略图 (可选，状态图标右侧) --
+        # -- B. 文本偏移（紧凑模式：直接在图标后） --
         text_offset = self.PADDING + self.ICON_SIZE + self.PADDING
-
-        if thumbnail and isinstance(thumbnail, QIcon):
-             # 如果有缩略图，绘制在状态图标右侧
-            thumb_rect = QRect(rect.left() + text_offset,
-                               rect.top() + (rect.height() - self.THUMB_SIZE) // 2,
-                               self.THUMB_SIZE, self.THUMB_SIZE)
-            # 保持纵横比绘制
-            thumbnail.paint(painter, thumb_rect, Qt.AlignmentFlag.AlignCenter)
-            text_offset += self.THUMB_SIZE + self.PADDING
 
         # -- C. 文本 (剩余区域) --
         text_rect = QRect(rect.left() + text_offset, rect.top(),
@@ -158,28 +152,20 @@ class ImageListDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         """返回 Item 建议大小"""
-        # 固定高度 60px，确保能容纳 48px 缩略图和适当的 Padding
-        height = 60
+        # Gemini紧凑方案：行高44px，提高信息密度
+        height = 44
 
         # Phase 1.1: 计算实际宽度以支持横向滚动（长文件名）
-        # 获取文本内容
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
 
         # 计算文本实际宽度
         font_metrics = option.fontMetrics
         text_width = font_metrics.horizontalAdvance(text)
 
-        # 计算总宽度：左边距 + 状态图标 + 间距 + 缩略图 + 间距 + 文本 + 右边距
-        # 检查是否有缩略图
-        has_thumbnail = index.data(Qt.ItemDataRole.DecorationRole) is not None
-        thumb_width = self.THUMB_SIZE if has_thumbnail else 0
-        thumb_padding = self.PADDING if has_thumbnail else 0
-
+        # 计算总宽度：左边距 + 状态图标 + 间距 + 文本 + 右边距（无缩略图）
         total_width = (self.PADDING +           # 左边距
                        self.ICON_SIZE +          # 状态图标
                        self.PADDING +            # 图标后间距
-                       thumb_width +             # 缩略图宽度
-                       thumb_padding +           # 缩略图后间距
                        text_width +              # 文本宽度
                        self.PADDING)             # 右边距
 
