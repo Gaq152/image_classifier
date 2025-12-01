@@ -225,7 +225,8 @@ class TutorialManager:
                 title="类别排序",
                 content='点击这个<b>「▼」</b>按钮可以调整类别的排序方式：<br><br>'
                         '• 按名称排序<br>'
-                        '• 按快捷键排序',
+                        '• 按快捷键排序<br>'
+                        '• 按分类数量排序',
                 target_widget_name="sort_button",
                 arrow_position=ArrowPosition.RIGHT,  # 气泡在左侧，箭头在气泡右侧指向按钮
                 highlight_padding=12,
@@ -235,7 +236,8 @@ class TutorialManager:
                 mock_widget_content={
                     "items": [
                         ("☑", "按名称排序"),
-                        ("☐", "按快捷键排序")
+                        ("☐", "按快捷键排序"),
+                        ("☐", "按分类数量排序")
                     ]
                 },
                 mock_widget_position="at_target"
