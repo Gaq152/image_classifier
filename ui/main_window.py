@@ -1513,10 +1513,16 @@ class ImageClassifier(QMainWindow):
                 self.logger.info("🔄 开始后台同步操作...")
                 self.statusBar.showMessage("🔄 后台同步分类状态中...")
                 
-                # 连接同步完成信号
+                # 连接同步完成信号（使用UniqueConnection防止重复连接）
                 if hasattr(self.file_manager, 'file_sync'):
-                    self.file_manager.file_sync.sync_completed.connect(self._on_sync_completed)
-                    self.file_manager.file_sync.sync_progress.connect(self._on_sync_progress)
+                    try:
+                        self.file_manager.file_sync.sync_completed.connect(
+                            self._on_sync_completed, Qt.ConnectionType.UniqueConnection)
+                        self.file_manager.file_sync.sync_progress.connect(
+                            self._on_sync_progress, Qt.ConnectionType.UniqueConnection)
+                    except TypeError:
+                        # 已连接，忽略
+                        pass
                 
                 # 启动真正的同步操作
                 try:

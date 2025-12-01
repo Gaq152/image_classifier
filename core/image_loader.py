@@ -700,7 +700,7 @@ class HighPerformanceImageLoader(QThread):
                 self.logger.debug("[SMB缓存] 元信息不可用，执行完整扫描")
 
             # 超限或元信息不可用时，执行完整扫描和清理
-            self.logger.info(f"[SMB缓存] 开始完整扫描和清理...")
+            self.logger.debug(f"[SMB缓存] 开始完整扫描和清理...")
 
             # 阶段1修复-问题6: 进入批量更新模式
             self.cache_meta.begin_bulk_update()
@@ -726,7 +726,7 @@ class HighPerformanceImageLoader(QThread):
                             continue
 
                 total_size_gb = total_size / (1024**3)
-                self.logger.info(f"[SMB缓存] 扫描完成: {total_size_gb:.2f}GB ({len(cache_files)}个文件)")
+                self.logger.debug(f"[SMB缓存] 扫描完成: {total_size_gb:.2f}GB ({len(cache_files)}个文件)")
 
                 # 如果未超限，直接提交扫描结果
                 if total_size_gb <= max_size_gb:
@@ -829,7 +829,7 @@ class HighPerformanceImageLoader(QThread):
                 # commit_bulk_update会将扫描结果与pending_remove合并得到最终结果
                 self.cache_meta.commit_bulk_update(len(cache_files), total_size)
 
-                self.logger.info(f"[SMB缓存] 清理完成，删除{removed_count}个文件，释放 {removed_size / (1024**3):.2f}GB")
+                self.logger.debug(f"[SMB缓存] 清理完成，删除{removed_count}个文件，释放 {removed_size / (1024**3):.2f}GB")
 
                 # Task 3.2：清理完成后归零命中率统计
                 self.reset_scaled_cache_stats()
@@ -1017,11 +1017,11 @@ class HighPerformanceImageLoader(QThread):
                 cache_size_mb = cache_size_bytes / 1024 / 1024
 
                 # Task 2.1收尾：记录策略信息到日志和元数据
-                self.logger.info(f"[SMB缓存] 已缓存: {Path(image_path).name} | "
-                               f"策略:{strategy_id} | "
-                               f"缩放比:{scale_ratio:.2f} | "
-                               f"格式:{target_format} | "
-                               f"大小:{cache_size_mb:.2f}MB")
+                self.logger.debug(f"[SMB缓存] 已缓存: {Path(image_path).name} | "
+                                f"策略:{strategy_id} | "
+                                f"缩放比:{scale_ratio:.2f} | "
+                                f"格式:{target_format} | "
+                                f"大小:{cache_size_mb:.2f}MB")
 
                 # 优化7：直接添加新记录，不再检查和删除旧记录
                 self.cache_meta.add_entry(
@@ -1058,11 +1058,11 @@ class HighPerformanceImageLoader(QThread):
                 cache_size_mb = cache_size_bytes / 1024 / 1024
 
                 # Task 2.1收尾P1修复：bytes分支也记录策略信息
-                self.logger.info(f"[SMB缓存] 已缓存: {Path(image_path).name} | "
-                               f"策略:{strategy_id} | "
-                               f"缩放比:{scale_ratio:.2f} | "
-                               f"格式:{target_format} | "
-                               f"大小:{cache_size_mb:.2f}MB")
+                self.logger.debug(f"[SMB缓存] 已缓存: {Path(image_path).name} | "
+                                f"策略:{strategy_id} | "
+                                f"缩放比:{scale_ratio:.2f} | "
+                                f"格式:{target_format} | "
+                                f"大小:{cache_size_mb:.2f}MB")
 
                 # 优化7：直接添加新记录，不再检查和删除旧记录
                 self.cache_meta.add_entry(
@@ -1099,11 +1099,11 @@ class HighPerformanceImageLoader(QThread):
                 cache_size_mb = cache_size_bytes / 1024 / 1024
 
                 # Task 2.1收尾P1修复：PIL Image分支也记录策略信息
-                self.logger.info(f"[SMB缓存] 已缓存: {Path(image_path).name} | "
-                               f"策略:{strategy_id} | "
-                               f"缩放比:{scale_ratio:.2f} | "
-                               f"格式:{target_format} | "
-                               f"大小:{cache_size_mb:.2f}MB")
+                self.logger.debug(f"[SMB缓存] 已缓存: {Path(image_path).name} | "
+                                f"策略:{strategy_id} | "
+                                f"缩放比:{scale_ratio:.2f} | "
+                                f"格式:{target_format} | "
+                                f"大小:{cache_size_mb:.2f}MB")
 
                 # 优化7：直接添加新记录，不再检查和删除旧记录
                 self.cache_meta.add_entry(
@@ -1430,7 +1430,7 @@ class HighPerformanceImageLoader(QThread):
 
             if starvation and token_in_use < self.max_concurrent:
                 # 饥饿保护：临时放开缓冲
-                self.logger.info(
+                self.logger.debug(
                     f"[优先级策略-2.4] 饥饿保护生效 令牌使用:{token_in_use}/{self.max_concurrent} "
                     f"buffer:{self.priority_buffer} blocked:{self.low_blocked_count}"
                 )
@@ -1643,7 +1643,7 @@ class HighPerformanceImageLoader(QThread):
                 return None
 
             token_acquired = True
-            self.logger.info(
+            self.logger.debug(
                 f"[并发度量-2.3][等待] 获取令牌成功: {Path(image_path).name} "
                 f"优先级:{'高' if priority else '普通'} 环境:{env_type} "
                 f"等待:{wait_cost:.3f}s 运行中:{current_running}/{self.max_concurrent} "
@@ -1675,7 +1675,7 @@ class HighPerformanceImageLoader(QThread):
             started = True
 
             # 记录任务开始日志
-            self.logger.info(
+            self.logger.debug(
                 f"[并发度量-2.3][开始] 任务开始: {Path(image_path).name} "
                 f"优先级:{'高' if priority else '普通'} 环境:{env_type} "
                 f"等待:{wait_cost:.3f}s 运行中:{current_running}/{self.max_concurrent} "
@@ -1696,7 +1696,7 @@ class HighPerformanceImageLoader(QThread):
                     current_high = self.running_high
                     queued_tasks = self.queued_tasks
 
-                self.logger.info(
+                self.logger.debug(
                     f"[并发度量-2.3][结束] 任务结束释放令牌: {Path(image_path).name} "
                     f"优先级:{'高' if priority else '普通'} 环境:{env_type} "
                     f"等待:{wait_cost:.3f}s 运行中:{current_running}/{self.max_concurrent} "
