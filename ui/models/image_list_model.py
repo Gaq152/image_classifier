@@ -75,18 +75,23 @@ class ImageListModel(QAbstractListModel):
         self._thumbnail_lru.clear()
 
         for i, path in enumerate(image_files):
-            is_classified = path in classified_images
-            is_removed = path in removed_images
-            is_multi = path in multi_classified
+            # Bug修复-P0：统一转换为字符串，防止Path对象与字符串键不匹配
+            # 问题：apply_image_filter传入的可能是Path对象，但classified_images等字典用字符串键
+            # 解决：统一path_str用于所有membership检查和映射
+            path_str = str(path)
+
+            is_classified = path_str in classified_images
+            is_removed = path_str in removed_images
+            is_multi = path_str in multi_classified
 
             # 使用原始索引（如果提供）或当前索引
             original_idx = original_indices[i] if original_indices else i
-            item = ImageItem(str(path), original_idx, is_classified, is_removed, is_multi)
+            item = ImageItem(path_str, original_idx, is_classified, is_removed, is_multi)
             self._data.append(item)
 
             # 建立 O(1) 查找索引
             self._index_map[original_idx] = i  # original_index -> row
-            self._path_map[str(path)] = i
+            self._path_map[path_str] = i
 
         self.endResetModel()
 
