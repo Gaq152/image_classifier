@@ -762,6 +762,37 @@ class ImageClassifier(QMainWindow):
         # 添加弹性空间，推送右侧按钮到最右边
         category_title_layout.addStretch()
 
+        # 排序方向按钮 - 升序/降序切换（tooltip在后面动态设置）
+        self.sort_direction_button = self.create_toolbar_button(
+            '↑' if self.config.sort_ascending else '↓',
+            'sort_direction_button',
+            '',  # tooltip将在_update_direction_button_tooltip中动态设置
+            self.toggle_sort_direction,
+            size=(18, 18)
+        )
+        self.sort_direction_button.setStyleSheet("""
+            QPushButton#sort_direction_button {
+                background-color: transparent;
+                color: #E65100;
+                border: none;
+                border-radius: 3px;
+                font-size: 12px;
+                font-weight: bold;
+                text-align: center;
+                margin: 0px;
+                padding: 0px;
+            }
+            QPushButton#sort_direction_button:hover {
+                background-color: rgba(245, 245, 245, 180);
+            }
+            QPushButton#sort_direction_button:pressed {
+                background-color: rgba(224, 224, 224, 180);
+            }
+        """)
+        category_title_layout.addWidget(self.sort_direction_button)
+        # 设置初始tooltip（动态显示当前排序状态）
+        self._update_direction_button_tooltip()
+
         # 排序按钮 - 类别排序选项
         self.sort_button = self.create_toolbar_button('▼', 'sort_button',
                                                      '类别排序方式',
@@ -1430,10 +1461,13 @@ class ImageClassifier(QMainWindow):
 
             # 保存更新后的配置
             self.config.save_config()
-            
+
             # 初始化类别计数
             self.init_category_counts()
-            
+
+            # 更新排序方向按钮的UI状态（从配置加载后同步）
+            self._sync_sort_button_state()
+
             # 更新UI
             self.update_category_buttons()
             self.setup_shortcuts()
@@ -4798,15 +4832,81 @@ class ImageClassifier(QMainWindow):
             # 更新UI
             self.update_category_buttons()
 
-            # 显示提示
-            mode_names = {"name": "按名称排序", "shortcut": "按快捷键排序", "count": "按分类数量排序"}
-            mode_name = mode_names.get(new_mode, new_mode)
-            toast_success(self, f"已切换到{mode_name}")
-            self.logger.info(f"类别排序模式已切换为: {mode_name}")
+            # 更新方向按钮的tooltip（因为排序模式变了）
+            self._update_direction_button_tooltip()
+
+            # 显示提示（使用详细描述）
+            current_text, _ = self._get_sort_tooltip_texts()
+            toast_success(self, f"已切换到：{current_text}")
+            self.logger.info(f"类别排序模式已切换为: {new_mode}")
 
         except Exception as e:
             self.logger.error(f"切换排序模式失败: {e}")
             toast_error(self, f"切换排序模式失败: {str(e)}")
+
+    def toggle_sort_direction(self):
+        """切换排序方向（升序/降序）"""
+        try:
+            # 切换方向
+            self.config.sort_ascending = not self.config.sort_ascending
+            self.config.save_config()
+
+            # 更新按钮图标和tooltip
+            self.sort_direction_button.setText('↑' if self.config.sort_ascending else '↓')
+            self._update_direction_button_tooltip()
+
+            # 重新排序类别
+            category_counts = self._get_category_counts() if self.config.category_sort_mode == "count" else None
+            self.ordered_categories = self.config.get_sorted_categories(
+                self.categories, category_counts=category_counts
+            )
+
+            # 更新UI
+            self.update_category_buttons()
+
+            # 显示提示（使用详细描述）
+            _, action_text = self._get_sort_tooltip_texts()
+            toast_success(self, f"已切换为：{action_text}")
+            self.logger.info(f"排序方向已切换")
+
+        except Exception as e:
+            self.logger.error(f"切换排序方向失败: {e}")
+            toast_error(self, f"切换排序方向失败: {str(e)}")
+
+    def _get_sort_tooltip_texts(self):
+        """获取当前排序状态的tooltip文案
+
+        Returns:
+            tuple: (当前状态描述, 切换后状态描述)
+        """
+        mode = self.config.category_sort_mode
+        is_asc = self.config.sort_ascending
+
+        # 状态描述映射表 (mode, is_ascending) -> (当前状态, 切换后状态)
+        status_map = {
+            ('name', True):     ("按名称 (A → Z)", "名称倒序 (Z → A)"),
+            ('name', False):    ("按名称 (Z → A)", "名称顺序 (A → Z)"),
+            ('shortcut', True): ("按快捷键 (1 → 9 → A)", "快捷键倒序 (Z → 1)"),
+            ('shortcut', False):("按快捷键 (Z → A → 1)", "快捷键顺序 (1 → Z)"),
+            ('count', True):    ("按数量 (少 → 多)", "数量从多到少"),
+            ('count', False):   ("按数量 (多 → 少)", "数量从少到多"),
+        }
+
+        return status_map.get((mode, is_asc), ("未知状态", "切换方向"))
+
+    def _update_direction_button_tooltip(self):
+        """根据当前排序模式和方向，动态更新方向按钮的tooltip"""
+        current_text, action_text = self._get_sort_tooltip_texts()
+        tooltip = f"当前：{current_text}\n点击切换为：{action_text}"
+        self.sort_direction_button.setToolTip(tooltip)
+
+    def _sync_sort_button_state(self):
+        """同步排序方向按钮的UI状态（从配置加载后调用）"""
+        if hasattr(self, 'sort_direction_button'):
+            # 更新按钮图标
+            self.sort_direction_button.setText('↑' if self.config.sort_ascending else '↓')
+            # 更新tooltip
+            self._update_direction_button_tooltip()
 
     def _get_category_counts(self):
         """获取每个类别的分类数量统计
