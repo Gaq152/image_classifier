@@ -2214,9 +2214,11 @@ class SettingsDialog(QDialog):
         self.theme_combo.blockSignals(False)
 
         # 检查是否因性能原因需要禁用主题控件（图片数量>10000）
+        # Phase 1.1: Model/View架构已解决性能问题，移除限制
         if self.parent() and hasattr(self.parent(), 'image_list'):
-            image_count = self.parent().image_list.count()
-            if image_count > 10000:
+            model = self.parent().image_list.model()
+            image_count = model.rowCount() if model else 0
+            if False:  # 性能限制已移除
                 # 禁用主题下拉列表和自动切换开关
                 self.theme_combo.setEnabled(False)
                 self.auto_theme_switch.setEnabled(False)
@@ -3511,12 +3513,8 @@ class SettingsDialog(QDialog):
             self.app_config.theme_mode = "manual"
 
             # 启用主题下拉列表（但需要检查是否因性能原因禁用）
-            # 检查图片数量，如果>10000则保持禁用状态
+            # Phase 1.1: Model/View架构已解决性能问题，移除限制
             should_disable_for_performance = False
-            if self.parent() and hasattr(self.parent(), 'image_list'):
-                image_count = self.parent().image_list.count()
-                if image_count > 10000:
-                    should_disable_for_performance = True
 
             if not should_disable_for_performance:
                 self.theme_combo.setEnabled(True)
@@ -4142,10 +4140,8 @@ class SettingsDialog(QDialog):
 
             # 检查是否因性能原因禁用主题控件（图片数量>10000）
             should_disable_for_performance = False
-            if self.parent() and hasattr(self.parent(), 'image_list'):
-                image_count = self.parent().image_list.count()
-                if image_count > 10000:
-                    should_disable_for_performance = True
+            # Phase 1.1: Model/View架构已解决性能问题，移除限制
+            should_disable_for_performance = False
 
             if not should_disable_for_performance:
                 self.theme_combo.setEnabled(True)  # 确保下拉列表可用
@@ -4625,16 +4621,14 @@ class SettingsDialog(QDialog):
         elif self.app_config.theme == "dark":
             # 暗色主题
             self.theme_combo.setCurrentIndex(1)
-            # 检查是否因性能原因禁用（图片数量>10000）
-            if not (self.parent() and hasattr(self.parent(), 'image_list') and self.parent().image_list.count() > 10000):
-                self.theme_combo.setEnabled(True)
+            # Phase 1.1: Model/View架构已解决性能问题，移除限制
+            self.theme_combo.setEnabled(True)
             self.auto_theme_switch.setChecked(False)
         else:
             # 亮色主题
             self.theme_combo.setCurrentIndex(0)
-            # 检查是否因性能原因禁用（图片数量>10000）
-            if not (self.parent() and hasattr(self.parent(), 'image_list') and self.parent().image_list.count() > 10000):
-                self.theme_combo.setEnabled(True)
+            # Phase 1.1: Model/View架构已解决性能问题，移除限制
+            self.theme_combo.setEnabled(True)
             self.auto_theme_switch.setChecked(False)
 
         # 恢复信号

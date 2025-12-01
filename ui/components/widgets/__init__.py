@@ -22,7 +22,8 @@ Note:
 # from .enhanced_button import EnhancedButton
 # from .status_label import StatusLabel
 from .category_button import CategoryButton
-from .image_list_item import ImageListItem
+# Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
+# from .image_list_item import ImageListItem
 from .enhanced_image_label import EnhancedImageLabel
 from .statistics_panel import StatisticsPanel
 from .switch import Switch
@@ -33,7 +34,7 @@ __all__ = [
     # 'EnhancedButton',
     # 'StatusLabel',
     'CategoryButton',
-    'ImageListItem',
+    # 'ImageListItem',  # Phase 1.1: 已废弃
     'EnhancedImageLabel',
     'StatisticsPanel',
     'Switch',

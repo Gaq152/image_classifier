@@ -22,12 +22,16 @@ from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                             QSplitter, QLabel, QScrollArea, QStatusBar, QToolBar
                             , QSizePolicy, QFileDialog,
-                            QMessageBox, QApplication, QListWidget,
+                            QMessageBox, QApplication, QListView,
                             QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu, QDialog)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent, QThread
+# Phase 1.1: QListWidget已废弃，Model/View架构使用QListView
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent, QThread, QItemSelectionModel
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush, QFont
-from .components.widgets import (CategoryButton, ImageListItem, EnhancedImageLabel,
+from .components.widgets import (CategoryButton, EnhancedImageLabel,
                                 StatisticsPanel)
+# Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
+from .models.image_list_model import ImageListModel
+from .delegates.image_list_delegate import ImageListDelegate
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles, WidgetStyles
 from .components.styles.theme import default_theme
@@ -627,30 +631,49 @@ class ImageClassifier(QMainWindow):
         list_title_layout.addWidget(folder_button)
 
         layout.addWidget(list_title_container, 0)  # 不拉伸
-        
+
         # 图片列表容器 - 可随窗口拉伸
-        self.image_list = QListWidget()
+        # Phase 1.1 Migration: Replace QListWidget with QListView for performance
+        self.image_list = QListView()
         self.image_list.setObjectName("image_list")  # 设置对象名以便教程系统找到
         self.image_list.setMinimumHeight(120)  # 设置最小高度
+
+        # Initialize empty Model and Delegate
+        self.image_list_model = ImageListModel([], {}, set(), set(), self)
+        self.image_list.setModel(self.image_list_model)
+        self.image_list.setItemDelegate(ImageListDelegate(self))
+
+        # Phase 1.1 关键性能优化：防止主题切换时重新计算所有条目（Codex + Gemini 诊断）
+        # 问题：setStyleSheet() 触发 QListView 重新计算 24k 条目的几何，导致 6 秒卡顿
+        # 解决：开启 UniformItemSizes（列表项高度固定）+ Batched 布局模式
+        self.image_list.setUniformItemSizes(True)  # ← P0 修复：避免逐条测量 24k 项
+        self.image_list.setLayoutMode(QListView.LayoutMode.Batched)  # 批处理布局
+        self.image_list.setBatchSize(256)  # 每批 256 项
+
+        # Phase 1.1: 配置滚动条行为 - 支持长文件名横向滚动
+        self.image_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.image_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.image_list.setWordWrap(False)  # 禁用文字换行，允许横向滚动
+
         # 移除最大高度限制，让它能够拉伸
         self.image_list.setStyleSheet("""
-            QListWidget {
+            QListView {
                 border: 1px solid #B3D9FF;
                 border-radius: 4px;
                 background-color: #FFFFFF;
                 padding: 2px;
             }
-            QListWidget::item {
+            QListView::item {
                 border: 1px solid transparent;
                 border-radius: 3px;
                 padding: 4px 6px;
                 margin: 1px;
             }
-            QListWidget::item:hover {
+            QListView::item:hover {
                 background-color: #E3F2FD;
                 border-color: #2196F3;
             }
-            QListWidget::item:selected {
+            QListView::item:selected {
                 background-color: #2196F3;
                 color: white;
                 border-color: #0D47A1;
@@ -697,7 +720,8 @@ class ImageClassifier(QMainWindow):
                 background: none;
             }
         """)
-        self.image_list.itemClicked.connect(self.on_image_list_item_clicked)
+        # Signal changed from itemClicked(QListWidgetItem) to clicked(QModelIndex)
+        self.image_list.clicked.connect(self.on_image_list_item_clicked)
         layout.addWidget(self.image_list, 1)  # 设置拉伸权重1
     
     def create_category_area(self, layout):
@@ -1926,11 +1950,20 @@ class ImageClassifier(QMainWindow):
             self.show_current_image()
 
             # 滚动图片列表到对应位置
-            if hasattr(self, 'image_list_widget') and self.image_list_widget:
-                self.image_list_widget.scrollToItem(
-                    self.image_list_widget.item(index),
-                    QAbstractItemView.ScrollHint.PositionAtCenter
-                )
+            # Phase 1.1: 修复变量名 image_list_widget -> image_list, 使用Model/View API
+            if hasattr(self, 'image_list') and self.image_list and self.image_list_model:
+                # Model/View架构：通过索引映射找到对应的行
+                if hasattr(self, '_original_to_filtered_index'):
+                    # 有过滤：从original_index查找filtered_row
+                    filtered_row = self._original_to_filtered_index.get(index)
+                    if filtered_row is not None:
+                        model_index = self.image_list_model.index(filtered_row, 0)
+                        self.image_list.scrollTo(model_index, QAbstractItemView.ScrollHint.PositionAtCenter)
+                else:
+                    # 没有过滤：直接使用索引
+                    if index < self.image_list_model.rowCount():
+                        model_index = self.image_list_model.index(index, 0)
+                        self.image_list.scrollTo(model_index, QAbstractItemView.ScrollHint.PositionAtCenter)
 
         except Exception as e:
             self.logger.error(f"跳转到图片索引 {index} 失败: {e}")
@@ -2086,13 +2119,17 @@ class ImageClassifier(QMainWindow):
     def _update_image_list_internal(self):
         """内部图片列表更新方法 - 完整显示所有图片"""
         try:
-            self.image_list.clear()
-            
+            # Phase 1.1 Migration: 使用 Model API 替代 QListWidget API
+            # 不再需要 clear()，_init_data 会重置模型
+
             if not self.image_files:
+                # 如果没有文件，初始化空模型以清空视图
+                if hasattr(self, 'image_list_model'):
+                    self.image_list_model._init_data([], {}, set(), set())
                 return
-                
+
             total_count = len(self.image_files)
-            
+
             # 图片列表始终显示完整内容，不使用滑动窗口
             # 滑动窗口只用于内部预加载优化，不影响用户可见的列表
             if hasattr(self, 'initial_batch_loaded') and not self.initial_batch_loaded:
@@ -2105,39 +2142,39 @@ class ImageClassifier(QMainWindow):
                 start_index = 0
                 end_index = total_count
                 self.logger.info(f"显示完整图片列表，共 {total_count} 张图片")
-            
-            # 添加所有图片到列表中
-            for i in range(start_index, end_index):
-                file_path = self.image_files[i]
-                file_path_str = str(file_path)
-                
-                # 检查分类和移除状态
-                is_classified = file_path_str in self.classified_images
-                is_removed = file_path_str in self.removed_images
-                
-                # 检查是否是多分类
-                is_multi_classified = False
-                if is_classified:
-                    category = self.classified_images.get(file_path_str)
-                    is_multi_classified = isinstance(category, list) and len(category) > 1
-                
-                item = ImageListItem(file_path_str, is_classified, is_removed)
-                item.image_index = i  # 添加索引属性
-                item.is_multi_classified = is_multi_classified  # 设置多分类状态
-                
-                # 设置状态图标
-                item.set_status_icon()
-                
-                self.image_list.addItem(item)
-                
-                # 设置当前选中状态和高亮
-                if i == self.current_index:
-                    # 高亮当前项
-                    item.setSelected(True)
-                    self.image_list.setCurrentItem(item)
-                    # 确保当前项可见
-                    self.image_list.scrollToItem(item, QAbstractItemView.ScrollHint.EnsureVisible)
-            
+
+            # 1. 准备数据
+            # 将 Path 对象转换为字符串，适配 Model 接口
+            display_files = [str(f) for f in self.image_files[start_index:end_index]]
+
+            # 2. 预计算多分类集合 (O(N) -> Set lookup)
+            multi_classified = {
+                p for p, c in self.classified_images.items()
+                if isinstance(c, list) and len(c) > 1
+            }
+
+            # 3. 批量初始化 Model (高性能)
+            self.image_list_model._init_data(
+                display_files,
+                self.classified_images,
+                self.removed_images,
+                multi_classified
+            )
+
+            # 4. 恢复选中状态
+            # 确保当前索引在显示范围内
+            if 0 <= self.current_index < len(display_files):
+                # 获取 ModelIndex (Row=current_index, Col=0)
+                idx = self.image_list_model.index(self.current_index, 0)
+                if idx.isValid():
+                    # 使用 SelectionModel API 设置选中
+                    self.image_list.selectionModel().setCurrentIndex(
+                        idx,
+                        QItemSelectionModel.SelectionFlag.ClearAndSelect
+                    )
+                    # 使用 View API 滚动
+                    self.image_list.scrollTo(idx, QAbstractItemView.ScrollHint.EnsureVisible)
+
             # 如果列表是完整的，同步当前选中状态
             if start_index == 0 and end_index == total_count:
                 QTimer.singleShot(100, self.sync_image_list_selection)
@@ -2553,14 +2590,38 @@ class ImageClassifier(QMainWindow):
     def sync_image_list_selection(self):
         """同步图片列表的选中状态"""
         try:
-            # 找到当前图片在列表中的项并选中
-            for i in range(self.image_list.count()):
-                item = self.image_list.item(i)
-                if hasattr(item, 'image_index') and item.image_index == self.current_index:
-                    self.image_list.setCurrentItem(item)
-                    # 确保当前项可见
-                    self.image_list.scrollToItem(item, QAbstractItemView.ScrollHint.EnsureVisible)
-                    break
+            # Phase 1.1 Migration: 使用 Model/View API 替代 QListWidget 遍历逻辑
+            model = self.image_list.model()
+            if not model:
+                return
+
+            # Codex Review修复：过滤后需要将original_index转换为filtered_row
+            if hasattr(self, '_original_to_filtered_index'):
+                # 有过滤：查找当前图片在过滤列表中的行号
+                filtered_row = self._original_to_filtered_index.get(self.current_index)
+                if filtered_row is not None:
+                    # 当前图片在过滤列表中
+                    idx = model.index(filtered_row, 0)
+                    if idx.isValid():
+                        self.image_list.selectionModel().setCurrentIndex(
+                            idx,
+                            QItemSelectionModel.SelectionFlag.ClearAndSelect
+                        )
+                        self.image_list.scrollTo(idx, QAbstractItemView.ScrollHint.EnsureVisible)
+                else:
+                    # 当前图片被过滤掉了，清除选中
+                    self.image_list.selectionModel().clearSelection()
+            else:
+                # 没有过滤：直接使用current_index作为行号
+                if 0 <= self.current_index < model.rowCount():
+                    idx = model.index(self.current_index, 0)
+                    if idx.isValid():
+                        self.image_list.selectionModel().setCurrentIndex(
+                            idx,
+                            QItemSelectionModel.SelectionFlag.ClearAndSelect
+                        )
+                        self.image_list.scrollTo(idx, QAbstractItemView.ScrollHint.EnsureVisible)
+
         except Exception as e:
             self.logger.debug(f"同步图片列表选中状态失败: {e}")
     
@@ -2679,56 +2740,106 @@ class ImageClassifier(QMainWindow):
             return loop_enabled
 
     def prev_image(self):
-        """上一张图片（支持循环翻页）"""
-        if self.current_index > 0:
-            self.current_index -= 1
+        """上一张图片（支持循环翻页，Codex Review修复：支持过滤列表导航）"""
+        # Codex最终Review修复：区分"未过滤"和"过滤结果为空"
+        if hasattr(self, '_visible_indices'):
+            # 过滤已激活
+            if not self._visible_indices:
+                # 过滤结果为空，不允许导航
+                toast_info(self, "当前过滤条件下没有图片")
+                return
 
-            # 优化3：记录翻页方向（-1表示向后/上一张）
-            if 'direction_history' not in self.user_behavior:
-                self.user_behavior['direction_history'] = []
-            self.user_behavior['direction_history'].append(-1)
-            # 保留最近10次
-            if len(self.user_behavior['direction_history']) > 10:
-                self.user_behavior['direction_history'] = self.user_behavior['direction_history'][-10:]
-
-            self.show_current_image()
+            # 有可见图片：在可见列表中导航
+            try:
+                current_pos = self._visible_indices.index(self.current_index)
+                if current_pos > 0:
+                    # 移动到上一张可见图片
+                    self.current_index = self._visible_indices[current_pos - 1]
+                    self._record_direction(-1)
+                    self.show_current_image()
+                else:
+                    # 已经是第一张可见图片
+                    loop_enabled = self._should_enable_loop()
+                    if loop_enabled:
+                        # 循环到最后一张可见图片
+                        self.current_index = self._visible_indices[-1]
+                        self.logger.debug(f"[循环翻页-过滤] 第1张可见 -> 第{len(self._visible_indices)}张可见")
+                        self.show_current_image()
+                    else:
+                        toast_info(self, "已经是第一张图片了！")
+            except ValueError:
+                # 当前图片不在可见列表中（被过滤掉了），跳到第一张可见图片
+                self.current_index = self._visible_indices[0]
+                self.show_current_image()
         else:
-            # 已经是第一张，检查是否开启循环翻页
-            loop_enabled = self._should_enable_loop()
-            if loop_enabled:
-                # 循环到最后一张
-                self.current_index = len(self.image_files) - 1
-                self.logger.debug(f"[循环翻页] 第1张 -> 第{self.current_index + 1}张（最后一张）")
+            # 没有过滤：原始逻辑
+            if self.current_index > 0:
+                self.current_index -= 1
+                self._record_direction(-1)
                 self.show_current_image()
             else:
-                # 显示边界提示
-                toast_info(self, "已经是第一张图片了！")
+                loop_enabled = self._should_enable_loop()
+                if loop_enabled:
+                    self.current_index = len(self.image_files) - 1
+                    self.logger.debug(f"[循环翻页] 第1张 -> 第{self.current_index + 1}张（最后一张）")
+                    self.show_current_image()
+                else:
+                    toast_info(self, "已经是第一张图片了！")
+
+    def _record_direction(self, direction):
+        """记录翻页方向（优化3：智能预加载）"""
+        if 'direction_history' not in self.user_behavior:
+            self.user_behavior['direction_history'] = []
+        self.user_behavior['direction_history'].append(direction)
+        if len(self.user_behavior['direction_history']) > 10:
+            self.user_behavior['direction_history'] = self.user_behavior['direction_history'][-10:]
 
     def next_image(self):
-        """下一张图片（支持循环翻页）"""
-        if self.current_index < len(self.image_files) - 1:
-            self.current_index += 1
+        """下一张图片（支持循环翻页，Codex Review修复：支持过滤列表导航）"""
+        # Codex最终Review修复：区分"未过滤"和"过滤结果为空"
+        if hasattr(self, '_visible_indices'):
+            # 过滤已激活
+            if not self._visible_indices:
+                # 过滤结果为空，不允许导航
+                toast_info(self, "当前过滤条件下没有图片")
+                return
 
-            # 优化3：记录翻页方向（1表示向前/下一张）
-            if 'direction_history' not in self.user_behavior:
-                self.user_behavior['direction_history'] = []
-            self.user_behavior['direction_history'].append(1)
-            # 保留最近10次
-            if len(self.user_behavior['direction_history']) > 10:
-                self.user_behavior['direction_history'] = self.user_behavior['direction_history'][-10:]
-
-            self.show_current_image()
+            # 有可见图片：在可见列表中导航
+            try:
+                current_pos = self._visible_indices.index(self.current_index)
+                if current_pos < len(self._visible_indices) - 1:
+                    # 移动到下一张可见图片
+                    self.current_index = self._visible_indices[current_pos + 1]
+                    self._record_direction(1)
+                    self.show_current_image()
+                else:
+                    # 已经是最后一张可见图片
+                    loop_enabled = self._should_enable_loop()
+                    if loop_enabled:
+                        # 循环到第一张可见图片
+                        self.current_index = self._visible_indices[0]
+                        self.logger.debug(f"[循环翻页-过滤] 第{len(self._visible_indices)}张可见 -> 第1张可见")
+                        self.show_current_image()
+                    else:
+                        toast_info(self, "已经是最后一张图片了！")
+            except ValueError:
+                # 当前图片不在可见列表中（被过滤掉了），跳到第一张可见图片
+                self.current_index = self._visible_indices[0]
+                self.show_current_image()
         else:
-            # 已经是最后一张，检查是否开启循环翻页
-            loop_enabled = self._should_enable_loop()
-            if loop_enabled:
-                # 循环到第一张
-                self.current_index = 0
-                self.logger.debug(f"[循环翻页] 第{len(self.image_files)}张（最后一张） -> 第1张")
+            # 没有过滤：原始逻辑
+            if self.current_index < len(self.image_files) - 1:
+                self.current_index += 1
+                self._record_direction(1)
                 self.show_current_image()
             else:
-                # 显示边界提示
-                toast_info(self, "已经是最后一张图片了！")
+                loop_enabled = self._should_enable_loop()
+                if loop_enabled:
+                    self.current_index = 0
+                    self.logger.debug(f"[循环翻页] 第{len(self.image_files)}张（最后一张） -> 第1张")
+                    self.show_current_image()
+                else:
+                    toast_info(self, "已经是最后一张图片了！")
     
     def prev_category(self):
         """选择上一个类别 - 参考原始实现"""
@@ -2800,11 +2911,20 @@ class ImageClassifier(QMainWindow):
     
     # ===== 事件处理方法 =====
     
-    def on_image_list_item_clicked(self, item):
-        """处理图片列表项点击"""
-        if hasattr(item, 'image_index'):
-            self.current_index = item.image_index
-            self.show_current_image()
+    def on_image_list_item_clicked(self, index):
+        """处理图片列表项点击
+
+        Args:
+            index: QModelIndex, 点击的列表项索引
+        """
+        # Phase 1.1 Migration: 适配 QListView 的 clicked 信号 (传递 QModelIndex)
+        if index.isValid():
+            # 从自定义数据角色获取原始图片索引
+            img_idx = index.data(ImageListModel.ROLE_IMAGE_INDEX)
+
+            if img_idx is not None:
+                self.current_index = img_idx
+                self.show_current_image()
 
     def create_filter_status_icon(self, status_type, is_checked=False):
         """创建筛选菜单的状态图标（带checkbox）
@@ -3059,20 +3179,39 @@ class ImageClassifier(QMainWindow):
         self.filter_button.style().polish(self.filter_button)
 
     def apply_image_filter(self):
-        """应用过滤器到图片列表"""
+        """
+        应用过滤器到图片列表
+        Phase 1.1: Model/View架构版本，保留缩略图缓存
+        Codex Review修复：空数据处理
+        """
+        # Codex Review修复：空数据时也要更新Model，避免保留旧数据
         if not hasattr(self, 'image_files') or not self.image_files:
+            # 清空Model
+            if hasattr(self, 'image_list_model'):
+                self.image_list_model.update_data([], {}, set(), set())
+                self._visible_indices = []
+                self._original_to_filtered_index = {}
+            # 清空图像显示
+            self.current_index = -1
+            self.image_label.clear()
             return
 
         # 保存当前选中的图片路径
-        current_item = self.image_list.currentItem()
-        current_path = current_item.image_path if current_item and hasattr(current_item, 'image_path') else None
+        current_index = self.image_list.currentIndex()
+        current_path = None
+        if current_index.isValid():
+            current_path = current_index.data(ImageListModel.ROLE_FULL_PATH)
 
-        # 清空列表
-        self.image_list.clear()
+        # Phase 1.1: 计算多分类集合（Codex Review发现multi_classified_images不存在）
+        multi_classified = {
+            p for p, c in self.classified_images.items()
+            if isinstance(c, list) and len(c) > 1
+        }
 
-        # 遍历并过滤
-        new_index = -1
-        display_index = 0
+        # 过滤图片列表
+        filtered_files = []
+        original_indices = []  # 保存原始索引映射
+
         for idx, img_path in enumerate(self.image_files):
             img_path_str = str(img_path)
 
@@ -3089,42 +3228,52 @@ class ImageClassifier(QMainWindow):
             )
 
             if should_show:
-                item = ImageListItem(img_path, is_classified, is_removed)
-                item.image_index = idx  # 保存原始索引
+                filtered_files.append(img_path)
+                original_indices.append(idx)
 
-                # 设置多分类状态
-                if is_classified:
-                    category = self.classified_images.get(img_path_str)
-                    if isinstance(category, list):
-                        item.is_multi_classified = True
+        # 更新Model数据（保留缩略图缓存，传递原始索引）
+        self.image_list_model.update_data(
+            filtered_files,
+            self.classified_images,
+            self.removed_images,
+            multi_classified,  # 使用局部计算的多分类集合
+            original_indices  # 传递原始索引，确保ROLE_IMAGE_INDEX返回正确值
+        )
 
-                # 设置图标
-                item.set_status_icon()
+        # 保存过滤索引映射（用于滚动定位等场景）
+        # original_index -> filtered_row
+        self._original_to_filtered_index = {v: k for k, v in enumerate(original_indices)}
 
-                self.image_list.addItem(item)
-
-                # 恢复之前选中的项
-                if current_path and str(img_path) == str(current_path):
-                    new_index = display_index
-
-                display_index += 1
+        # Codex Review修复：保存可见索引列表，用于next/prev导航
+        # 这是一个有序列表，包含所有过滤后可见图片的original_index
+        self._visible_indices = original_indices  # [0, 2, 5, 7, ...] 按顺序排列
 
         # 恢复选中
-        if new_index >= 0:
-            self.image_list.setCurrentRow(new_index)
-            # 更新 current_index 为原始索引
-            item = self.image_list.item(new_index)
-            if item and hasattr(item, 'image_index'):
-                self.current_index = item.image_index
-        elif self.image_list.count() > 0:
-            self.image_list.setCurrentRow(0)
-            item = self.image_list.item(0)
-            if item and hasattr(item, 'image_index'):
-                self.current_index = item.image_index
+        # Codex优化：使用Model的_path_map进行O(1)查找而不是线性扫描
+        if current_path:
+            # O(1)查找路径对应的行
+            row = self.image_list_model._path_map.get(str(current_path))
+            if row is not None and 0 <= row < self.image_list_model.rowCount():
+                model_index = self.image_list_model.index(row, 0)
+                self.image_list.setCurrentIndex(model_index)
+                # 更新current_index为原始索引（从Model获取）
+                self.current_index = model_index.data(ImageListModel.ROLE_IMAGE_INDEX)
+        elif self.image_list_model.rowCount() > 0:
+            # 默认选中第一项
+            model_index = self.image_list_model.index(0, 0)
+            self.image_list.setCurrentIndex(model_index)
+            # 更新current_index为原始索引（从Model获取）
+            self.current_index = model_index.data(ImageListModel.ROLE_IMAGE_INDEX)
 
         # 更新图片显示
-        if self.image_list.count() > 0:
+        # Codex Review修复：过滤结果为空时清空显示
+        if self.image_list_model.rowCount() > 0:
             self.show_current_image()
+        else:
+            # 过滤结果为空，清空显示
+            self.current_index = -1
+            self.image_label.clear()
+            toast_info(self, "当前过滤条件下没有图片")
 
     def get_filter_stats(self):
         """获取过滤统计信息"""
@@ -3275,9 +3424,17 @@ class ImageClassifier(QMainWindow):
         if hasattr(self.image_label, 'update_status_badge'):
             QTimer.singleShot(50, self.image_label.update_status_badge)
 
+        # Phase 1.2: 检查是否有过滤激活，如果有则刷新过滤列表
+        is_filtering = not (self.filter_unclassified and self.filter_classified and self.filter_removed)
+        if is_filtering:
+            # 刷新过滤列表，更新 _visible_indices
+            # 这样被分类的图片会从过滤列表中移除（如果不符合当前过滤条件）
+            self.apply_image_filter()
+
         # 只在单分类模式下自动移动到下一张图片
         if not self.is_multi_category:
             # 单分类模式下，自动移动到下一张
+            # next_image() 会正确处理过滤后的列表（如果当前图片被过滤掉，会跳到第一张可见图片）
             self.next_image()
         else:
             # 多分类模式下，保持在当前图片，但刷新UI显示状态
@@ -3350,28 +3507,24 @@ class ImageClassifier(QMainWindow):
     def _update_single_image_status(self, image_index, image_path):
         """更新单个图片在列表中的状态图标"""
         try:
-            # 遍历图片列表找到对应的项目
-            for i in range(self.image_list.count()):
-                item = self.image_list.item(i)
-                if hasattr(item, 'image_index') and item.image_index == image_index:
-                    # 更新状态
-                    is_classified = image_path in self.classified_images
-                    is_removed = image_path in self.removed_images
-                    
-                    # 多分类模式 - 添加标记表示多个分类
-                    if is_classified:
-                        current_category = self.classified_images.get(image_path)
-                        is_multi_classified = isinstance(current_category, list) and len(current_category) > 1
-                        if hasattr(item, 'is_multi_classified'):
-                            item.is_multi_classified = is_multi_classified
-                    
-                    # 更新item的状态
-                    item.is_classified = is_classified
-                    item.is_removed = is_removed
-                    
-                    # 重新设置状态图标
-                    item.set_status_icon()
-                    break
+            # Phase 1.1 Migration: 使用 Model API O(1) 更新状态
+            # 避免遍历 View，提高交互响应速度
+
+            if not hasattr(self, 'image_list_model'):
+                return
+
+            # 1. 计算新状态
+            is_classified = image_path in self.classified_images
+            is_removed = image_path in self.removed_images
+
+            is_multi = False
+            if is_classified:
+                current_category = self.classified_images.get(image_path)
+                is_multi = isinstance(current_category, list) and len(current_category) > 1
+
+            # 2. 调用 Model 接口更新 (O(1) 查找 + 自动刷新 Delegate)
+            self.image_list_model.update_status(image_index, is_classified, is_removed, is_multi)
+
         except Exception as e:
             self.logger.debug(f"更新单个图片状态失败: {e}")
     
@@ -3431,14 +3584,22 @@ class ImageClassifier(QMainWindow):
         if hasattr(self.image_label, 'update_status_badge'):
             QTimer.singleShot(50, self.image_label.update_status_badge)
 
+        # Phase 1.2: 检查是否有过滤激活，如果有则刷新过滤列表
+        is_filtering = not (self.filter_unclassified and self.filter_classified and self.filter_removed)
+        if is_filtering:
+            # 刷新过滤列表，更新 _visible_indices
+            # 这样被移除的图片会从过滤列表中移除（如果不符合当前过滤条件）
+            self.apply_image_filter()
+
         # 只在单分类模式下自动移动到下一张图片
         if not self.is_multi_category:
             # 单分类模式下，自动移动到下一张
+            # next_image() 会正确处理过滤后的列表（如果当前图片被过滤掉，会跳到第一张可见图片）
             self.next_image()
         else:
             # 多分类模式下，保持在当前图片，但刷新UI显示状态
             self.update_category_selection_for_current_image(current_path)
-        
+
         self.logger.info(f"图片已移除: {Path(current_path).name}")
 
     def _undo_classification(self, image_path, category):
@@ -3491,6 +3652,12 @@ class ImageClassifier(QMainWindow):
             # 更新UI和状态
             self._update_single_image_status(self.current_index, image_path)
             QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
+
+            # Phase 1.2: 检查是否有过滤激活，如果有则刷新过滤列表
+            is_filtering = not (self.filter_unclassified and self.filter_classified and self.filter_removed)
+            if is_filtering:
+                # 撤销分类后，图片状态从"已分类"变为"未分类"，需要刷新过滤列表
+                self.apply_image_filter()
 
             # 单分类模式下，保持在当前图片，不自动跳转
             if not self.is_multi_category:
@@ -3553,6 +3720,12 @@ class ImageClassifier(QMainWindow):
             # 更新状态标记显示
             if hasattr(self.image_label, 'update_status_badge'):
                 QTimer.singleShot(50, self.image_label.update_status_badge)
+
+            # Phase 1.2: 检查是否有过滤激活，如果有则刷新过滤列表
+            is_filtering = not (self.filter_unclassified and self.filter_classified and self.filter_removed)
+            if is_filtering:
+                # 撤销删除后，图片状态从"已移除"变为"未分类"，需要刷新过滤列表
+                self.apply_image_filter()
 
             # 保持在当前图片，刷新UI显示状态
             if not self.is_multi_category:
@@ -4698,20 +4871,28 @@ class ImageClassifier(QMainWindow):
     def update_image_list_thumbnail(self, image_path, thumbnail_data):
         """更新图片列表中的缩略图"""
         try:
-            # 在图片列表中找到对应项并更新缩略图
-            for i in range(self.image_list.count()):
-                item = self.image_list.item(i)
-                if item and item.data(Qt.ItemDataRole.UserRole) == image_path:
-                    # 更新项目的图标
-                    if hasattr(thumbnail_data, 'copy'):
-                        # QPixmap
-                        item.setIcon(QIcon(thumbnail_data))
-                    else:
-                        # 需要转换
-                        thumbnail_pixmap = self.convert_to_pixmap(thumbnail_data)
-                        if thumbnail_pixmap:
-                            item.setIcon(QIcon(thumbnail_pixmap))
-                    break
+            # Phase 1.1 Migration: 使用 Model API 高效更新缩略图 (O(1))
+            # 不再遍历 ListWidget，直接通过 Model 的 Path 映射更新
+
+            if not hasattr(self, 'image_list_model'):
+                return
+
+            icon = None
+
+            # 1. 统一转换为 QIcon
+            if hasattr(thumbnail_data, 'copy'):
+                # 已经是 QPixmap
+                icon = QIcon(thumbnail_data)
+            else:
+                # 可能是 numpy 数组，需要转换
+                thumbnail_pixmap = self.convert_to_pixmap(thumbnail_data)
+                if thumbnail_pixmap:
+                    icon = QIcon(thumbnail_pixmap)
+
+            # 2. 更新 Model (自动处理缓存和 View 刷新)
+            if icon:
+                self.image_list_model.set_thumbnail(str(image_path), icon)
+
         except Exception as e:
             self.logger.error(f"更新缩略图时出错: {e}")
 
@@ -4882,8 +5063,9 @@ class ImageClassifier(QMainWindow):
 
     def is_theme_switch_disabled_due_to_performance(self):
         """检查是否因性能原因禁用主题切换（图片数量>10000）"""
-        if hasattr(self, 'image_list'):
-            return self.image_list.count() > 10000
+        # Phase 1.1 完成：Model/View架构已彻底解决性能问题
+        # QListView虚拟化只渲染可见行，主题切换不再遍历所有Item
+        # 性能限制已移除，支持任意数量图片
         return False
 
     def update_theme_button_state(self):
@@ -4894,10 +5076,10 @@ class ImageClassifier(QMainWindow):
         try:
             app_config = get_app_config()
             theme_mode = app_config.theme_mode
-            image_count = self.image_list.count() if hasattr(self, 'image_list') else 0
+            image_count = self.image_list.model().rowCount() if (hasattr(self, 'image_list') and self.image_list.model()) else 0
 
-            # 检查是否因性能原因需要禁用
-            disabled_due_to_performance = image_count > 10000
+            # Phase 1.1 修复：使用统一的性能检查方法，而不是硬编码
+            disabled_due_to_performance = self.is_theme_switch_disabled_due_to_performance()
 
             # 检查是否因为自动模式或系统模式需要禁用
             disabled_due_to_mode = theme_mode in ("auto", "system")
@@ -4927,7 +5109,7 @@ class ImageClassifier(QMainWindow):
         try:
             # 检查是否因性能原因禁用（图片过多）
             if self.is_theme_switch_disabled_due_to_performance():
-                count = self.image_list.count() if hasattr(self, 'image_list') else 0
+                count = self.image_list.model().rowCount() if (hasattr(self, 'image_list') and self.image_list.model()) else 0
                 toast_warning(self, f"图片数量过多（{count}张），主题切换已禁用以保证性能")
                 return
 
@@ -5032,26 +5214,27 @@ class ImageClassifier(QMainWindow):
                 """)
 
             # 更新图片列表区域
+            # Phase 1.1: QListWidget → QListView
             if hasattr(self, 'image_list'):
                 self.image_list.setStyleSheet(f"""
-                    QListWidget {{
+                    QListView {{
                         border: 1px solid {c.BORDER_MEDIUM};
                         border-radius: 4px;
                         background-color: {c.BACKGROUND_SECONDARY};
                         padding: 2px;
                     }}
-                    QListWidget::item {{
+                    QListView::item {{
                         border: 1px solid transparent;
                         border-radius: 3px;
                         padding: 4px 6px;
                         margin: 1px;
                         color: {c.TEXT_PRIMARY};
                     }}
-                    QListWidget::item:hover {{
+                    QListView::item:hover {{
                         background-color: {c.BACKGROUND_HOVER};
                         border-color: {c.PRIMARY};
                     }}
-                    QListWidget::item:selected {{
+                    QListView::item:selected {{
                         background-color: {c.PRIMARY};
                         color: white;
                         border-color: {c.PRIMARY_DARK};
@@ -5059,19 +5242,23 @@ class ImageClassifier(QMainWindow):
                     QScrollBar:vertical {{
                         border: 1px solid {c.BORDER_LIGHT};
                         background: {c.BACKGROUND_SECONDARY};
-                        width: 10px;
-                        border-radius: 3px;
+                        width: 14px;
+                        border-radius: 4px;
+                        margin: 0px;
                     }}
                     QScrollBar::handle:vertical {{
                         background: {c.PRIMARY};
                         border-radius: 3px;
-                        min-height: 15px;
+                        min-height: 30px;
+                        margin: 2px 2px 2px 2px;
                     }}
                     QScrollBar::handle:vertical:hover {{
                         background: {c.PRIMARY_DARK};
+                        margin: 1px 1px 1px 1px;
                     }}
                     QScrollBar::handle:vertical:pressed {{
                         background: {c.PRIMARY_DARK};
+                        margin: 0px 0px 0px 0px;
                     }}
                     QScrollBar:horizontal {{
                         border: 1px solid {c.BORDER_LIGHT};
@@ -5256,10 +5443,10 @@ class ImageClassifier(QMainWindow):
                     }}
                 """)
 
-            # 更新分类按钮样式（重新创建按钮以应用新主题）
+            # Phase 1.1 性能优化：只更新按钮样式，不重新创建（避免6秒卡顿）
             if hasattr(self, 'category_buttons') and self.category_buttons:
-                self._update_category_buttons_internal()
-                # 更新所有类别按钮的标签颜色
+                # 不要调用 _update_category_buttons_internal()，那会重建所有按钮
+                # 只更新现有按钮的标签颜色即可
                 for button in self.category_buttons:
                     if hasattr(button, 'update_label_colors'):
                         button.update_label_colors()
@@ -5296,7 +5483,7 @@ class ImageClassifier(QMainWindow):
 
             # 检查是否因性能原因禁用自动切换（图片过多）
             if self.is_theme_switch_disabled_due_to_performance():
-                image_count = self.image_list.count() if hasattr(self, 'image_list') else 0
+                image_count = self.image_list.model().rowCount() if (hasattr(self, 'image_list') and self.image_list.model()) else 0
                 self.logger.debug(f"自动主题切换已跳过（图片数量：{image_count}，超过10000限制）")
                 return
 

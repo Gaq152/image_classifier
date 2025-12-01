@@ -58,8 +58,16 @@ class ImageListModel(QAbstractListModel):
         self._init_data(image_files, classified_images, removed_images, multi_classified or set())
 
     def _init_data(self, image_files: List[str], classified_images: Dict[str, Any],
-                   removed_images: Set[str], multi_classified: Set[str]):
-        """初始化内部数据结构，构建快速查找映射"""
+                   removed_images: Set[str], multi_classified: Set[str],
+                   original_indices: Optional[List[int]] = None):
+        """
+        初始化内部数据结构，构建快速查找映射
+
+        Args:
+            original_indices: 可选的原始索引列表，用于过滤场景
+                            如果提供，item.index将使用original_indices[i]
+                            否则使用enumerate的索引i
+        """
         self.beginResetModel()
         self._data.clear()
         self._index_map.clear()
@@ -71,11 +79,13 @@ class ImageListModel(QAbstractListModel):
             is_removed = path in removed_images
             is_multi = path in multi_classified
 
-            item = ImageItem(str(path), i, is_classified, is_removed, is_multi)
+            # 使用原始索引（如果提供）或当前索引
+            original_idx = original_indices[i] if original_indices else i
+            item = ImageItem(str(path), original_idx, is_classified, is_removed, is_multi)
             self._data.append(item)
 
             # 建立 O(1) 查找索引
-            self._index_map[i] = i
+            self._index_map[original_idx] = i  # original_index -> row
             self._path_map[str(path)] = i
 
         self.endResetModel()
@@ -121,6 +131,10 @@ class ImageListModel(QAbstractListModel):
                 return "removed"
             else:
                 return "pending"
+
+        elif role == Qt.ItemDataRole.ToolTipRole:
+            # Gemini Review建议：显示完整文件名，方便长文件名查看（避免横向滚动）
+            return Path(item.path).name
 
         return None
 
@@ -188,3 +202,43 @@ class ImageListModel(QAbstractListModel):
         # 通知 View 刷新 DecorationRole
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.DecorationRole])
+
+    def update_data(self, image_files: List[str], classified_images: Dict[str, Any],
+                    removed_images: Set[str], multi_classified: Set[str],
+                    original_indices: Optional[List[int]] = None):
+        """
+        更新模型数据（保留缩略图缓存）
+        Phase 1.1: 用于过滤功能，避免重新创建Model导致缓存丢失
+        Codex优化：只遍历_thumbnail_lru而不是整个_path_map
+
+        Args:
+            original_indices: 可选的原始索引列表，用于过滤场景
+        """
+        # Codex优化：保存旧的缩略图缓存（只遍历LRU缓存，而不是整个_path_map）
+        # 这样在10k列表下，遍历量从10k降低到缓存上限(1000)
+        old_thumbnails = {}
+        for path_str in list(self._thumbnail_lru.keys()):  # 创建副本避免迭代时修改
+            if path_str in self._path_map:
+                row = self._path_map[path_str]
+                if 0 <= row < len(self._data):
+                    item = self._data[row]
+                    if item.thumbnail is not None:
+                        old_thumbnails[path_str] = item.thumbnail
+
+        # 重新初始化数据
+        self._init_data(image_files, classified_images, removed_images, multi_classified,
+                        original_indices)
+
+        # 恢复缩略图（如果路径还存在）
+        for path_str, thumbnail in old_thumbnails.items():
+            if path_str in self._path_map:
+                row = self._path_map[path_str]
+                self._data[row].thumbnail = thumbnail
+                # 更新LRU
+                self._thumbnail_lru[path_str] = row
+                self._thumbnail_lru.move_to_end(path_str)
+
+        # Codex优化：清理LRU中已不存在的路径
+        for path_str in list(self._thumbnail_lru.keys()):
+            if path_str not in self._path_map:
+                del self._thumbnail_lru[path_str]
