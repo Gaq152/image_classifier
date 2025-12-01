@@ -1315,7 +1315,7 @@ class TabbedHelpDialog(QDialog):
         <li><b>手动设置</b>：右键类别按钮选择"设置快捷键"可自定义</li>
         <li><b>组合键</b>：支持 Ctrl、Alt、Shift 组合键，需手动设置</li>
         <li><b>冲突检测</b>：设置快捷键时会自动检测冲突，避开系统保留快捷键</li>
-        <li><b>排序模式</b>：支持按类别名称或快捷键顺序排列</li>
+        <li><b>排序模式</b>：支持按类别名称、快捷键或分类数量排列</li>
         </ul>
 
         <h4 style="color: {colors['text_primary']};">性能优化</h4>

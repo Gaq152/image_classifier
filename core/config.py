@@ -225,12 +225,13 @@ class Config:
 
         return sorted(categories, key=get_shortcut_weight)
 
-    def get_sorted_categories(self, categories, sort_mode=None):
+    def get_sorted_categories(self, categories, sort_mode=None, category_counts=None):
         """根据排序模式返回排序后的类别列表
 
         Args:
             categories: 类别集合或列表
-            sort_mode: 排序模式 ("name" 或 "shortcut")，默认使用配置的模式
+            sort_mode: 排序模式 ("name", "shortcut" 或 "count")，默认使用配置的模式
+            category_counts: 类别分类数量字典 {category_name: count}，仅 count 模式需要
 
         Returns:
             排序后的类别列表
@@ -241,6 +242,11 @@ class Config:
         if sort_mode == "shortcut":
             # 按快捷键排序
             return self.sort_categories(categories)
+        elif sort_mode == "count":
+            # 按分类数量排序（降序，数量多的在前）
+            if category_counts is None:
+                category_counts = {}
+            return sorted(list(categories), key=lambda c: (-category_counts.get(c, 0), c))
         else:  # sort_mode == "name" (默认)
             # 按名称排序
             return sorted(list(categories))

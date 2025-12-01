@@ -1422,8 +1422,11 @@ class ImageClassifier(QMainWindow):
             # 分配默认快捷键
             self.config.assign_default_shortcuts(self.categories)
 
-            # 根据配置的排序模式排序类别
-            self.ordered_categories = self.config.get_sorted_categories(self.categories)
+            # 根据配置的排序模式排序类别（count模式需要分类数量统计）
+            category_counts = self._get_category_counts() if self.config.category_sort_mode == "count" else None
+            self.ordered_categories = self.config.get_sorted_categories(
+                self.categories, category_counts=category_counts
+            )
 
             # 保存更新后的配置
             self.config.save_config()
@@ -3067,7 +3070,7 @@ class ImageClassifier(QMainWindow):
         # 获取当前排序模式
         current_mode = getattr(self.config, 'category_sort_mode', 'name')
 
-        # 两个单选菜单项 - 使用自定义复选框图标
+        # 三个单选菜单项 - 使用自定义复选框图标
         action_name = QAction(self.create_checkbox_icon(current_mode == 'name'), "按名称排序", self)
         action_name.triggered.connect(lambda: self.change_category_sort_mode('name'))
         menu.addAction(action_name)
@@ -3075,6 +3078,10 @@ class ImageClassifier(QMainWindow):
         action_shortcut = QAction(self.create_checkbox_icon(current_mode == 'shortcut'), "按快捷键排序", self)
         action_shortcut.triggered.connect(lambda: self.change_category_sort_mode('shortcut'))
         menu.addAction(action_shortcut)
+
+        action_count = QAction(self.create_checkbox_icon(current_mode == 'count'), "按分类数量排序", self)
+        action_count.triggered.connect(lambda: self.change_category_sort_mode('count'))
+        menu.addAction(action_count)
 
         # 在排序按钮下方显示菜单 - 智能定位防止超出窗口
         # 先让菜单调整大小以获得准确的尺寸
@@ -4771,10 +4778,10 @@ class ImageClassifier(QMainWindow):
         """切换类别排序模式
 
         Args:
-            new_mode: "name" 或 "shortcut"
+            new_mode: "name", "shortcut" 或 "count"
         """
         try:
-            if new_mode not in ["name", "shortcut"]:
+            if new_mode not in ["name", "shortcut", "count"]:
                 self.logger.error(f"无效的排序模式: {new_mode}")
                 return
 
@@ -4782,20 +4789,41 @@ class ImageClassifier(QMainWindow):
             self.config.category_sort_mode = new_mode
             self.config.save_config()
 
-            # 重新排序类别
-            self.ordered_categories = self.config.get_sorted_categories(self.categories)
+            # 重新排序类别（count模式需要传入分类数量统计）
+            category_counts = self._get_category_counts() if new_mode == "count" else None
+            self.ordered_categories = self.config.get_sorted_categories(
+                self.categories, category_counts=category_counts
+            )
 
             # 更新UI
             self.update_category_buttons()
 
             # 显示提示
-            mode_name = "按名称排序" if new_mode == "name" else "按快捷键排序"
+            mode_names = {"name": "按名称排序", "shortcut": "按快捷键排序", "count": "按分类数量排序"}
+            mode_name = mode_names.get(new_mode, new_mode)
             toast_success(self, f"已切换到{mode_name}")
             self.logger.info(f"类别排序模式已切换为: {mode_name}")
 
         except Exception as e:
             self.logger.error(f"切换排序模式失败: {e}")
             toast_error(self, f"切换排序模式失败: {str(e)}")
+
+    def _get_category_counts(self):
+        """获取每个类别的分类数量统计
+
+        Returns:
+            dict: {category_name: count} 每个类别对应的图片数量
+        """
+        counts = {}
+        for img_path, category in self.classified_images.items():
+            if isinstance(category, list):
+                # 多分类模式：一张图可能属于多个类别
+                for cat in category:
+                    counts[cat] = counts.get(cat, 0) + 1
+            else:
+                # 单分类模式
+                counts[category] = counts.get(category, 0) + 1
+        return counts
 
     def fit_to_window(self):
         """适应窗口大小"""
