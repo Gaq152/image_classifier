@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle, Q
 from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QIcon, QPixmap
 from PyQt6.QtCore import Qt, QSize, QRect
 
-from ui.models.image_list_model import ImageListModel
+from ..models.image_list_model import ImageListModel
+from ..components.styles.theme import default_theme
 
 class ImageListDelegate(QStyledItemDelegate):
     """
@@ -14,14 +15,15 @@ class ImageListDelegate(QStyledItemDelegate):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 预生成图标缓存 { status_type: QIcon }
-        self._icon_cache: Dict[str, QIcon] = {}
-        self._init_icons()
 
-        # 布局常量
+        # 布局常量（必须在_init_icons()之前定义）
         self.ICON_SIZE = 36     # 状态图标大小
         self.THUMB_SIZE = 48    # 缩略图大小
         self.PADDING = 8        # 间距
+
+        # 预生成图标缓存 { status_type: QIcon }
+        self._icon_cache: Dict[str, QIcon] = {}
+        self._init_icons()
 
     def _init_icons(self):
         """预生成所有状态的图标，避免在 paint 中重复创建"""
@@ -140,11 +142,12 @@ class ImageListDelegate(QStyledItemDelegate):
         text_rect = QRect(rect.left() + text_offset, rect.top(),
                           rect.width() - text_offset - self.PADDING, rect.height())
 
-        # 设置文本颜色 (选中时为高亮文本色，否则为普通文本色)
+        # 设置文本颜色 (选中时为白色，否则使用主题文本色)
+        # Phase 1.1: 从主题系统获取颜色，确保暗主题下文字可见
         if opt.state & QStyle.StateFlag.State_Selected:
-            painter.setPen(opt.palette.highlightedText().color())
+            painter.setPen(QColor("white"))
         else:
-            painter.setPen(opt.palette.text().color())
+            painter.setPen(QColor(default_theme.colors.TEXT_PRIMARY))
 
         # 垂直居中绘制文本，超出部分自动省略号
         painter.drawText(text_rect,
@@ -156,5 +159,28 @@ class ImageListDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         """返回 Item 建议大小"""
         # 固定高度 60px，确保能容纳 48px 缩略图和适当的 Padding
-        # 使用-1表示宽度自适应，避免option.rect.width()为0的问题
-        return QSize(-1, 60)
+        height = 60
+
+        # Phase 1.1: 计算实际宽度以支持横向滚动（长文件名）
+        # 获取文本内容
+        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+
+        # 计算文本实际宽度
+        font_metrics = option.fontMetrics
+        text_width = font_metrics.horizontalAdvance(text)
+
+        # 计算总宽度：左边距 + 状态图标 + 间距 + 缩略图 + 间距 + 文本 + 右边距
+        # 检查是否有缩略图
+        has_thumbnail = index.data(Qt.ItemDataRole.DecorationRole) is not None
+        thumb_width = self.THUMB_SIZE if has_thumbnail else 0
+        thumb_padding = self.PADDING if has_thumbnail else 0
+
+        total_width = (self.PADDING +           # 左边距
+                       self.ICON_SIZE +          # 状态图标
+                       self.PADDING +            # 图标后间距
+                       thumb_width +             # 缩略图宽度
+                       thumb_padding +           # 缩略图后间距
+                       text_width +              # 文本宽度
+                       self.PADDING)             # 右边距
+
+        return QSize(total_width, height)
