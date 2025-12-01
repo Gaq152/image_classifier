@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent, QThread, QItemSelectionModel
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush, QFont
 from .components.widgets import (CategoryButton, EnhancedImageLabel,
-                                StatisticsPanel)
+                                StatisticsPanel, ExpandableSearch)
 # Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
 from .models.image_list_model import ImageListModel
 from .delegates.image_list_delegate import ImageListDelegate
@@ -569,6 +569,12 @@ class ImageClassifier(QMainWindow):
         # 添加弹性空间，推送右侧按钮到最右边
         list_title_layout.addStretch()
 
+        # 搜索组件 - 可展开的文件名搜索
+        self.image_search_widget = ExpandableSearch()
+        self.image_search_widget.search_confirmed.connect(self._on_image_search)
+        self.image_search_widget.search_cleared.connect(self._on_image_search_cleared)
+        list_title_layout.addWidget(self.image_search_widget)
+
         # 筛选按钮 - 筛选图片显示条件
         self.filter_button = self.create_toolbar_button('▼', 'filter_button',
                                                        '筛选图片显示条件',
@@ -578,6 +584,7 @@ class ImageClassifier(QMainWindow):
         self.filter_unclassified = True
         self.filter_classified = True
         self.filter_removed = True
+        self._image_search_text = ""  # 图片列表搜索关键字
 
         # 应用样式
         self.filter_button.setStyleSheet("""
@@ -1149,6 +1156,15 @@ class ImageClassifier(QMainWindow):
                 self.logger.debug("快捷键被禁用，跳过执行")
                 return
 
+            # 检查是否在输入模式（输入框聚焦时不执行快捷键）
+            if self._is_in_input_mode():
+                self.logger.debug("输入模式，跳过快捷键执行")
+                # 手动触发QLineEdit的returnPressed信号（QAction会拦截事件导致信号不触发）
+                focused = self.focusWidget()
+                if focused and isinstance(focused, QLineEdit):
+                    focused.returnPressed.emit()
+                return
+
             if func:
                 # INFO级别记录QAction快捷键触发（简化记录）
                 func_name = getattr(func, '__name__', 'lambda')
@@ -1374,6 +1390,11 @@ class ImageClassifier(QMainWindow):
                 app_config.update_last_opened_drive_info(str(self.current_dir), is_network)
             except Exception as e:
                 self.logger.error(f"保存最后打开的目录信息失败: {e}")
+
+            # 清除搜索状态
+            self._image_search_text = ""
+            if hasattr(self, 'image_search_widget'):
+                self.image_search_widget.clear_and_collapse()
 
             # 先启动图片扫描，让UI立即响应
             self.load_images()
@@ -3145,6 +3166,36 @@ class ImageClassifier(QMainWindow):
 
         menu.exec(QPoint(x, y))
 
+    def _on_image_search(self, text: str):
+        """处理图片列表搜索
+
+        Args:
+            text: 搜索关键字
+        """
+        self._image_search_text = text.strip()
+        self.apply_image_filter()
+
+        # 搜索后自动选中第一个匹配项
+        if self.image_list_model.rowCount() > 0:
+            first_index = self.image_list_model.index(0, 0)
+            self.image_list.setCurrentIndex(first_index)
+            # 获取原始索引并跳转到该图片
+            original_idx = first_index.data(ImageListModel.ROLE_IMAGE_INDEX)
+            if original_idx is not None:
+                self.current_index = original_idx
+                self.show_current_image()
+
+        # 显示搜索结果提示
+        total_count = len(self.image_files) if hasattr(self, 'image_files') else 0
+        match_count = self.image_list_model.rowCount()
+        toast_info(self, f"搜索 \"{text}\"：找到 {match_count}/{total_count} 个匹配项")
+
+    def _on_image_search_cleared(self):
+        """处理搜索清除/关闭"""
+        if self._image_search_text:  # 仅在有搜索词时才需要刷新
+            self._image_search_text = ""
+            self.apply_image_filter()
+
     def show_filter_menu(self):
         """显示筛选菜单"""
 
@@ -3269,20 +3320,30 @@ class ImageClassifier(QMainWindow):
         font_metrics = self.image_list.fontMetrics()
         max_text_width = 0
 
+        # 搜索关键字预处理（小写，用于大小写不敏感匹配）
+        search_keyword = self._image_search_text.lower() if self._image_search_text else ""
+
         for idx, img_path in enumerate(self.image_files):
             img_path_str = str(img_path)
+            file_name = Path(img_path_str).name
 
             # 判断状态
             is_removed = img_path_str in self.removed_images
             is_classified = img_path_str in self.classified_images
             is_unclassified = not is_removed and not is_classified
 
-            # 检查是否显示
-            should_show = (
+            # 检查状态过滤
+            status_show = (
                 (is_unclassified and self.filter_unclassified) or
                 (is_classified and self.filter_classified) or
                 (is_removed and self.filter_removed)
             )
+
+            # 检查搜索关键字匹配（大小写不敏感）
+            search_match = (not search_keyword) or (search_keyword in file_name.lower())
+
+            # 同时满足状态过滤和搜索匹配
+            should_show = status_show and search_match
 
             if should_show:
                 filtered_files.append(img_path)
@@ -5496,6 +5557,10 @@ class ImageClassifier(QMainWindow):
                         min-height: 28px;
                     }}
                 """)
+
+            # 更新搜索组件主题
+            if hasattr(self, 'image_search_widget'):
+                self.image_search_widget.apply_theme()
 
             # 更新类别标题容器
             category_title_container = self.findChild(QWidget, "category_title_container")

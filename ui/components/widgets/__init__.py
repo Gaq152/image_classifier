@@ -27,6 +27,7 @@ from .category_button import CategoryButton
 from .enhanced_image_label import EnhancedImageLabel
 from .statistics_panel import StatisticsPanel
 from .switch import Switch
+from .expandable_search import ExpandableSearch
 
 # 定义公共接口
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     'EnhancedImageLabel',
     'StatisticsPanel',
     'Switch',
+    'ExpandableSearch',
 ]
 
 # 版本信息
