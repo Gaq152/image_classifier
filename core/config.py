@@ -21,7 +21,8 @@ class Config:
         self.category_order = []
         self.category_shortcuts = {}
         self.ignored_categories = []  # 被忽略的类别目录列表
-        self.category_sort_mode = "name"  # 类别排序模式: "name" 或 "shortcut"
+        self.category_sort_mode = "name"  # 类别排序模式: "name", "shortcut" 或 "count"
+        self.sort_ascending = True  # 排序方向: True=升序, False=降序
         self._lock = threading.Lock()
         
         # 系统保留的快捷键和类别
@@ -129,6 +130,7 @@ class Config:
                     self.category_shortcuts = config_data.get('category_shortcuts', {})
                     self.ignored_categories = config_data.get('ignored_categories', [])  # 忽略列表
                     self.category_sort_mode = config_data.get('category_sort_mode', 'name')  # 类别排序模式
+                    self.sort_ascending = config_data.get('sort_ascending', True)  # 排序方向
 
                     # 迁移逻辑：如果旧配置中有更新相关字段，迁移到全局配置
                     self._migrate_update_config(config_data)
@@ -157,6 +159,7 @@ class Config:
                 'category_shortcuts': self.category_shortcuts,
                 'ignored_categories': getattr(self, 'ignored_categories', []),  # 保存忽略列表
                 'category_sort_mode': getattr(self, 'category_sort_mode', 'name'),  # 保存排序模式
+                'sort_ascending': getattr(self, 'sort_ascending', True),  # 保存排序方向
             }
             # 确保配置文件目录存在
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -225,31 +228,41 @@ class Config:
 
         return sorted(categories, key=get_shortcut_weight)
 
-    def get_sorted_categories(self, categories, sort_mode=None, category_counts=None):
+    def get_sorted_categories(self, categories, sort_mode=None, category_counts=None, ascending=None):
         """根据排序模式返回排序后的类别列表
 
         Args:
             categories: 类别集合或列表
             sort_mode: 排序模式 ("name", "shortcut" 或 "count")，默认使用配置的模式
             category_counts: 类别分类数量字典 {category_name: count}，仅 count 模式需要
+            ascending: 是否升序，默认使用配置的 sort_ascending
 
         Returns:
             排序后的类别列表
         """
         if sort_mode is None:
             sort_mode = self.category_sort_mode
+        if ascending is None:
+            ascending = self.sort_ascending
 
         if sort_mode == "shortcut":
             # 按快捷键排序
-            return self.sort_categories(categories)
+            result = self.sort_categories(categories)
         elif sort_mode == "count":
-            # 按分类数量排序（降序，数量多的在前）
+            # 按分类数量排序
             if category_counts is None:
                 category_counts = {}
-            return sorted(list(categories), key=lambda c: (-category_counts.get(c, 0), c))
+            # 升序时数量少的在前，降序时数量多的在前
+            result = sorted(list(categories), key=lambda c: (category_counts.get(c, 0), c))
         else:  # sort_mode == "name" (默认)
             # 按名称排序
-            return sorted(list(categories))
+            result = sorted(list(categories))
+
+        # 如果是降序，反转结果
+        if not ascending:
+            result = list(reversed(result))
+
+        return result
 
     def add_ignored_category(self, category_name):
         """添加类别到忽略列表"""
