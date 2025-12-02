@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                             QMessageBox, QTabWidget, QProgressBar, QApplication,
                             QWidget, QTextBrowser, QCheckBox, QGroupBox, QScrollArea, QComboBox,
                             QDoubleSpinBox,QSpinBox)
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer, QSize, QThread
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl, QPropertyAnimation, QEasingCurve, QRectF, pyqtProperty, QTimer, QSize, QThread, QEvent
 from PyQt6.QtGui import QKeySequence, QIcon, QDesktopServices, QPainter, QColor, QPen
 from ..utils.file_operations import normalize_folder_name, retry_file_operation
 from .._version_ import compare_version, __version__, get_about_info, get_latest_version_info, VERSION_HISTORY, get_manifest_url, CONTACT_INFO
@@ -2934,15 +2934,44 @@ class SettingsDialog(QDialog):
         warmup_count_label.setStyleSheet("font-size: 13px;")
         warmup_count_layout.addWidget(warmup_count_label)
 
+        # 自定义SpinBox布局：输入框 + 上下按钮 + 单位
+        spinbox_container = QWidget()
+        spinbox_container_layout = QHBoxLayout(spinbox_container)
+        spinbox_container_layout.setContentsMargins(0, 0, 0, 0)
+        spinbox_container_layout.setSpacing(0)
+
+        # SpinBox（使用统一样式）
         self.warmup_count_spinbox = QSpinBox()
         self.warmup_count_spinbox.setRange(10, 500)
         self.warmup_count_spinbox.setSingleStep(10)
         self.warmup_count_spinbox.setValue(self.app_config.cache_warmup_count)
-        self.warmup_count_spinbox.setSuffix(" 张")
-        self.warmup_count_spinbox.setMinimumHeight(32)
-        self.warmup_count_spinbox.setMinimumWidth(120)
-        self.warmup_count_spinbox.valueChanged.connect(self.on_warmup_count_changed)
-        warmup_count_layout.addWidget(self.warmup_count_spinbox)
+        self.warmup_count_spinbox.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.warmup_count_spinbox.setFixedSize(60, 24)
+        self.warmup_count_spinbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 使用统一样式方法
+        self._apply_spinbox_style(self.warmup_count_spinbox)
+        # 禁用滚轮
+        self.warmup_count_spinbox.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.warmup_count_spinbox.installEventFilter(self)
+        spinbox_container_layout.addWidget(self.warmup_count_spinbox)
+
+        # 使用统一的按钮创建方法
+        warmup_buttons = self._create_spinbox_buttons(self.warmup_count_spinbox, button_height=12)
+        spinbox_container_layout.addWidget(warmup_buttons)
+
+        # 单位标签（放在外面）
+        unit_label = QLabel("张")
+        unit_label.setStyleSheet(f"font-size: 13px; color: {c.TEXT_PRIMARY}; margin-left: 5px;")
+        spinbox_container_layout.addWidget(unit_label)
+
+        warmup_count_layout.addWidget(spinbox_container)
+
+        # 防抖定时器：延迟500ms后保存
+        self._warmup_count_debounce_timer = QTimer(self)
+        self._warmup_count_debounce_timer.setSingleShot(True)
+        self._warmup_count_debounce_timer.timeout.connect(self._save_warmup_count)
+        self._pending_warmup_count = self.app_config.cache_warmup_count
+        self.warmup_count_spinbox.valueChanged.connect(self._on_warmup_count_changed_debounced)
 
         warmup_count_layout.addStretch()
 
@@ -3335,6 +3364,8 @@ class SettingsDialog(QDialog):
 
     def create_preview_section(self) -> QGroupBox:
         """创建图像预览设置区域"""
+        c = default_theme.colors  # 主题颜色变量
+
         group = QGroupBox("🖼️ 图像预览设置")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
@@ -3369,9 +3400,9 @@ class SettingsDialog(QDialog):
         zoom_max_label = QLabel("最大缩放倍数：")
         zoom_controls_layout.addWidget(zoom_max_label)
 
-        # 创建包含spinbox和外部按钮的容器
+        # 创建包含spinbox和外部按钮的容器（无间距，组合式组件）
         zoom_max_container = QHBoxLayout()
-        zoom_max_container.setSpacing(2)
+        zoom_max_container.setSpacing(0)
         zoom_max_container.setContentsMargins(0, 0, 0, 0)
 
         self.zoom_max_spinbox = QDoubleSpinBox()
@@ -3391,23 +3422,23 @@ class SettingsDialog(QDialog):
         zoom_max_container.addWidget(self.zoom_max_spinbox)
 
         # 外部上下按钮（垂直排列）
-        zoom_max_buttons = self._create_spinbox_buttons(self.zoom_max_spinbox)
-        zoom_max_container.addLayout(zoom_max_buttons)
+        zoom_max_buttons = self._create_spinbox_buttons(self.zoom_max_spinbox, button_height=16)
+        zoom_max_container.addWidget(zoom_max_buttons)
 
         zoom_controls_layout.addLayout(zoom_max_container)
 
         # "倍" 标签
         zoom_max_unit = QLabel("倍")
-        zoom_max_unit.setStyleSheet("color: #757575; font-size: 13px;")
+        zoom_max_unit.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 13px; margin-left: 5px;")
         zoom_controls_layout.addWidget(zoom_max_unit)
 
         # 最小缩放倍数
         zoom_min_label = QLabel("最小缩放倍数：")
         zoom_controls_layout.addWidget(zoom_min_label)
 
-        # 创建包含spinbox和外部按钮的容器
+        # 创建包含spinbox和外部按钮的容器（无间距，组合式组件）
         zoom_min_container = QHBoxLayout()
-        zoom_min_container.setSpacing(2)
+        zoom_min_container.setSpacing(0)
         zoom_min_container.setContentsMargins(0, 0, 0, 0)
 
         self.zoom_min_spinbox = QDoubleSpinBox()
@@ -3427,14 +3458,14 @@ class SettingsDialog(QDialog):
         zoom_min_container.addWidget(self.zoom_min_spinbox)
 
         # 外部上下按钮（垂直排列）
-        zoom_min_buttons = self._create_spinbox_buttons(self.zoom_min_spinbox)
-        zoom_min_container.addLayout(zoom_min_buttons)
+        zoom_min_buttons = self._create_spinbox_buttons(self.zoom_min_spinbox, button_height=16)
+        zoom_min_container.addWidget(zoom_min_buttons)
 
         zoom_controls_layout.addLayout(zoom_min_container)
 
         # "倍" 标签
         zoom_min_unit = QLabel("倍")
-        zoom_min_unit.setStyleSheet("color: #757575; font-size: 13px;")
+        zoom_min_unit.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 13px; margin-left: 5px;")
         zoom_controls_layout.addWidget(zoom_min_unit)
 
         zoom_controls_layout.addStretch()
@@ -3575,10 +3606,29 @@ class SettingsDialog(QDialog):
         status = "启用" if checked else "禁用"
         toast_success(self, f"缓存预热功能已{status}（仅网络路径有效）")
 
-    def on_warmup_count_changed(self, value: int):
-        """预热图片数量改变事件（优化8）"""
+    def _on_warmup_count_changed_debounced(self, value: int):
+        """预热图片数量改变事件（带防抖）"""
+        # 记录待保存的值，重启防抖定时器
+        self._pending_warmup_count = value
+        self._warmup_count_debounce_timer.start(500)  # 500ms防抖
+
+    def _save_warmup_count(self):
+        """防抖定时器触发后实际保存"""
+        value = self._pending_warmup_count
         self.app_config.cache_warmup_count = value
         toast_success(self, f"预热图片数量已设置为 {value} 张")
+
+    def on_warmup_count_changed(self, value: int):
+        """预热图片数量改变事件（优化8）- 保留兼容性"""
+        self.app_config.cache_warmup_count = value
+        toast_success(self, f"预热图片数量已设置为 {value} 张")
+
+    def eventFilter(self, obj, event):
+        """事件过滤器：禁用SpinBox的滚轮事件"""
+        if obj == self.warmup_count_spinbox and event.type() == QEvent.Type.Wheel:
+            # 拦截滚轮事件，不传递给SpinBox
+            return True
+        return super().eventFilter(obj, event)
 
     def on_local_loop_changed(self, checked: bool):
         """本地路径循环翻页开关改变事件"""
@@ -4064,6 +4114,10 @@ class SettingsDialog(QDialog):
         try:
             self.app_config._save_config()
             self.logger.debug("已保存缩放配置")
+            # 显示当前缩放范围
+            zoom_max = self.app_config.image_zoom_max
+            zoom_min = self.app_config.image_zoom_min
+            toast_success(self, f"缩放范围已设置：{zoom_min:.2f}x ~ {zoom_max:.1f}x")
         except Exception as e:
             self.logger.error(f"保存缩放配置失败: {e}")
 
@@ -4495,52 +4549,81 @@ class SettingsDialog(QDialog):
         self.update()
 
     def _apply_spinbox_style(self, spinbox):
-        """为spinbox应用美化样式（无按钮版本）"""
+        """为spinbox应用美化样式（组合式组件风格：左侧圆角，右侧直角连接按钮）
+
+        支持 QSpinBox 和 QDoubleSpinBox
+        """
         c = default_theme.colors
 
+        # 使用通用选择器，同时匹配 QSpinBox 和 QDoubleSpinBox
         spinbox.setStyleSheet(f"""
-            QDoubleSpinBox {{
+            QSpinBox, QDoubleSpinBox {{
                 background-color: {c.BACKGROUND_SECONDARY};
                 color: {c.TEXT_PRIMARY};
-                border: 2px solid {c.BORDER_MEDIUM};
-                border-radius: 6px;
-                padding: 6px 10px;
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: 4px;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+                padding: 4px 8px;
                 font-size: 13px;
-                font-weight: 500;
+                selection-background-color: {c.PRIMARY};
             }}
-            QDoubleSpinBox:hover {{
+            QSpinBox:hover, QDoubleSpinBox:hover {{
                 border-color: {c.PRIMARY};
             }}
-            QDoubleSpinBox:focus {{
+            QSpinBox:focus, QDoubleSpinBox:focus {{
                 border-color: {c.PRIMARY};
-                background-color: {c.BACKGROUND_CARD};
+                background-color: {c.BACKGROUND_PRIMARY};
+            }}
+            QSpinBox::up-button, QSpinBox::down-button,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                width: 0px;
+                border: none;
+                background: transparent;
             }}
         """)
 
-    def _create_spinbox_buttons(self, spinbox):
-        """创建外部垂直排列的上下按钮"""
+    def _create_spinbox_buttons(self, spinbox, button_height=12):
+        """创建外部垂直排列的上下按钮（组合式组件风格）
+
+        Args:
+            spinbox: 要绑定的QSpinBox或QDoubleSpinBox
+            button_height: 每个按钮的高度，默认12px
+
+        Returns:
+            QWidget: 包含上下按钮的容器组件
+        """
         c = default_theme.colors
 
-        # 按钮容器（垂直布局）
-        buttons_layout = QVBoxLayout()
+        # 按钮容器
+        btn_container = QWidget()
+        btn_container.setFixedWidth(20)
+        buttons_layout = QVBoxLayout(btn_container)
         buttons_layout.setSpacing(0)
         buttons_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 上箭头按钮
+        # 上箭头按钮（右上圆角，无左边框，底部分割线）
         up_button = QPushButton("▲")
-        up_button.setFixedSize(18, 16)
+        up_button.setFixedHeight(button_height)
         up_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        up_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # 防止抢走输入框焦点
+        up_button.setAutoRepeat(True)  # 长按连发
+        up_button.setAutoRepeatDelay(400)  # 首次延迟400ms
+        up_button.setAutoRepeatInterval(80)  # 之后每80ms触发一次
         up_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {c.BACKGROUND_SECONDARY};
                 color: {c.TEXT_SECONDARY};
                 border: 1px solid {c.BORDER_MEDIUM};
-                border-top-right-radius: 3px;
-                border-bottom: none;
-                font-size: 9px;
+                border-left: none;
+                border-bottom: 1px solid {c.BORDER_MEDIUM};
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 0px;
+                margin: 0px;
                 padding: 0px;
+                font-size: 8px;
                 min-height: 0px;
-                max-height: 16px;
+                max-height: {button_height}px;
             }}
             QPushButton:hover {{
                 background-color: {c.BACKGROUND_HOVER};
@@ -4548,27 +4631,34 @@ class SettingsDialog(QDialog):
             }}
             QPushButton:pressed {{
                 background-color: {c.PRIMARY};
-                color: white;
+                color: #FFFFFF;
             }}
         """)
         up_button.clicked.connect(lambda: spinbox.stepUp())
         buttons_layout.addWidget(up_button)
 
-        # 下箭头按钮
+        # 下箭头按钮（右下圆角，无左边框，无上边框）
         down_button = QPushButton("▼")
-        down_button.setFixedSize(18, 16)
+        down_button.setFixedHeight(button_height)
         down_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        down_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # 防止抢走输入框焦点
+        down_button.setAutoRepeat(True)  # 长按连发
+        down_button.setAutoRepeatDelay(400)  # 首次延迟400ms
+        down_button.setAutoRepeatInterval(80)  # 之后每80ms触发一次
         down_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {c.BACKGROUND_SECONDARY};
                 color: {c.TEXT_SECONDARY};
                 border: 1px solid {c.BORDER_MEDIUM};
-                border-bottom-right-radius: 3px;
+                border-left: none;
                 border-top: none;
-                font-size: 9px;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 4px;
+                margin: 0px;
                 padding: 0px;
+                font-size: 8px;
                 min-height: 0px;
-                max-height: 16px;
+                max-height: {button_height}px;
             }}
             QPushButton:hover {{
                 background-color: {c.BACKGROUND_HOVER};
@@ -4576,13 +4666,13 @@ class SettingsDialog(QDialog):
             }}
             QPushButton:pressed {{
                 background-color: {c.PRIMARY};
-                color: white;
+                color: #FFFFFF;
             }}
         """)
         down_button.clicked.connect(lambda: spinbox.stepDown())
         buttons_layout.addWidget(down_button)
 
-        return buttons_layout
+        return btn_container
 
     def showEvent(self, event):
         """对话框显示时居中并同步配置"""
