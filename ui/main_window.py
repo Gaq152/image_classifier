@@ -5327,35 +5327,19 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"启动教程失败: {e}")
             toast_error(self, f"启动教程失败: {str(e)}")
 
-    def is_theme_switch_disabled_due_to_performance(self):
-        """检查是否因性能原因禁用主题切换（图片数量>10000）"""
-        # Phase 1.1 完成：Model/View架构已彻底解决性能问题
-        # QListView虚拟化只渲染可见行，主题切换不再遍历所有Item
-        # 性能限制已移除，支持任意数量图片
-        return False
-
     def update_theme_button_state(self):
-        """更新主题按钮状态（根据图片数量和主题模式）"""
+        """更新主题按钮状态（根据主题模式）"""
         if not hasattr(self, 'theme_button'):
             return
 
         try:
             app_config = get_app_config()
             theme_mode = app_config.theme_mode
-            image_count = self.image_list.model().rowCount() if (hasattr(self, 'image_list') and self.image_list.model()) else 0
-
-            # Phase 1.1 修复：使用统一的性能检查方法，而不是硬编码
-            disabled_due_to_performance = self.is_theme_switch_disabled_due_to_performance()
 
             # 检查是否因为自动模式或系统模式需要禁用
             disabled_due_to_mode = theme_mode in ("auto", "system")
 
-            if disabled_due_to_performance:
-                # 因性能原因禁用
-                self.theme_button.setEnabled(False)
-                self.theme_button.setToolTip(f"图片数量过多（{image_count}张），主题切换已禁用以保证性能")
-                self.logger.debug(f"主题按钮因性能原因禁用（图片数：{image_count}）")
-            elif disabled_due_to_mode:
+            if disabled_due_to_mode:
                 # 因模式原因禁用
                 self.theme_button.setEnabled(False)
                 mode_name = "自动切换" if theme_mode == "auto" else "跟随系统"
@@ -5373,12 +5357,6 @@ class ImageClassifier(QMainWindow):
     def toggle_theme(self):
         """切换主题"""
         try:
-            # 检查是否因性能原因禁用（图片过多）
-            if self.is_theme_switch_disabled_due_to_performance():
-                count = self.image_list.model().rowCount() if (hasattr(self, 'image_list') and self.image_list.model()) else 0
-                toast_warning(self, f"图片数量过多（{count}张），主题切换已禁用以保证性能")
-                return
-
             # 检查是否启用了自动切换
             app_config = get_app_config()
 
@@ -5749,12 +5727,6 @@ class ImageClassifier(QMainWindow):
 
             # 只有在自动模式下才进行检查
             if app_config.theme_mode != "auto":
-                return
-
-            # 检查是否因性能原因禁用自动切换（图片过多）
-            if self.is_theme_switch_disabled_due_to_performance():
-                image_count = self.image_list.model().rowCount() if (hasattr(self, 'image_list') and self.image_list.model()) else 0
-                self.logger.debug(f"自动主题切换已跳过（图片数量：{image_count}，超过10000限制）")
                 return
 
             # 根据时间获取应该使用的主题
