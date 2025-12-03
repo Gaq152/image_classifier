@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-6.5.0-blue.svg)
+![Version](https://img.shields.io/badge/version-6.6.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
@@ -25,8 +25,8 @@
 
 | 版本 | 平台 | 下载链接 | 大小 |
 |------|------|----------|------|
-| v6.5.0 | Windows | [ImageClassifier_v6.5.0.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/6.5.0/ImageClassifier_v6.5.0.exe) | ~86MB |
-| Latest | Windows | [ImageClassifier_latest.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/ImageClassifier_v6.5.0.exe) | ~86MB |
+| v6.6.0 | Windows | [ImageClassifier_v6.6.0.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/6.6.0/ImageClassifier_v6.6.0.exe) | ~86MB |
+| Latest | Windows | [ImageClassifier_latest.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/ImageClassifier_v6.6.0.exe) | ~86MB |
 
 > 💡 **快速开始**: 下载exe文件后双击即可运行，无需安装Python环境。
 
