@@ -246,7 +246,26 @@ class CategoryButton(QPushButton):
             if main_window and hasattr(main_window, 'config'):
                 dialog = CategoryShortcutDialog(main_window.config, self.category_name, self)
                 if dialog.exec():
+                    # 保存配置
+                    main_window.config.save_config()
+                    self.logger.info(f"快捷键已修改并保存: {self.category_name}")
+                    # 重新设置快捷键
                     main_window.setup_shortcuts()
+
+                    # 重新计算排序列表（特别是"按快捷键排序"模式）
+                    categories = getattr(main_window, 'categories', None)
+                    if categories is not None:
+                        category_counts = None
+                        if main_window.config.category_sort_mode == "count":
+                            category_counts = main_window._get_category_counts()
+                        main_window.ordered_categories = main_window.config.get_sorted_categories(
+                            categories, category_counts=category_counts
+                        )
+
+                    # 更新类别按钮列表（重新排序）
+                    main_window.update_category_buttons()
+                    self.logger.info(f"类别按钮列表已更新")
+                    # 更新当前按钮文本
                     self.update_text()
 
         except Exception as e:
@@ -295,6 +314,7 @@ class CategoryButton(QPushButton):
         """忽略类别"""
         try:
             from ..styles.theme import default_theme
+            c = default_theme.colors
 
             # 创建自定义消息框
             msg_box = QMessageBox(self)
@@ -350,6 +370,7 @@ class CategoryButton(QPushButton):
         """删除类别"""
         try:
             from ..styles.theme import default_theme
+            c = default_theme.colors
 
             # 创建自定义消息框
             msg_box = QMessageBox(self)
