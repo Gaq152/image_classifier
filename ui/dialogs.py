@@ -1659,7 +1659,7 @@ class TabbedHelpDialog(QDialog):
 
         <div style="background-color: {colors['bg_hover']}; padding: 20px; border-left: 4px solid {colors['primary']}; text-align: center; margin: 30px 0;">
         <h3 style="margin: 0 0 15px 0; color: {colors['primary']};">版权信息</h3>
-        <p style="margin: 5px 0; color: {colors['text_primary']};"><b>© 2025 GDDI</b></p>
+        <p style="margin: 5px 0; color: {colors['text_primary']};"><b>© 2024 GDDI</b></p>
         <p style="margin: 5px 0; color: {colors['text_primary']};">专注于提升图片管理效率的专业软件</p>
         <p style="margin: 15px 0 5px 0; color: {colors['text_secondary']}; font-size: 14px; line-height: 1.6;">
         本软件遵循 MIT 开源协议<br>
@@ -2212,29 +2212,6 @@ class SettingsDialog(QDialog):
 
         # 恢复信号
         self.theme_combo.blockSignals(False)
-
-        # 检查是否因性能原因需要禁用主题控件（图片数量>10000）
-        # Phase 1.1: Model/View架构已解决性能问题，移除限制
-        if self.parent() and hasattr(self.parent(), 'image_list'):
-            model = self.parent().image_list.model()
-            image_count = model.rowCount() if model else 0
-            if False:  # 性能限制已移除
-                # 禁用主题下拉列表和自动切换开关
-                self.theme_combo.setEnabled(False)
-                self.auto_theme_switch.setEnabled(False)
-
-                # 更新tooltip提示原因
-                tooltip_text = f"图片数量过多（{image_count}张），主题切换已禁用以保证性能"
-                self.theme_combo.setToolTip(tooltip_text)
-                auto_label.setToolTip(tooltip_text)
-
-                # 添加说明文本
-                warning_label = QLabel(f"⚠️ 当前图片数量（{image_count}张）超过10000，为保证性能已禁用主题切换功能")
-                warning_label.setStyleSheet("font-size: 12px; color: #F59E0B; padding: 5px;")
-                warning_label.setWordWrap(True)
-                theme_layout.addWidget(warning_label)
-
-                self.logger.debug(f"SettingsDialog: 主题控件因性能原因禁用（图片数：{image_count}）")
 
         layout.addStretch()
         return group
@@ -3543,12 +3520,8 @@ class SettingsDialog(QDialog):
             # 禁用自动模式，恢复手动模式
             self.app_config.theme_mode = "manual"
 
-            # 启用主题下拉列表（但需要检查是否因性能原因禁用）
-            # Phase 1.1: Model/View架构已解决性能问题，移除限制
-            should_disable_for_performance = False
-
-            if not should_disable_for_performance:
-                self.theme_combo.setEnabled(True)
+            # 启用主题下拉列表
+            self.theme_combo.setEnabled(True)
 
             # 根据当前主题设置下拉列表（阻止信号触发）
             current_theme = self.app_config.theme
@@ -3563,18 +3536,9 @@ class SettingsDialog(QDialog):
             if self.parent():
                 if hasattr(self.parent(), 'stop_auto_theme_timer'):
                     self.parent().stop_auto_theme_timer()
-                if hasattr(self.parent(), 'theme_button'):
-                    # 重新启用主窗口的主题按钮（但需要检查是否因性能原因禁用）
+                if hasattr(self.parent(), 'update_theme_button_state'):
                     # 使用主窗口的update_theme_button_state方法来正确设置状态
-                    if hasattr(self.parent(), 'update_theme_button_state'):
-                        self.parent().update_theme_button_state()
-                    elif not should_disable_for_performance:
-                        # 如果没有update_theme_button_state方法，则直接启用（向后兼容）
-                        self.parent().theme_button.setEnabled(True)
-                        # 恢复正确的tooltip
-                        current_theme = self.app_config.theme
-                        theme_tooltip = '切换到暗色主题' if current_theme == "light" else '切换到亮色主题'
-                        self.parent().theme_button.setToolTip(theme_tooltip)
+                    self.parent().update_theme_button_state()
 
             toast_info(self, "已关闭自动切换")
 
@@ -4191,14 +4155,7 @@ class SettingsDialog(QDialog):
             # 恢复默认值
             self.theme_combo.setCurrentIndex(0)  # 默认浅色主题
             self.auto_theme_switch.setChecked(False)  # 默认关闭自动切换
-
-            # 检查是否因性能原因禁用主题控件（图片数量>10000）
-            should_disable_for_performance = False
-            # Phase 1.1: Model/View架构已解决性能问题，移除限制
-            should_disable_for_performance = False
-
-            if not should_disable_for_performance:
-                self.theme_combo.setEnabled(True)  # 确保下拉列表可用
+            self.theme_combo.setEnabled(True)  # 确保下拉列表可用
 
             self.auto_update_switch.setChecked(True)
             self.endpoint_input.setText("https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json")
