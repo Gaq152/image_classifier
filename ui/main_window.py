@@ -35,7 +35,7 @@ from .delegates.image_list_delegate import ImageListDelegate
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles, WidgetStyles
 from .components.styles.theme import default_theme
-from .components.styles.widget_styles import WidgetStyles as WS
+from .components.styles.widget_styles import WidgetStyles as WS, apply_category_button_style
 from .components.tutorial import TutorialManager
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
                      TabbedHelpDialog, ProgressDialog, SettingsDialog, ManageIgnoredCategoriesDialog,
@@ -5599,6 +5599,11 @@ class ImageClassifier(QMainWindow):
                         background-color: {c.BACKGROUND_SECONDARY};
                     }}
                 """)
+
+            # 更新所有类别按钮的样式
+            if hasattr(self, 'category_buttons'):
+                for btn in self.category_buttons:
+                    apply_category_button_style(btn)
 
             # 更新统计面板
             if hasattr(self, 'statistics_panel') and hasattr(self.statistics_panel, 'apply_theme'):
