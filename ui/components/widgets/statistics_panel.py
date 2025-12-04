@@ -5,8 +5,109 @@
 """
 
 import logging
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QLabel, QProgressBar
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QLabel, QProgressBar, QSizePolicy
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QPen, QBrush, QLinearGradient
+from PyQt6.QtCore import Qt, QRectF
 from ..styles.theme import default_theme
+
+
+class RoundedProgressBar(QProgressBar):
+    """自定义绘制的进度条，解决低进度显示问题
+
+    特点：
+    - 所有进度（0-100%）都显示圆角
+    - 完全填充容器，无间隙
+    - 动态圆角半径，低进度时自动缩小
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTextVisible(True)
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(24)
+        # 颜色配置（根据进度百分比变化）
+        self._chunk_colors = ("stop: 0 #28A745, stop: 1 #20C997")  # 默认绿色
+        # 清空默认样式，完全由自绘控制
+        self.setStyleSheet("""
+            QProgressBar { border: 0; background: transparent; padding: 0; margin: 0; }
+            QProgressBar::chunk { background: transparent; margin: 0; padding: 0; }
+        """)
+
+    def setChunkColors(self, color_stops: str):
+        """设置进度块颜色（渐变格式）"""
+        self._chunk_colors = color_stops
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 获取主题颜色
+        c = default_theme.colors
+
+        # 绘制区域（留出0.5px避免边界裁剪）
+        rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+        radius = rect.height() / 2  # 半圆形圆角
+
+        # 1. 创建容器路径（用于背景和裁剪）
+        container_path = QPainterPath()
+        container_path.addRoundedRect(rect, radius, radius)
+
+        # 2. 绘制背景
+        pen = QPen(QColor("#6C757D"))
+        pen.setWidthF(1.0)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(QColor(c.BACKGROUND_SECONDARY)))
+        painter.drawPath(container_path)
+
+        # 3. 绘制进度块（使用 ClipPath 确保不超出边界）
+        total = self.maximum() - self.minimum()
+        progress = 0 if total <= 0 else (self.value() - self.minimum()) / total
+        if progress > 0:
+            # 设置裁剪区域为容器形状（关键！防止超出边界）
+            painter.setClipPath(container_path)
+
+            chunk_width = rect.width() * progress
+
+            # 解析渐变颜色
+            gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
+            if "DC3545" in self._chunk_colors:  # 红色（低进度）
+                gradient.setColorAt(0, QColor("#DC3545"))
+                gradient.setColorAt(1, QColor("#FF6B6B"))
+            elif "FFC107" in self._chunk_colors:  # 黄色（中进度）
+                gradient.setColorAt(0, QColor("#FFC107"))
+                gradient.setColorAt(1, QColor("#FFD700"))
+            elif "17A2B8" in self._chunk_colors:  # 蓝色（较高进度）
+                gradient.setColorAt(0, QColor("#17A2B8"))
+                gradient.setColorAt(1, QColor("#20C997"))
+            else:  # 绿色（高进度/完成）
+                gradient.setColorAt(0, QColor("#28A745"))
+                gradient.setColorAt(1, QColor("#20C997"))
+
+            # 直接绘制矩形，ClipPath 会自动裁剪成圆角
+            chunk_rect = QRectF(rect.left(), rect.top(), chunk_width, rect.height())
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.fillRect(chunk_rect, gradient)
+
+            # 取消裁剪
+            painter.setClipping(False)
+
+        # 4. 重新绘制边框（确保边框在最上层）
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(container_path)
+
+        # 5. 绘制文本
+        if self.isTextVisible():
+            percentage = int(progress * 100) if total > 0 else 0
+            text = f"{percentage}%"
+            painter.setPen(QColor(c.TEXT_PRIMARY))
+            font = self.font()
+            font.setBold(True)
+            font.setPointSize(9)
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
 
 class StatisticsPanel(QWidget):
@@ -19,29 +120,6 @@ class StatisticsPanel(QWidget):
 
         # 立即调用一次统计更新，确保进度条初始样式正确
         self.update_statistics(0, 0, 0)
-
-    def _apply_progress_style(self, chunk_color="stop: 0 #28A745, stop: 1 #20C997"):
-        """统一的进度条样式应用方法，确保圆角始终生效"""
-        style = f"""
-            QProgressBar {{
-                border: 1px solid #6C757D;
-                border-radius: 10px;
-                background-color: #E9ECEF;
-                text-align: center;
-                font-weight: bold;
-                font-size: 12px;
-                height: 24px;
-                margin: 2px 0px;
-            }}
-            QProgressBar::chunk {{
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                    {chunk_color});
-                border-radius: 8px;
-                margin: 0px;
-                border: none;
-            }}
-        """
-        self.progress_bar.setStyleSheet(style)
 
     def initUI(self):
         """初始化简洁的UI - 2x2网格布局"""
@@ -97,18 +175,10 @@ class StatisticsPanel(QWidget):
 
             layout.addLayout(stats_grid)
 
-            # 单一进度条（去掉重复的进度标题和标签）
-            self.progress_bar = QProgressBar()
+            # 单一进度条（使用自定义绘制的圆角进度条）
+            self.progress_bar = RoundedProgressBar()
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
-            self.progress_bar.setMinimumHeight(24)
-            self.progress_bar.setMaximumHeight(24)
-            # 使用统一的样式方法设置进度条样式
-            self._apply_progress_style()
-
-            # 立即调用初始化统计更新，确保样式应用
-            self.progress_bar.setValue(0)
-            self.progress_bar.setFormat("0%")
             layout.addWidget(self.progress_bar)
 
         except Exception as e:
@@ -135,7 +205,7 @@ class StatisticsPanel(QWidget):
                 self.progress_bar.setValue(progress_percentage)
                 self.progress_bar.setFormat(f"{progress_percentage}%")
 
-                # 根据进度调整颜色
+                # 根据进度调整颜色（自定义进度条使用 setChunkColors）
                 if progress_percentage >= 100:
                     chunk_color = "stop: 0 #28A745, stop: 1 #20C997"  # 绿色 - 完成
                 elif progress_percentage >= 75:
@@ -145,13 +215,10 @@ class StatisticsPanel(QWidget):
                 else:
                     chunk_color = "stop: 0 #DC3545, stop: 1 #FF6B6B"  # 红色 - 刚开始
 
-                # 使用统一的样式方法
-                self._apply_progress_style(chunk_color)
+                self.progress_bar.setChunkColors(chunk_color)
             else:
                 self.progress_bar.setValue(0)
-                self.progress_bar.setFormat("0%")
-                # 使用统一的样式方法，确保即使在total=0时也应用圆角样式
-                self._apply_progress_style("stop: 0 #DC3545, stop: 1 #FF6B6B")
+                self.progress_bar.setChunkColors("stop: 0 #DC3545, stop: 1 #FF6B6B")
 
         except Exception as e:
             self.logger.error(f"更新统计信息失败: {e}")
@@ -191,9 +258,8 @@ class StatisticsPanel(QWidget):
             for label in [self.total_label, self.classified_label, self.removed_label, self.remaining_label]:
                 label.setStyleSheet(label_style)
 
-            # 更新进度条样式
+            # 更新进度条颜色（自定义进度条使用 setChunkColors）
             if hasattr(self, 'progress_bar'):
-                # 获取当前进度值来确定颜色
                 current_value = self.progress_bar.value()
                 if current_value >= 100:
                     chunk_color = "stop: 0 #28A745, stop: 1 #20C997"
@@ -203,28 +269,8 @@ class StatisticsPanel(QWidget):
                     chunk_color = "stop: 0 #FFC107, stop: 1 #FFD700"
                 else:
                     chunk_color = "stop: 0 #DC3545, stop: 1 #FF6B6B"
-
-                progress_style = f"""
-                    QProgressBar {{
-                        border: 1px solid {c.BORDER_MEDIUM};
-                        border-radius: 10px;
-                        background-color: {c.BACKGROUND_SECONDARY};
-                        text-align: center;
-                        font-weight: bold;
-                        font-size: 12px;
-                        height: 24px;
-                        margin: 2px 0px;
-                        color: {c.TEXT_PRIMARY};
-                    }}
-                    QProgressBar::chunk {{
-                        background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                            {chunk_color});
-                        border-radius: 8px;
-                        margin: 0px;
-                        border: none;
-                    }}
-                """
-                self.progress_bar.setStyleSheet(progress_style)
+                self.progress_bar.setChunkColors(chunk_color)
+                self.progress_bar.update()  # 触发重绘
 
         except Exception as e:
             self.logger.error(f"应用主题到统计面板失败: {e}")
