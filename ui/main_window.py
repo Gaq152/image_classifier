@@ -38,7 +38,8 @@ from .components.styles.theme import default_theme
 from .components.styles.widget_styles import WidgetStyles as WS
 from .components.tutorial import TutorialManager
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
-                     TabbedHelpDialog, ProgressDialog, SettingsDialog, ManageIgnoredCategoriesDialog)
+                     TabbedHelpDialog, ProgressDialog, SettingsDialog, ManageIgnoredCategoriesDialog,
+                     UpdateCheckerThread)
 from .managers import FileStateManager
 from .update_dialog import UpdateInfoDialog
 from ..core.config import Config
@@ -52,34 +53,6 @@ from ..core.update_utils import fetch_manifest, launch_self_update
 from ..utils.performance import performance_monitor
 from ..utils.paths import get_update_dir
 from .._version_ import __version__, get_manifest_url, compare_version
-
-
-class UpdateCheckerThread(QThread):
-    """修复问题4：后台检查更新的线程，避免阻塞UI"""
-
-    # 信号：检查成功 (manifest字典, endpoint, token)
-    check_success = pyqtSignal(dict, str, str)
-    # 信号：检查失败 (错误信息)
-    check_failed = pyqtSignal(str)
-
-    def __init__(self, endpoint, token=None):
-        super().__init__()
-        self.endpoint = endpoint
-        self.token = token
-        self.logger = logging.getLogger(__name__)
-
-    def run(self):
-        """在后台线程中执行更新检查"""
-        try:
-            self.logger.debug(f"[后台更新检查] 开始检查: {self.endpoint}")
-            manifest = fetch_manifest(self.endpoint, self.token or None)
-            self.logger.debug(f"[后台更新检查] 检查成功: v{manifest.get('version', 'unknown')}")
-            # 发送成功信号
-            self.check_success.emit(manifest, self.endpoint, self.token or '')
-        except Exception as e:
-            self.logger.debug(f"[后台更新检查] 检查失败: {e}")
-            # 发送失败信号
-            self.check_failed.emit(str(e))
 
 
 class DisabledButtonEventFilter(QObject):
