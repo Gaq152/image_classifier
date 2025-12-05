@@ -2819,9 +2819,28 @@ class ImageClassifier(QMainWindow):
                     else:
                         toast_info(self, "已经是第一张图片了！")
             except ValueError:
-                # 当前图片不在可见列表中（被过滤掉了），跳到第一张可见图片
-                self.current_index = self._visible_indices[0]
-                self.show_current_image()
+                # 当前图片不在可见列表中（被过滤掉了）
+                # 找到当前索引之前的最后一张可见图片（而不是跳到第一张）
+                prev_visible = None
+                for idx in reversed(self._visible_indices):
+                    if idx < self.current_index:
+                        prev_visible = idx
+                        break
+
+                if prev_visible is not None:
+                    # 找到了上一张可见图片
+                    self.current_index = prev_visible
+                    self.show_current_image()
+                else:
+                    # 当前索引之前没有可见图片了
+                    loop_enabled = self._should_enable_loop()
+                    if loop_enabled:
+                        # 循环到最后一张可见图片
+                        self.current_index = self._visible_indices[-1]
+                        self.logger.debug(f"[循环翻页-过滤] 第1张可见 -> 第{len(self._visible_indices)}张可见（从被过滤位置）")
+                        self.show_current_image()
+                    else:
+                        toast_info(self, "已经是第一张图片了！")
         else:
             # 没有过滤：原始逻辑
             if self.current_index > 0:
@@ -2874,9 +2893,27 @@ class ImageClassifier(QMainWindow):
                     else:
                         toast_info(self, "已经是最后一张图片了！")
             except ValueError:
-                # 当前图片不在可见列表中（被过滤掉了），跳到第一张可见图片
-                self.current_index = self._visible_indices[0]
-                self.show_current_image()
+                # 当前图片不在可见列表中（被过滤掉了）
+                # 找到当前索引之后的第一张可见图片（而不是跳到第一张）
+                next_visible = None
+                for idx in self._visible_indices:
+                    if idx > self.current_index:
+                        next_visible = idx
+                        break
+
+                if next_visible is not None:
+                    # 找到了下一张可见图片
+                    self.current_index = next_visible
+                    self.show_current_image()
+                else:
+                    # 当前索引之后没有可见图片了
+                    loop_enabled = self._should_enable_loop()
+                    if loop_enabled:
+                        self.current_index = self._visible_indices[0]
+                        self.logger.debug(f"[循环翻页-过滤] 第{len(self._visible_indices)}张可见 -> 第1张可见（从被过滤位置）")
+                        self.show_current_image()
+                    else:
+                        toast_info(self, "已经是最后一张图片了！")
         else:
             # 没有过滤：原始逻辑
             if self.current_index < len(self.image_files) - 1:
@@ -3681,6 +3718,7 @@ class ImageClassifier(QMainWindow):
         if not self.image_files or self.current_index < 0:
             return
 
+        original_index = self.current_index
         current_path = str(self.image_files[self.current_index])
         # 计算文件的实际路径（根据操作模式和分类状态）
         real_path = str(self.get_real_file_path(current_path))
@@ -3734,19 +3772,47 @@ class ImageClassifier(QMainWindow):
 
         # Phase 1.2: 检查是否有过滤激活，如果有则刷新过滤列表
         is_filtering = not (self.filter_unclassified and self.filter_classified and self.filter_removed)
+        moved_by_filter = False
         if is_filtering:
             # 刷新过滤列表，更新 _visible_indices
             # 这样被移除的图片会从过滤列表中移除（如果不符合当前过滤条件）
             self.apply_image_filter()
 
+            # 当前图片被过滤掉时，保持当前位置的相邻可见项，而不是重置到列表首项
+            if hasattr(self, '_visible_indices') and self._visible_indices:
+                if original_index not in self._visible_indices:
+                    # 先找删除位置之后的第一张可见图片
+                    next_visible = next((i for i in self._visible_indices if i > original_index), None)
+                    if next_visible is None:
+                        # 如果后面没有了，找前面的最后一张可见图片
+                        next_visible = next(
+                            (i for i in reversed(self._visible_indices) if i < original_index),
+                            None
+                        )
+
+                    if next_visible is not None:
+                        self.current_index = next_visible
+                        # 同步列表选中状态
+                        row = self._original_to_filtered_index.get(next_visible)
+                        if row is None and hasattr(self.image_list_model, '_index_map'):
+                            row = self.image_list_model._index_map.get(next_visible)
+                        if row is not None:
+                            model_index = self.image_list_model.index(row, 0)
+                            self.image_list.setCurrentIndex(model_index)
+                        self.show_current_image()
+                        moved_by_filter = True
+
         # 只在单分类模式下自动移动到下一张图片
         if not self.is_multi_category:
-            # 单分类模式下，自动移动到下一张
-            # next_image() 会正确处理过滤后的列表（如果当前图片被过滤掉，会跳到第一张可见图片）
-            self.next_image()
+            # 过滤后已跳转到邻近可见项，则不再额外前进，避免跳过一张
+            if not moved_by_filter:
+                self.next_image()
         else:
             # 多分类模式下，保持在当前图片，但刷新UI显示状态
-            self.update_category_selection_for_current_image(current_path)
+            current_display_path = current_path
+            if 0 <= self.current_index < len(self.image_files):
+                current_display_path = str(self.image_files[self.current_index])
+            self.update_category_selection_for_current_image(current_display_path)
 
         self.logger.info(f"图片已移除: {Path(current_path).name}")
 
