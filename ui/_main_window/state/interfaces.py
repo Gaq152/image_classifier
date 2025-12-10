@@ -268,6 +268,11 @@ class StateMutator(Protocol):
         """设置所有图片文件列表（未过滤）"""
         pass
 
+
+    def set_total_images(self, total: int) -> None:
+        """设置图片总数"""
+        pass
+
     # ========== 类别管理 ==========
 
 
