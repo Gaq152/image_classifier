@@ -223,10 +223,11 @@ class ImageClassifier(QMainWindow):
 
             # 文件扫描器
             self.file_scanner = FileScannerThread()
-            self.file_scanner.files_found.connect(self.on_files_found)
-            self.file_scanner.initial_batch_ready.connect(self.on_initial_batch_ready)
-            self.file_scanner.scan_progress.connect(self.on_scan_progress)
-            self.file_scanner.scan_finished.connect(self.on_scan_completed)
+            # 由 ImageNavigationManager 统一监听 scanner 信号，主窗口不再直连
+            # self.file_scanner.files_found.connect(self.on_files_found)
+            # self.file_scanner.initial_batch_ready.connect(self.on_initial_batch_ready)
+            # self.file_scanner.scan_progress.connect(self.on_scan_progress)
+            # self.file_scanner.scan_finished.connect(self.on_scan_completed)
             
             # 图像加载器
             self.image_loader = HighPerformanceImageLoader()
@@ -296,6 +297,11 @@ class ImageClassifier(QMainWindow):
             )
 
             self.logger.info("Manager初始化完成")
+
+            # 连接 Manager 信号（替代 scanner 直连）
+            self._nav_manager.list_updated.connect(self.on_list_updated)
+            self._nav_manager.scan_progress.connect(self.on_scan_progress)
+            self._nav_manager.scan_completed.connect(self.on_scan_completed)
 
         except Exception as e:
             self.logger.error(f"Manager初始化失败: {e}")
@@ -543,6 +549,10 @@ class ImageClassifier(QMainWindow):
     def set_all_image_files(self, files: list) -> None:
         """设置所有图片文件列表"""
         self.all_image_files = files
+
+    def set_total_images(self, total: int) -> None:
+        """设置图片总数"""
+        self.total_images = total
 
     def set_categories(self, categories: set) -> None:
         """设置类别集合"""
@@ -2035,7 +2045,13 @@ class ImageClassifier(QMainWindow):
             self.file_scanner.scan_directory(self.current_dir)
     
     # ===== 文件扫描事件处理 =====
-    
+
+    def on_list_updated(self, file_list):
+        """接收 Manager 的列表更新信号，执行 UI 层刷新"""
+        # Manager已经更新了状态（image_files, all_image_files, total_images）
+        # 这里只需要刷新UI
+        self.schedule_ui_update('image_list', 'statistics')
+
     def on_initial_batch_ready(self, initial_files):
         """处理初始批次文件"""
         if not self.loading_in_progress:

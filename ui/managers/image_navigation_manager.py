@@ -44,6 +44,10 @@ class ImageNavigationManager(QObject):
 
     # 信号：图片索引变化
     image_changed = pyqtSignal(int)
+    # 信号：文件列表和扫描状态（Manager统一管理scanner）
+    list_updated = pyqtSignal(list)          # 文件列表更新（首批或增量）
+    scan_progress = pyqtSignal(str)          # 扫描进度消息
+    scan_completed = pyqtSignal(int)         # 扫描完成，参数：总数
 
     def __init__(
         self,
@@ -115,9 +119,11 @@ class ImageNavigationManager(QObject):
         self._background_loading = False
         self._current_requested_image: Optional[str] = None  # 当前请求加载的图片路径（用于异步加载验证）
 
-        # 连接文件扫描器信号
+        # 连接文件扫描器信号（Manager统一管理scanner）
         self._scanner.initial_batch_ready.connect(self.on_initial_batch_ready)
+        self._scanner.files_found.connect(self.on_files_found)
         self._scanner.scan_progress.connect(self._on_scan_progress)
+        self._scanner.scan_finished.connect(self.on_scan_finished)
 
     def set_ui_components(self, image_list, image_list_model):
         """设置UI组件引用（在UI初始化后调用）
@@ -201,6 +207,9 @@ class ImageNavigationManager(QObject):
 
         self._logger.info("🚀 程序UI已完全启用，用户可立即使用")
 
+        # 通知上层：列表已更新（首批）
+        self.list_updated.emit(self._state.image_files)
+
     def _delayed_load_state(self):
         """延迟加载状态文件，避免阻塞UI"""
         try:
@@ -213,6 +222,73 @@ class ImageNavigationManager(QObject):
     def _on_scan_progress(self, message: str):
         """处理扫描进度（更新状态栏）"""
         self._ui.update_status_bar(message)
+        # 转发进度给主窗口
+        self.scan_progress.emit(message)
+
+    def on_files_found(self, file_batch: List[Path]):
+        """处理后续发现的文件批次（增量更新）"""
+        if not self._background_loading:
+            return
+
+        # 去重：只添加新文件
+        existing_paths = {str(f) for f in self._state.image_files}
+        new_files = [f for f in file_batch if str(f) not in existing_paths]
+
+        if new_files:
+            # 增量扩展文件列表
+            current_files = list(self._state.image_files)
+            current_files.extend(new_files)
+            self._mutator.set_image_files(current_files)
+
+            all_files = list(self._state.all_image_files)
+            all_files.extend(new_files)
+            self._mutator.set_all_image_files(all_files)
+
+            # 更新图片加载器的文件列表引用
+            self._loader.set_image_files_reference(current_files)
+
+            current_total = len(all_files)
+
+            # 节流：每1000个文件更新一次UI
+            if current_total % 1000 == 0:
+                self._ui.schedule_ui_update('image_list')
+                self._ui.update_status_bar(f"🧐 后台发现 {current_total} 个文件...")
+                self._logger.info(f"[后台扫描] 增量更新，累计 {current_total} 个文件")
+
+            # 发射列表更新信号
+            self.list_updated.emit(current_files)
+
+    def on_scan_finished(self, total_count: int):
+        """扫描完成处理"""
+        self._background_loading = False
+        self._initial_batch_loaded = True
+
+        # 最终去重
+        unique_files = []
+        seen_paths = set()
+        for file_path in self._state.image_files:
+            path_str = str(file_path)
+            if path_str not in seen_paths:
+                unique_files.append(file_path)
+                seen_paths.add(path_str)
+
+        # 更新文件列表
+        self._mutator.set_image_files(unique_files)
+        self._mutator.set_all_image_files(unique_files.copy())
+
+        actual_count = len(unique_files)
+        self._mutator.set_total_images(actual_count)
+
+        # 更新图片加载器的文件列表引用
+        self._loader.set_image_files_reference(unique_files)
+
+        # 移动模式下，补全已移动的文件到列表
+        if hasattr(self._ui, 'supplement_moved_files_to_list'):
+            self._ui.supplement_moved_files_to_list()
+
+        # 发射完成信号
+        self.scan_completed.emit(actual_count)
+        self._logger.info(f"[扫描完成] 最终保留 {actual_count} 个文件")
 
     # ========== 图片显示 ==========
 
