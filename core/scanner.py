@@ -9,8 +9,8 @@ import logging
 import time
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
-from ..utils.exceptions import DirectoryScanError
-from ..utils.performance import performance_monitor
+from utils.exceptions import DirectoryScanError
+from utils.performance import performance_monitor
 
 
 class FileScannerThread(QThread):

@@ -34,12 +34,12 @@ except ImportError:
 
 import psutil
 
-from ..utils.exceptions import ImageLoadError
-from ..utils.file_operations import is_network_path
-from ..utils.performance import performance_monitor
-from ..utils.paths import get_cache_dir, get_old_cache_dir
-from ..utils.cache_meta import SimpleCacheMeta
-from ..utils.cache_index import CacheIndex
+from utils.exceptions import ImageLoadError
+from utils.file_operations import is_network_path
+from utils.performance import performance_monitor
+from utils.paths import get_cache_dir, get_old_cache_dir
+from utils.cache_meta import SimpleCacheMeta
+from utils.cache_index import CacheIndex
 
 
 class HighPerformanceImageLoader(QThread):
@@ -1613,6 +1613,16 @@ class HighPerformanceImageLoader(QThread):
             self.logger.error(f"[并行加载] 提交加载任务失败，重置并发计数器: {e}")
             raise ImageLoadError(f"提交加载任务失败: {e}")
 
+    def preload_images(self, paths):
+        """批量预加载多张图片
+
+        Args:
+            paths: 图片路径列表（字符串或Path对象）
+        """
+        for path in paths:
+            # 非优先级加载，用于预缓存
+            self.load_image(str(path), priority=False)
+
     def _wrapped_task(self, image_path, priority, env_type="未知"):
         """阶段2.1：统一任务包装器，负责令牌获取、running计数和令牌释放
 
@@ -1957,7 +1967,8 @@ class HighPerformanceImageLoader(QThread):
             image_data = result.get('image_data')
             if self._is_valid_pixmap(image_data):
                 # 发射信号，将图像数据传递给主线程
-                self.image_loaded.emit(image_path, image_data)
+                # 确保image_path是字符串类型
+                self.image_loaded.emit(str(image_path), image_data)
             elif 'error' in result:
                 self.logger.error(f"图像加载错误: {result['error']}")
 
@@ -2123,7 +2134,32 @@ class HighPerformanceImageLoader(QThread):
                 # 标记为最近使用
                 self.cache.move_to_end(cache_key)
             return pixmap
-    
+
+    def is_cached(self, image_path) -> bool:
+        """检查图片是否在内存缓存中
+
+        Args:
+            image_path: 图片路径（字符串或Path对象）
+
+        Returns:
+            bool: 是否在缓存中
+        """
+        cache_key = self._get_cache_key(str(image_path))
+        with self.concurrent_lock:
+            return cache_key in self.cache
+
+    def get_from_cache(self, image_path):
+        """从缓存获取图片数据（公开接口）
+
+        Args:
+            image_path: 图片路径（字符串或Path对象）
+
+        Returns:
+            缓存的图片数据，如果不存在返回None
+        """
+        cache_key = self._get_cache_key(str(image_path))
+        return self._get_from_cache(cache_key)
+
     def get_cache_info(self):
         """获取缓存信息"""
         with self.concurrent_lock:

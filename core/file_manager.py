@@ -10,9 +10,9 @@ import shutil
 import threading
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
-from ..utils.exceptions import FileOperationError, SyncError
-from ..utils.file_operations import retry_file_operation, is_network_path
-from ..utils.performance import performance_monitor
+from utils.exceptions import FileOperationError, SyncError
+from utils.file_operations import retry_file_operation, is_network_path
+from utils.performance import performance_monitor
 
 
 class FileSyncThread(QThread):
