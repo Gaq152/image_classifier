@@ -314,12 +314,17 @@ class AddCategoriesDialog(QDialog):
                         errors.append(f'创建类别 "{chinese_name}" 失败: {str(e)}')
                         continue
 
-            # 显示跳过的类别提示（已存在或已忽略）
+            # 显示跳过的类别提示（已存在或已忽略）- 显示在主窗口上
             if skipped_categories:
                 skipped_text = ', '.join(skipped_categories[:5])
                 if len(skipped_categories) > 5:
                     skipped_text += f' 等{len(skipped_categories)}个'
-                toast_warning(self, f'类别 {skipped_text} 已存在或已忽略，已跳过')
+                # 在主窗口上显示toast，避免对话框关闭后toast消失
+                main_window = self.parent()
+                if main_window:
+                    toast_warning(main_window, f'类别 {skipped_text} 已存在或已忽略，已跳过')
+                else:
+                    toast_warning(self, f'类别 {skipped_text} 已存在或已忽略，已跳过')
 
             # 如果有错误但也有成功添加的类别
             if errors and added:
