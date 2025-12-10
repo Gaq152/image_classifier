@@ -10,27 +10,27 @@
 - UIHooks: UI 回调接口，Manager 通过此接口触发 UI 更新
 - ImageLoader: 图片加载器接口
 
+修改说明（2025-12-09）：
+- 将ABC改为Protocol，使用结构子类型（structural subtyping）
+- 主窗口不需要显式继承接口，只需实现相同签名的方法/属性
+- 避免ABC抽象属性与实例变量冲突的问题
+
 使用方式：
-    # 主窗口实现接口
-    class ImageClassifier(QMainWindow, StateView, StateMutator, UIHooks):
+    # 主窗口只需实现接口定义的方法，无需继承
+    class ImageClassifier(QMainWindow):
         def __init__(self):
-            self.session_state = SessionState()
-            self.view_state = ViewState()
+            self.current_dir = None  # 实例变量满足StateView.current_dir
+            ...
 
-            # 注入接口实现给 Manager
-            self.nav_manager = ImageNavigationManager(
-                state=self,      # 主窗口实现 StateView
-                mutator=self,    # 主窗口实现 StateMutator
-                ui=self          # 主窗口实现 UIHooks
-            )
-
-        # 实现接口方法
-        @property
-        def current_dir(self) -> Path:
-            return self.session_state.current_dir
+        # 注入给 Manager（通过鸭子类型）
+        self.nav_manager = ImageNavigationManager(
+            state=self,      # 主窗口实现 StateView 的方法签名
+            mutator=self,    # 主窗口实现 StateMutator 的方法签名
+            ui=self          # 主窗口实现 UIHooks 的方法签名
+        )
 """
 
-from abc import ABC, abstractmethod
+from typing import Protocol, runtime_checkable
 from pathlib import Path
 from typing import List, Dict, Set, Optional, Any, Union, TYPE_CHECKING
 
@@ -42,7 +42,8 @@ if TYPE_CHECKING:
     import numpy as np
 
 
-class StateView(ABC):
+@runtime_checkable
+class StateView(Protocol):
     """
     只读状态视图接口
 
@@ -53,13 +54,13 @@ class StateView(ABC):
     # ========== 路径相关 ==========
 
     @property
-    @abstractmethod
+
     def current_dir(self) -> Optional[Path]:
         """当前工作目录"""
         pass
 
     @property
-    @abstractmethod
+
     def base_dir(self) -> Optional[Path]:
         """基础目录（current_dir 的父目录）"""
         pass
@@ -67,25 +68,25 @@ class StateView(ABC):
     # ========== 图片相关 ==========
 
     @property
-    @abstractmethod
+
     def image_files(self) -> List[Path]:
         """当前图片文件列表（可能经过过滤）"""
         pass
 
     @property
-    @abstractmethod
+
     def all_image_files(self) -> List[Path]:
         """所有图片文件列表（未过滤）"""
         pass
 
     @property
-    @abstractmethod
+
     def current_index(self) -> int:
         """当前图片索引"""
         pass
 
     @property
-    @abstractmethod
+
     def total_images(self) -> int:
         """图片总数"""
         pass
@@ -93,7 +94,7 @@ class StateView(ABC):
     # ========== 分类状态 ==========
 
     @property
-    @abstractmethod
+
     def classified_images(self) -> Dict[str, Union[str, List[str]]]:
         """
         已分类图片映射
@@ -104,19 +105,19 @@ class StateView(ABC):
         pass
 
     @property
-    @abstractmethod
+
     def removed_images(self) -> Set[str]:
         """已移除图片集合"""
         pass
 
     @property
-    @abstractmethod
+
     def categories(self) -> Set[str]:
         """类别集合"""
         pass
 
     @property
-    @abstractmethod
+
     def ordered_categories(self) -> List[str]:
         """排序后的类别列表"""
         pass
@@ -124,13 +125,13 @@ class StateView(ABC):
     # ========== 模式状态 ==========
 
     @property
-    @abstractmethod
+
     def is_copy_mode(self) -> bool:
         """是否为复制模式"""
         pass
 
     @property
-    @abstractmethod
+
     def is_multi_category(self) -> bool:
         """是否为多分类模式"""
         pass
@@ -138,19 +139,19 @@ class StateView(ABC):
     # ========== 过滤状态 ==========
 
     @property
-    @abstractmethod
+
     def filter_unclassified(self) -> bool:
         """是否过滤未分类图片"""
         pass
 
     @property
-    @abstractmethod
+
     def filter_classified(self) -> bool:
         """是否过滤已分类图片"""
         pass
 
     @property
-    @abstractmethod
+
     def filter_removed(self) -> bool:
         """是否过滤已移除图片"""
         pass
@@ -158,13 +159,13 @@ class StateView(ABC):
     # ========== 配置相关 ==========
 
     @property
-    @abstractmethod
+
     def app_config(self) -> "AppConfig":
         """应用配置对象"""
         pass
 
     @property
-    @abstractmethod
+
     def config(self) -> "Config":
         """分类配置对象"""
         pass
@@ -172,25 +173,26 @@ class StateView(ABC):
     # ========== 网络状态 ==========
 
     @property
-    @abstractmethod
+
     def is_network_path(self) -> bool:
         """当前是否为网络路径"""
         pass
 
     # ========== 辅助方法 ==========
 
-    @abstractmethod
+
     def get_real_file_path(self, file_path: Path) -> Path:
         """获取文件的真实路径（处理分类后的路径变化）"""
         pass
 
-    @abstractmethod
+
     def get_image_at_index(self, index: int) -> Optional[Path]:
         """获取指定索引的图片路径"""
         pass
 
 
-class StateMutator(ABC):
+@runtime_checkable
+class StateMutator(Protocol):
     """
     状态修改接口
 
@@ -198,12 +200,12 @@ class StateMutator(ABC):
     与 StateView 分离，便于控制写权限。
     """
 
-    @abstractmethod
+
     def set_current_index(self, index: int) -> None:
         """设置当前图片索引"""
         pass
 
-    @abstractmethod
+
     def set_classified_image(self, path: str, category: Union[str, List[str]]) -> None:
         """
         设置图片的分类
@@ -214,179 +216,194 @@ class StateMutator(ABC):
         """
         pass
 
-    @abstractmethod
+
     def remove_classified_image(self, path: str) -> None:
         """移除图片的分类记录"""
         pass
 
-    @abstractmethod
+
     def add_removed_image(self, path: str) -> None:
         """添加到已移除列表"""
         pass
 
-    @abstractmethod
+
     def remove_from_removed(self, path: str) -> None:
         """从已移除列表中移除"""
         pass
 
-    @abstractmethod
+
     def set_classified_images(self, images: Dict[str, Union[str, List[str]]]) -> None:
         """设置已分类图片映射"""
         pass
 
-    @abstractmethod
+
     def set_removed_images(self, images: Set[str]) -> None:
         """设置已移除图片集合"""
         pass
 
-    @abstractmethod
+
     def set_copy_mode(self, is_copy: bool) -> None:
         """设置复制/移动模式"""
         pass
 
-    @abstractmethod
+
     def set_multi_category(self, is_multi: bool) -> None:
         """设置单/多分类模式"""
         pass
 
     # ========== 路径与图片列表 ==========
 
-    @abstractmethod
+
     def set_current_dir(self, dir_path: Optional[Path]) -> None:
         """设置当前工作目录"""
         pass
 
-    @abstractmethod
+
     def set_image_files(self, files: List[Path]) -> None:
         """设置当前图片文件列表（可能经过过滤）"""
         pass
 
-    @abstractmethod
+
     def set_all_image_files(self, files: List[Path]) -> None:
         """设置所有图片文件列表（未过滤）"""
         pass
 
     # ========== 类别管理 ==========
 
-    @abstractmethod
+
     def set_categories(self, categories: Set[str]) -> None:
         """设置类别集合"""
         pass
 
-    @abstractmethod
+
     def set_ordered_categories(self, categories: List[str]) -> None:
         """设置排序后的类别列表"""
         pass
 
-    @abstractmethod
+
     def add_category(self, category: str) -> None:
         """添加类别"""
         pass
 
-    @abstractmethod
+
     def remove_category(self, category: str) -> None:
         """移除类别"""
         pass
 
     # ========== 临时状态 ==========
 
-    @abstractmethod
+
     def set_last_operation_category(self, category: Optional[str]) -> None:
         """设置最后一次操作的类别"""
         pass
 
-    @abstractmethod
+
     def set_current_category_index(self, index: int) -> None:
         """设置当前选中的类别索引"""
         pass
 
-    @abstractmethod
+
     def set_selected_category(self, category: Optional[str]) -> None:
         """设置当前选中的类别名"""
         pass
 
     # ========== ViewState: 过滤状态 ==========
 
-    @abstractmethod
+
     def set_filter_unclassified(self, value: bool) -> None:
         """设置是否过滤未分类图片"""
         pass
 
-    @abstractmethod
+
     def set_filter_classified(self, value: bool) -> None:
         """设置是否过滤已分类图片"""
         pass
 
-    @abstractmethod
+
     def set_filter_removed(self, value: bool) -> None:
         """设置是否过滤已移除图片"""
         pass
 
     # ========== ViewState: 排序状态 ==========
 
-    @abstractmethod
+
     def set_sort_mode(self, mode: str) -> None:
         """设置排序模式：'name'（名称）, 'time'（时间）, 'size'（大小）"""
         pass
 
-    @abstractmethod
+
     def set_sort_ascending(self, value: bool) -> None:
         """设置是否升序排序"""
         pass
 
-    @abstractmethod
+
     def set_category_sort_mode(self, mode: str) -> None:
         """设置类别排序模式：'name'（名称）, 'count'（数量）, 'shortcut'（快捷键）"""
         pass
 
-    @abstractmethod
+
     def set_category_sort_ascending(self, value: bool) -> None:
         """设置类别是否升序排序"""
         pass
 
     # ========== ViewState: 显示状态 ==========
 
-    @abstractmethod
+
     def set_show_image_list(self, value: bool) -> None:
         """设置是否显示图片列表"""
         pass
 
-    @abstractmethod
+
     def set_show_category_panel(self, value: bool) -> None:
         """设置是否显示类别面板"""
         pass
 
-    @abstractmethod
+
     def set_show_status_bar(self, value: bool) -> None:
         """设置是否显示状态栏"""
         pass
 
     # ========== ViewState: 预览状态 ==========
 
-    @abstractmethod
+
     def set_preview_scale(self, scale: float) -> None:
         """设置预览图缩放比例"""
         pass
 
-    @abstractmethod
+
     def set_fit_to_window(self, value: bool) -> None:
         """设置是否适应窗口大小"""
         pass
 
     # ========== ViewState: 搜索状态 ==========
 
-    @abstractmethod
+
     def set_search_text(self, text: str) -> None:
         """设置搜索文本"""
         pass
 
-    @abstractmethod
+
     def set_search_active(self, value: bool) -> None:
         """设置搜索是否激活"""
         pass
 
+    # ========== 图片加载请求跟踪 ==========
 
-class UIHooks(ABC):
+    def set_current_requested_image(self, path: str) -> None:
+        """
+        设置当前请求加载的图片路径
+
+        用于异步加载回调时验证图片是否仍是当前请求的图片，
+        避免快速翻页时显示错误的图片。
+
+        Args:
+            path: 规范化后的图片路径（使用 Path.resolve() 后的字符串）
+        """
+        pass
+
+
+@runtime_checkable
+class UIHooks(Protocol):
     """
     UI 回调接口
 
@@ -396,19 +413,19 @@ class UIHooks(ABC):
 
     # ========== 状态保存 ==========
 
-    @abstractmethod
+
     def save_state(self) -> None:
         """异步保存状态"""
         pass
 
-    @abstractmethod
+
     def save_state_sync(self) -> None:
         """同步保存状态"""
         pass
 
     # ========== UI 更新调度 ==========
 
-    @abstractmethod
+
     def schedule_ui_update(self, *components: str) -> None:
         """
         调度 UI 更新（节流防抖）
@@ -419,7 +436,7 @@ class UIHooks(ABC):
         """
         pass
 
-    @abstractmethod
+
     def update_window_title(self, path: Optional[Path] = None) -> None:
         """
         更新窗口标题
@@ -429,24 +446,24 @@ class UIHooks(ABC):
         """
         pass
 
-    @abstractmethod
+
     def update_status_bar(self, message: str) -> None:
         """更新状态栏"""
         pass
 
     # ========== 图片显示 ==========
 
-    @abstractmethod
+
     def show_current_image(self) -> None:
         """显示当前图片"""
         pass
 
-    @abstractmethod
+
     def show_loading_placeholder(self) -> None:
         """显示加载占位符"""
         pass
 
-    @abstractmethod
+
     def display_image(self, image_data: Union["QPixmap", "np.ndarray"], path: Path) -> None:
         """
         显示指定图片
@@ -459,43 +476,75 @@ class UIHooks(ABC):
 
     # ========== 列表更新 ==========
 
-    @abstractmethod
+
     def sync_image_list_selection(self) -> None:
         """同步图片列表选中状态"""
         pass
 
-    @abstractmethod
+
     def refresh_image_list(self) -> None:
         """刷新图片列表"""
         pass
 
     # ========== 类别相关 ==========
 
-    @abstractmethod
+
     def update_category_buttons(self) -> None:
         """更新类别按钮"""
         pass
 
-    @abstractmethod
+
     def refresh_category_buttons_style(self) -> None:
         """刷新类别按钮样式"""
         pass
 
-    @abstractmethod
+
     def update_category_selection(self) -> None:
         """更新类别选中状态"""
         pass
 
+    # ========== 类别按钮（供 CategoryManager 调用） ==========
+
+
+    def get_category_button_layout(self):
+        """获取类别按钮所在的布局（如 QVBoxLayout）"""
+        pass
+
+
+    def clear_category_buttons(self) -> None:
+        """清空所有类别按钮并重置布局"""
+        pass
+
+
+    def create_category_button(self, name: str, shortcut: Optional[str], count: int):
+        """创建单个类别按钮并返回按钮实例"""
+        pass
+
+
+    def set_category_button_count(self, name: str, count: int) -> None:
+        """更新指定类别按钮的计数显示"""
+        pass
+
+
+    def ensure_category_visible(self, index: int) -> None:
+        """滚动使指定索引的类别按钮可见"""
+        pass
+
+
+    def highlight_category_button(self, index: int) -> None:
+        """高亮指定索引的类别按钮"""
+        pass
+
     # ========== 过滤相关 ==========
 
-    @abstractmethod
+
     def apply_image_filter(self) -> None:
         """应用图片过滤"""
         pass
 
     # ========== 通知提示 ==========
 
-    @abstractmethod
+
     def show_toast(self, toast_type: str, message: str) -> None:
         """
         显示 Toast 通知
@@ -506,47 +555,48 @@ class UIHooks(ABC):
         """
         pass
 
-    @abstractmethod
+
     def show_message_box(self, title: str, message: str, msg_type: str = 'info') -> None:
         """显示消息框"""
         pass
 
-    @abstractmethod
+
     def show_question(self, title: str, message: str) -> bool:
         """显示确认对话框，返回是否确认"""
         pass
 
     # ========== 进度对话框 ==========
 
-    @abstractmethod
+
     def show_progress_dialog(self, title: str, message: str, maximum: int = 100) -> "QProgressDialog":
         """显示进度对话框，返回对话框对象"""
         pass
 
 
-class ImageLoader(ABC):
+@runtime_checkable
+class ImageLoader(Protocol):
     """
     图片加载器接口
 
     Manager 通过此接口请求图片加载，而不是直接访问加载器。
     """
 
-    @abstractmethod
+
     def load_image(self, path: Path, priority: bool = False) -> None:
         """请求加载图片"""
         pass
 
-    @abstractmethod
+
     def preload_images(self, paths: List[Path]) -> None:
         """预加载多张图片"""
         pass
 
-    @abstractmethod
+
     def is_cached(self, path: Path) -> bool:
         """检查图片是否已缓存"""
         pass
 
-    @abstractmethod
+
     def get_from_cache(self, path: Path) -> Optional["np.ndarray"]:
         """
         从缓存获取图片
@@ -556,9 +606,34 @@ class ImageLoader(ABC):
         """
         pass
 
-    @abstractmethod
+
     def clear_cache(self) -> None:
         """清理缓存"""
+        pass
+
+
+@runtime_checkable
+class ImageNavigator(Protocol):
+    """
+    图片导航器接口
+
+    FileOperationManager 通过此接口请求导航操作，避免直接依赖 ImageNavigationManager。
+    这样可以避免循环依赖，保持职责单一。
+    """
+
+
+    def select_after_removal(self, original_index: int) -> None:
+        """
+        删除图片后智能选择下一张可见图片
+
+        在过滤模式下删除图片后，根据原始索引智能选择最近的可见图片：
+        1. 优先选择原始索引之后的第一张可见图片
+        2. 如果后面没有了，选择原始索引之前的最后一张可见图片
+        3. 如果都没有，保持在空态
+
+        Args:
+            original_index: 删除前的图片索引
+        """
         pass
 
 
@@ -568,3 +643,4 @@ StateViewType = StateView
 StateMutatorType = StateMutator
 UIHooksType = UIHooks
 ImageLoaderType = ImageLoader
+ImageNavigatorType = ImageNavigator
