@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ...utils.file_operations import normalize_folder_name, retry_file_operation
+from utils.file_operations import normalize_folder_name, retry_file_operation
 from ..components.styles import ButtonStyles, DialogStyles
 from ..components.styles.theme import default_theme
 from ..components.toast import toast_warning, toast_error

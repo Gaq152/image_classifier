@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import (QPushButton, QLabel, QHBoxLayout, QDialog, QVBoxLay
                             QLineEdit, QMenu, QMessageBox)
 from PyQt6.QtCore import Qt
 
-from ....utils.file_operations import normalize_folder_name, retry_file_operation
-from ....utils.exceptions import FileOperationError
+from utils.file_operations import normalize_folder_name, retry_file_operation
+from utils.exceptions import FileOperationError
 from ...dialogs import CategoryShortcutDialog
 from ..toast import toast_warning, toast_error, toast_floating
 from ..styles import apply_category_button_style, WidgetStyles, ButtonStyles

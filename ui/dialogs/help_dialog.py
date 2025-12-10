@@ -14,7 +14,7 @@ from PyQt6.QtGui import QDesktopServices, QIcon
 
 from ..components.toast import toast_success, toast_error
 from ..components.styles.theme import default_theme
-from ..._version_ import CONTACT_INFO, VERSION_HISTORY, get_about_info
+from _version_ import CONTACT_INFO, VERSION_HISTORY, get_about_info
 
 class TabbedHelpDialog(QDialog):
     """带标签页的帮助对话框"""

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QLabel
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
 from enum import Enum
-from ....utils.app_config import get_app_config
+from utils.app_config import get_app_config
 
 
 class ToastType(Enum):

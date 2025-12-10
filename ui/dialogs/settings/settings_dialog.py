@@ -14,10 +14,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QKeySequence
 
-from ....utils.app_config import get_app_config
-from ....utils.paths import get_cache_dir, get_update_dir
-from ...._version_ import compare_version, __version__, get_manifest_url
-from ....core.update_utils import fetch_manifest
+from utils.app_config import get_app_config
+from utils.paths import get_cache_dir, get_update_dir
+from _version_ import compare_version, __version__, get_manifest_url
+from core.update_utils import fetch_manifest
 from ...components.toast import toast_info, toast_success, toast_warning, toast_error
 from ...components.styles.theme import default_theme
 from ...components.styles import ButtonStyles, DialogStyles
