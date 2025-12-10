@@ -31,6 +31,7 @@ class AddCategoriesDialog(QDialog):
         super().__init__(parent)
         self.existing_categories = existing_categories
         self.added_categories = set()
+        self.skipped_categories = []  # 记录跳过的类别（已存在或已忽略）
         self.logger = logging.getLogger(__name__)
         self._centered = False  # 标记是否已居中
         self.initUI()
@@ -267,7 +268,7 @@ class AddCategoriesDialog(QDialog):
             # 分割文本并处理
             added = False
             errors = []  # 记录错误信息
-            skipped_categories = []  # 记录跳过的类别（已存在或已忽略）
+            self.skipped_categories = []  # 重置跳过的类别列表
 
             for line in text.split('\n'):
                 # 同时支持中英文逗号
@@ -286,14 +287,14 @@ class AddCategoriesDialog(QDialog):
 
                     # 检查是否已存在
                     if chinese_name in self.existing_categories:
-                        if chinese_name not in skipped_categories:
-                            skipped_categories.append(chinese_name)
+                        if chinese_name not in self.skipped_categories:
+                            self.skipped_categories.append(chinese_name)
                         continue
 
                     # 检查是否在忽略列表中
                     if self._is_category_ignored(chinese_name):
-                        if chinese_name not in skipped_categories:
-                            skipped_categories.append(chinese_name)
+                        if chinese_name not in self.skipped_categories:
+                            self.skipped_categories.append(chinese_name)
                         continue
 
                     try:
@@ -314,17 +315,7 @@ class AddCategoriesDialog(QDialog):
                         errors.append(f'创建类别 "{chinese_name}" 失败: {str(e)}')
                         continue
 
-            # 显示跳过的类别提示（已存在或已忽略）- 显示在主窗口上
-            if skipped_categories:
-                skipped_text = ', '.join(skipped_categories[:5])
-                if len(skipped_categories) > 5:
-                    skipped_text += f' 等{len(skipped_categories)}个'
-                # 在主窗口上显示toast，避免对话框关闭后toast消失
-                main_window = self.parent()
-                if main_window:
-                    toast_warning(main_window, f'类别 {skipped_text} 已存在或已忽略，已跳过')
-                else:
-                    toast_warning(self, f'类别 {skipped_text} 已存在或已忽略，已跳过')
+            # 跳过的类别信息存储在 self.skipped_categories，由主窗口统一显示 toast
 
             # 如果有错误但也有成功添加的类别
             if errors and added:

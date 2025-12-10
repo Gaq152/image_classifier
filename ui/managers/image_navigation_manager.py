@@ -119,6 +119,16 @@ class ImageNavigationManager(QObject):
         self._scanner.initial_batch_ready.connect(self.on_initial_batch_ready)
         self._scanner.scan_progress.connect(self._on_scan_progress)
 
+    def set_ui_components(self, image_list, image_list_model):
+        """设置UI组件引用（在UI初始化后调用）
+
+        Args:
+            image_list: QListView 图片列表控件
+            image_list_model: ImageListModel 图片列表数据模型
+        """
+        self._image_list = image_list
+        self._image_list_model = image_list_model
+
     # ========== 图片加载 ==========
 
     def load_images(self):
@@ -260,7 +270,10 @@ class ImageNavigationManager(QObject):
                 self._update_category_selection(img_path)
 
             # 记录当前请求的图片路径（用于回调时判断）
-            self._current_requested_image = str(Path(real_path).resolve())
+            resolved_path = str(Path(real_path).resolve())
+            self._current_requested_image = resolved_path
+            # 同时通过接口设置主窗口的_current_requested_image，确保on_image_loaded回调能正确判断
+            self._mutator.set_current_requested_image(resolved_path)
 
             # 如果缓存命中，直接显示；否则显示占位符
             if is_cached:
@@ -571,6 +584,72 @@ class ImageNavigationManager(QObject):
 
         except Exception as e:
             self._logger.debug(f"同步图片列表选中状态失败: {e}")
+
+    # ========== 删除后导航 ==========
+
+    def select_after_removal(self, original_index: int) -> None:
+        """
+        删除图片后智能选择下一张可见图片
+
+        在过滤模式下删除图片后，根据原始索引智能选择最近的可见图片：
+        1. 优先选择原始索引之后的第一张可见图片
+        2. 如果后面没有了，选择原始索引之前的最后一张可见图片
+        3. 如果都没有，显示toast提示
+
+        Args:
+            original_index: 删除前的图片索引
+        """
+        try:
+            visible_indices = self._get_visible_indices()
+
+            if visible_indices is not None:
+                # 筛选模式：按"后 -> 前"优先级寻找最近的可见图片
+                if not visible_indices:
+                    self._mutator.set_current_index(-1)
+                    self._ui.show_toast('info', "当前没有可显示的图片")
+                    self.sync_image_list_selection()
+                    return
+
+                # 检查原始索引是否仍在可见列表中
+                if original_index in visible_indices:
+                    target_index = original_index
+                else:
+                    # 先找原始索引之后的第一张可见图片
+                    next_visible = next((i for i in visible_indices if i > original_index), None)
+                    if next_visible is None:
+                        # 如果后面没有，找原始索引之前的最后一张可见图片
+                        next_visible = next((i for i in reversed(visible_indices) if i < original_index), None)
+
+                    if next_visible is None:
+                        # 没有可见图片了
+                        self._mutator.set_current_index(-1)
+                        self._ui.show_toast('info', "当前没有可显示的图片")
+                        self.sync_image_list_selection()
+                        return
+
+                    target_index = next_visible
+            else:
+                # 无筛选模式：使用剩余列表的就近索引
+                image_files = self._state.image_files
+                if not image_files:
+                    self._mutator.set_current_index(-1)
+                    self._ui.show_toast('info', "当前没有可显示的图片")
+                    self.sync_image_list_selection()
+                    return
+                # 如果原始索引超出范围，调整到最后一张
+                target_index = min(max(original_index, 0), len(image_files) - 1)
+
+            # 更新索引并发射信号
+            self._mutator.set_current_index(target_index)
+            if target_index >= 0:
+                self.image_changed.emit(target_index)
+
+            # 同步列表选中并刷新当前图片
+            self.sync_image_list_selection()
+            self.show_current_image()
+
+        except Exception as e:
+            self._logger.debug(f"删除后导航失败: {e}")
 
     # ========== 预加载 ==========
 
