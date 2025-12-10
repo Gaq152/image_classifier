@@ -1,26 +1,22 @@
 """
 状态管理模块
 
-包含状态数据类和接口定义。
+包含状态接口定义（Protocol），供 Manager 依赖注入使用。
 
-设计理念（Codex Review，2025-12-04）：
-- 数据类（SessionState, ViewState）：存储状态数据
-- 接口（StateView, StateMutator, UIHooks, ImageLoader）：Manager 依赖注入，消除 Parent Reaching
-- 主窗口持有数据类，实现接口，注入给 Manager
+设计理念（决策 Q1 - 废弃数据类）：
+- ❌ 数据类（SessionState, ViewState）：已废弃
+- ✅ 接口（StateView, StateMutator, UIHooks, ImageLoader, ImageNavigator）：保留供 Manager 使用
+- 主窗口使用裸属性管理状态，实现 Protocol 接口，注入给 Manager
 
 使用方式：
-    from ui.main_window.state import SessionState, ViewState
-    from ui.main_window.state.interfaces import StateView, UIHooks
+    from ui._main_window.state.interfaces import StateView, UIHooks
 
     class ImageClassifier(QMainWindow, StateView, UIHooks):
         def __init__(self):
-            self.session_state = SessionState()
-            self.view_state = ViewState()
+            # 直接使用裸属性，不使用数据类
+            self.current_index = 0
+            self.classified_images = {}
 """
-
-# 数据类
-from .session_state import SessionState
-from .view_state import ViewState
 
 # 接口
 from .interfaces import (
@@ -28,24 +24,25 @@ from .interfaces import (
     StateMutator,
     UIHooks,
     ImageLoader,
+    ImageNavigator,
     StateViewType,
     StateMutatorType,
     UIHooksType,
     ImageLoaderType,
+    ImageNavigatorType,
 )
 
 __all__ = [
-    # 数据类
-    'SessionState',
-    'ViewState',
     # 接口
     'StateView',
     'StateMutator',
     'UIHooks',
     'ImageLoader',
+    'ImageNavigator',
     # 类型别名
     'StateViewType',
     'StateMutatorType',
     'UIHooksType',
     'ImageLoaderType',
+    'ImageNavigatorType',
 ]
