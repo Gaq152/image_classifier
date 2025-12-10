@@ -3,6 +3,8 @@
 import logging
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -47,7 +49,7 @@ class AddCategoriesDialog(QDialog):
             layout.setSpacing(15)
 
             # 添加说明标签
-            tip_label = QLabel('请输入类别名称，多个类别用逗号或换行分隔\n已存在的类别会被自动忽略')
+            tip_label = QLabel('请输入类别名称，多个类别用逗号或换行分隔\n已存在和已忽略的类别会被自动跳过')
             tip_label.setStyleSheet(f'QLabel {{ color: {c.TEXT_SECONDARY}; }}')
             layout.addWidget(tip_label)
 
@@ -180,6 +182,13 @@ class AddCategoriesDialog(QDialog):
         except Exception as e:
             self.logger.error(f"初始化添加类别对话框UI失败: {e}")
 
+    def _is_category_ignored(self, category_name: str) -> bool:
+        """检查类别是否在忽略列表中"""
+        parent = self.parent()
+        if parent and hasattr(parent, 'config') and parent.config:
+            return parent.config.is_category_ignored(category_name)
+        return False
+
     def update_preview(self):
         """更新预览列表"""
         try:
@@ -190,6 +199,8 @@ class AddCategoriesDialog(QDialog):
 
             # 分割文本并处理
             categories = set()
+            ignored_categories = []  # 记录被忽略的类别
+            existing_categories = []  # 记录已存在的类别
             for line in text.split('\n'):
                 # 同时支持中英文逗号
                 parts = []
@@ -197,10 +208,47 @@ class AddCategoriesDialog(QDialog):
                     parts.append(part)
                 for cat in parts:
                     cat = normalize_folder_name(cat.strip())  # 添加规范化处理
-                    if cat and cat not in self.existing_categories and cat not in categories:
+                    if not cat:
+                        continue
+                    # 检查是否在忽略列表中
+                    if self._is_category_ignored(cat):
+                        if cat not in ignored_categories:
+                            ignored_categories.append(cat)
+                        continue
+                    # 检查是否已存在
+                    if cat in self.existing_categories:
+                        if cat not in existing_categories:
+                            existing_categories.append(cat)
+                        continue
+                    if cat not in categories:
                         categories.add(cat)
                         item = QListWidgetItem(cat)
                         self.preview_list.addItem(item)
+
+            # 在预览列表顶部显示警告提示
+            c = default_theme.colors
+            warning_position = 0
+
+            # 显示已存在的类别警告
+            if existing_categories:
+                existing_text = ', '.join(existing_categories[:3])
+                if len(existing_categories) > 3:
+                    existing_text += f' 等{len(existing_categories)}个'
+                hint_item = QListWidgetItem(f'⚠️ 已存在: {existing_text}')
+                hint_item.setForeground(QColor(c.WARNING))
+                hint_item.setFlags(hint_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.preview_list.insertItem(warning_position, hint_item)
+                warning_position += 1
+
+            # 显示被忽略的类别警告
+            if ignored_categories:
+                ignored_text = ', '.join(ignored_categories[:3])
+                if len(ignored_categories) > 3:
+                    ignored_text += f' 等{len(ignored_categories)}个'
+                hint_item = QListWidgetItem(f'⚠️ 已忽略: {ignored_text}')
+                hint_item.setForeground(QColor(c.WARNING))
+                hint_item.setFlags(hint_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.preview_list.insertItem(warning_position, hint_item)
         except Exception as e:
             self.logger.error(f"更新预览失败: {e}")
 
@@ -219,6 +267,7 @@ class AddCategoriesDialog(QDialog):
             # 分割文本并处理
             added = False
             errors = []  # 记录错误信息
+            skipped_categories = []  # 记录跳过的类别（已存在或已忽略）
 
             for line in text.split('\n'):
                 # 同时支持中英文逗号
@@ -235,8 +284,16 @@ class AddCategoriesDialog(QDialog):
                         errors.append(f'类别名称 "{chinese_name}" 超过50个字符')
                         continue
 
+                    # 检查是否已存在
                     if chinese_name in self.existing_categories:
-                        toast_warning(self, f'类别 "{chinese_name}" 已存在，将跳过')
+                        if chinese_name not in skipped_categories:
+                            skipped_categories.append(chinese_name)
+                        continue
+
+                    # 检查是否在忽略列表中
+                    if self._is_category_ignored(chinese_name):
+                        if chinese_name not in skipped_categories:
+                            skipped_categories.append(chinese_name)
                         continue
 
                     try:
@@ -256,6 +313,13 @@ class AddCategoriesDialog(QDialog):
                     except Exception as e:
                         errors.append(f'创建类别 "{chinese_name}" 失败: {str(e)}')
                         continue
+
+            # 显示跳过的类别提示（已存在或已忽略）
+            if skipped_categories:
+                skipped_text = ', '.join(skipped_categories[:5])
+                if len(skipped_categories) > 5:
+                    skipped_text += f' 等{len(skipped_categories)}个'
+                toast_warning(self, f'类别 {skipped_text} 已存在或已忽略，已跳过')
 
             # 如果有错误但也有成功添加的类别
             if errors and added:
