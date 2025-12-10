@@ -17,6 +17,7 @@ import hashlib
 import traceback
 import subprocess
 from pathlib import Path
+from typing import Optional, List, Dict, Set, Union
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
@@ -41,18 +42,25 @@ from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
                      TabbedHelpDialog, ProgressDialog, SettingsDialog, ManageIgnoredCategoriesDialog,
                      UpdateCheckerThread)
 from .managers import FileStateManager
+from .managers.image_navigation_manager import ImageNavigationManager
+from .managers.file_operation_manager import FileOperationManager as UIFileOperationManager
+from .managers.category_manager import CategoryManager
+from ._main_window.state.interfaces import (
+    StateView, StateMutator, UIHooks, ImageLoader as ImageLoaderInterface,
+    ImageNavigator
+)
 from .update_dialog import UpdateInfoDialog
-from ..core.config import Config
-from ..utils.app_config import get_app_config
-from ..core.scanner import FileScannerThread
-from ..core.image_loader import HighPerformanceImageLoader
-from ..utils.exceptions import ImageClassifierError, FileOperationError, ConfigError
-from ..utils.file_operations import normalize_folder_name, retry_file_operation, is_network_path
-from ..core.file_manager import FileOperationManager
-from ..core.update_utils import fetch_manifest, launch_self_update
-from ..utils.performance import performance_monitor
-from ..utils.paths import get_update_dir
-from .._version_ import __version__, get_manifest_url, compare_version
+from core.config import Config
+from utils.app_config import get_app_config
+from core.scanner import FileScannerThread
+from core.image_loader import HighPerformanceImageLoader
+from utils.exceptions import ImageClassifierError, FileOperationError, ConfigError
+from utils.file_operations import normalize_folder_name, retry_file_operation, is_network_path
+from core.file_manager import FileOperationManager
+from core.update_utils import fetch_manifest, launch_self_update
+from utils.performance import performance_monitor
+from utils.paths import get_update_dir
+from _version_ import __version__, get_manifest_url, compare_version
 
 
 class DisabledButtonEventFilter(QObject):
@@ -89,7 +97,12 @@ class DisabledButtonEventFilter(QObject):
 
 
 class ImageClassifier(QMainWindow):
-    """主图像分类器窗口"""
+    """
+    主图像分类器窗口
+
+    通过实例变量和方法实现StateView/StateMutator/UIHooks/ImageLoader/ImageNavigator协议，
+    使用鸭子类型（Protocol）而非显式继承。
+    """
     
     # 信号定义
     file_moved = pyqtSignal(str, str)  # 文件移动信号(源路径, 目标路径)
@@ -112,13 +125,20 @@ class ImageClassifier(QMainWindow):
         
         # 初始化核心组件
         self.init_core_components()
-        
+
         # 初始化状态变量
         self.init_state_variables()
-        
+
+        # 初始化Manager（在状态变量之后）
+        self._init_managers()
+
         # 创建用户界面
         self.init_ui()
-        
+
+        # UI初始化后，更新Manager的UI组件引用
+        if self._nav_manager and hasattr(self, 'image_list') and hasattr(self, 'image_list_model'):
+            self._nav_manager.set_ui_components(self.image_list, self.image_list_model)
+
         # 设置快捷键
         self.setup_shortcuts()
 
@@ -221,13 +241,106 @@ class ImageClassifier(QMainWindow):
 
             # 线程池（用于文件操作）
             self.thread_pool = ThreadPoolExecutor(max_workers=4)
-            
+
             self.logger.info("核心组件初始化完成")
-            
+
         except Exception as e:
             self.logger.error(f"核心组件初始化失败: {e}")
             raise ImageClassifierError(f"核心组件初始化失败: {e}")
-    
+
+    def _init_managers(self):
+        """
+        初始化业务逻辑Manager
+
+        Manager通过依赖注入接收接口（self实现StateView/StateMutator/UIHooks等），
+        避免Manager直接访问主窗口（消除Parent Reaching反模式）。
+        """
+        try:
+            # 图片导航管理器
+            self._nav_manager = ImageNavigationManager(
+                state=self,
+                mutator=self,
+                ui=self,
+                loader=self.image_loader,  # 传入实际的image_loader而非self
+                scanner=self.file_scanner,
+                image_list=None,  # UI组件在init_ui后设置
+                image_list_model=None,
+                get_visible_indices=self._get_visible_indices,
+                get_original_to_filtered_index=self._get_original_to_filtered_index_dict,
+                update_category_selection_callback=self._update_category_selection_for_path,
+                load_state_callback=self._load_state,
+                log_image_info_callback=self._log_image_info,
+                log_performance_info_callback=self._log_performance_info,
+                is_network_path_callback=lambda p: is_network_path(str(p)) if p else False,
+                show_loading_placeholder_callback=self._show_loading_placeholder_for_path,
+                logger=self.logger
+            )
+
+            # 文件操作管理器
+            self._file_ops_manager = UIFileOperationManager(
+                state=self,
+                mutator=self,
+                ui=self,
+                navigator=self,  # self实现ImageNavigator接口
+                logger=self.logger
+            )
+
+            # 类别管理器
+            self._category_manager = CategoryManager(
+                state=self,
+                mutator=self,
+                ui=self,
+                navigator=self._nav_manager,
+                file_ops=self._file_ops_manager,
+                logger=self.logger
+            )
+
+            self.logger.info("Manager初始化完成")
+
+        except Exception as e:
+            self.logger.error(f"Manager初始化失败: {e}")
+            # Manager初始化失败不中断程序，降级到原有实现
+            self._nav_manager = None
+            self._file_ops_manager = None
+            self._category_manager = None
+
+    def _get_visible_indices(self) -> Optional[List[int]]:
+        """获取可见图片的原始索引列表（供Manager回调）"""
+        # 优先返回 apply_image_filter 维护的缓存
+        if hasattr(self, '_visible_indices') and self._visible_indices:
+            return self._visible_indices
+        # 兜底：未过滤时返回 None
+        return None
+
+    def _get_original_to_filtered_index_dict(self) -> Optional[Dict[int, int]]:
+        """获取原始索引到过滤后行号的映射（供Manager回调）"""
+        # 优先返回 apply_image_filter 维护的缓存
+        if hasattr(self, '_original_to_filtered_index') and self._original_to_filtered_index:
+            return self._original_to_filtered_index
+        # 兜底：未过滤时返回 None
+        return None
+
+    def _update_category_selection_for_path(self, img_path: str) -> None:
+        """更新类别选中状态（带路径参数，供Manager回调）"""
+        # 使用带路径参数的版本，正确更新分类状态
+        self.update_category_selection_for_current_image(img_path)
+
+    def _show_loading_placeholder_for_path(self, img_path: str) -> None:
+        """显示加载占位符（带路径参数，供Manager回调）"""
+        self.show_loading_placeholder()
+
+    def _log_image_info(self, info) -> None:
+        """记录图片信息（供Manager回调）"""
+        self.logger.debug(f"图片信息: {info}")
+
+    def _log_performance_info(self, *args) -> None:
+        """记录性能信息（供Manager回调，支持多个参数）"""
+        self.logger.debug(f"性能信息: {' '.join(str(arg) for arg in args)}")
+
+    def _load_state(self) -> None:
+        """加载状态（供Manager回调）"""
+        self.load_state()
+
     def init_state_variables(self):
         """初始化状态变量"""
         # 文件和目录状态
@@ -299,6 +412,368 @@ class ImageClassifier(QMainWindow):
         self.category_counts = {}
         self.category_count_cache_time = 0
         self.category_count_cache_ttl = 30  # 30秒TTL
+
+        # 过滤状态（ViewState）
+        self.filter_unclassified_state = False
+        self.filter_classified_state = False
+        self.filter_removed_state = False
+
+        # 排序状态（ViewState）
+        self.sort_mode_state = 'name'
+        self.sort_ascending_state = True
+        self.category_sort_mode_state = 'name'
+        self.category_sort_ascending_state = True
+
+        # 显示状态（ViewState）
+        self.show_image_list_state = True
+        self.show_category_panel_state = True
+        self.show_status_bar_state = True
+
+        # 预览状态（ViewState）
+        self.preview_scale_state = 1.0
+        self.fit_to_window_state = True
+
+        # 搜索状态（ViewState）
+        self.search_text_state = ''
+        self.search_active_state = False
+
+        # Manager实例（在init_core_components后初始化）
+        self._nav_manager = None
+        self._file_ops_manager = None
+        self._category_manager = None
+
+    # ==================== StateView 接口实现 ====================
+
+    # Protocol使用鸭子类型，实例变量（如self.current_dir）自动满足接口要求
+    # 以下只需实现接口中定义的非实例变量属性
+
+    @property
+    def base_dir(self) -> Optional[Path]:
+        """基础目录（current_dir 的父目录）"""
+        return self.current_dir.parent if self.current_dir else None
+
+    @property
+    def filter_unclassified(self) -> bool:
+        """是否过滤未分类图片"""
+        return self.filter_unclassified_state
+
+    @filter_unclassified.setter
+    def filter_unclassified(self, value: bool) -> None:
+        """设置是否过滤未分类图片"""
+        self.filter_unclassified_state = value
+
+    @property
+    def filter_classified(self) -> bool:
+        """是否过滤已分类图片"""
+        return self.filter_classified_state
+
+    @filter_classified.setter
+    def filter_classified(self, value: bool) -> None:
+        """设置是否过滤已分类图片"""
+        self.filter_classified_state = value
+
+    @property
+    def filter_removed(self) -> bool:
+        """是否过滤已移除图片"""
+        return self.filter_removed_state
+
+    @filter_removed.setter
+    def filter_removed(self, value: bool) -> None:
+        """设置是否过滤已移除图片"""
+        self.filter_removed_state = value
+
+    @property
+    def is_network_path(self) -> bool:
+        """当前是否为网络路径"""
+        return self.is_network_working_path
+
+    def get_image_at_index(self, index: int) -> Optional[Path]:
+        """获取指定索引的图片路径"""
+        if 0 <= index < len(self.image_files):
+            return Path(self.image_files[index])
+        return None
+
+    # ==================== StateMutator 接口实现 ====================
+
+    def set_current_index(self, index: int) -> None:
+        """设置当前图片索引"""
+        self.current_index = index
+
+    def set_classified_image(self, path: str, category) -> None:
+        """设置图片的分类"""
+        self.classified_images[path] = category
+
+    def remove_classified_image(self, path: str) -> None:
+        """移除图片的分类记录"""
+        if path in self.classified_images:
+            del self.classified_images[path]
+
+    def add_removed_image(self, path: str) -> None:
+        """添加到已移除列表"""
+        self.removed_images.add(path)
+
+    def remove_from_removed(self, path: str) -> None:
+        """从已移除列表中移除"""
+        self.removed_images.discard(path)
+
+    def set_classified_images(self, images: dict) -> None:
+        """设置已分类图片映射"""
+        self.classified_images = images
+
+    def set_removed_images(self, images: set) -> None:
+        """设置已移除图片集合"""
+        self.removed_images = images
+
+    def set_copy_mode(self, is_copy: bool) -> None:
+        """设置复制/移动模式"""
+        self.is_copy_mode = is_copy
+
+    def set_multi_category(self, is_multi: bool) -> None:
+        """设置单/多分类模式"""
+        self.is_multi_category = is_multi
+
+    def set_current_dir(self, dir_path: Optional[Path]) -> None:
+        """设置当前工作目录"""
+        self.current_dir = dir_path
+
+    def set_image_files(self, files: list) -> None:
+        """设置当前图片文件列表"""
+        self.image_files = files
+
+    def set_all_image_files(self, files: list) -> None:
+        """设置所有图片文件列表"""
+        self.all_image_files = files
+
+    def set_categories(self, categories: set) -> None:
+        """设置类别集合"""
+        self.categories = categories
+
+    def set_ordered_categories(self, categories: list) -> None:
+        """设置排序后的类别列表"""
+        self.ordered_categories = categories
+
+    def add_category(self, category: str) -> None:
+        """添加类别"""
+        self.categories.add(category)
+
+    def remove_category(self, category: str) -> None:
+        """移除类别"""
+        self.categories.discard(category)
+
+    def set_last_operation_category(self, category: Optional[str]) -> None:
+        """设置最后一次操作的类别"""
+        self.last_operation_category = category
+
+    def set_current_category_index(self, index: int) -> None:
+        """设置当前选中的类别索引"""
+        self.current_category_index = index
+
+    def set_selected_category(self, category: Optional[str]) -> None:
+        """设置当前选中的类别名"""
+        self.selected_category = category
+
+    def set_filter_unclassified(self, value: bool) -> None:
+        """设置是否过滤未分类图片"""
+        self.filter_unclassified_state = value
+
+    def set_filter_classified(self, value: bool) -> None:
+        """设置是否过滤已分类图片"""
+        self.filter_classified_state = value
+
+    def set_filter_removed(self, value: bool) -> None:
+        """设置是否过滤已移除图片"""
+        self.filter_removed_state = value
+
+    def set_sort_mode(self, mode: str) -> None:
+        """设置排序模式"""
+        self.sort_mode_state = mode
+
+    def set_sort_ascending(self, value: bool) -> None:
+        """设置是否升序排序"""
+        self.sort_ascending_state = value
+
+    def set_category_sort_mode(self, mode: str) -> None:
+        """设置类别排序模式"""
+        self.category_sort_mode_state = mode
+
+    def set_category_sort_ascending(self, value: bool) -> None:
+        """设置类别是否升序排序"""
+        self.category_sort_ascending_state = value
+
+    def set_show_image_list(self, value: bool) -> None:
+        """设置是否显示图片列表"""
+        self.show_image_list_state = value
+
+    def set_show_category_panel(self, value: bool) -> None:
+        """设置是否显示类别面板"""
+        self.show_category_panel_state = value
+
+    def set_show_status_bar(self, value: bool) -> None:
+        """设置是否显示状态栏"""
+        self.show_status_bar_state = value
+
+    def set_preview_scale(self, scale: float) -> None:
+        """设置预览图缩放比例"""
+        self.preview_scale_state = scale
+
+    def set_fit_to_window(self, value: bool) -> None:
+        """设置是否适应窗口大小"""
+        self.fit_to_window_state = value
+
+    def set_search_text(self, text: str) -> None:
+        """设置搜索文本"""
+        self.search_text_state = text
+
+    def set_search_active(self, value: bool) -> None:
+        """设置搜索是否激活"""
+        self.search_active_state = value
+
+    def set_current_requested_image(self, path: str) -> None:
+        """设置当前请求加载的图片路径（用于异步回调验证）"""
+        self._current_requested_image = path
+
+    # ==================== UIHooks 接口实现 ====================
+
+    def save_state_sync(self) -> None:
+        """同步保存状态"""
+        self._save_state_sync()
+
+    def update_status_bar(self, message: str) -> None:
+        """更新状态栏"""
+        if hasattr(self, 'statusBar') and self.statusBar:
+            self.statusBar.showMessage(message)
+
+    def show_toast(self, toast_type: str, message: str) -> None:
+        """显示Toast通知"""
+        if toast_type == 'info':
+            toast_info(self, message)
+        elif toast_type == 'success':
+            toast_success(self, message)
+        elif toast_type == 'warning':
+            toast_warning(self, message)
+        elif toast_type == 'error':
+            toast_error(self, message)
+
+    def show_message_box(self, title: str, message: str, msg_type: str = 'info') -> None:
+        """显示消息框"""
+        if msg_type == 'info':
+            QMessageBox.information(self, title, message)
+        elif msg_type == 'warning':
+            QMessageBox.warning(self, title, message)
+        elif msg_type == 'error':
+            QMessageBox.critical(self, title, message)
+
+    def show_question(self, title: str, message: str) -> bool:
+        """显示确认对话框"""
+        reply = QMessageBox.question(
+            self, title, message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def show_progress_dialog(self, title: str, message: str, maximum: int = 100):
+        """显示进度对话框"""
+        from PyQt6.QtWidgets import QProgressDialog
+        progress = QProgressDialog(message, "取消", 0, maximum, self)
+        progress.setWindowTitle(title)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.show()
+        return progress
+
+    def refresh_image_list(self) -> None:
+        """刷新图片列表"""
+        if hasattr(self, 'image_list_model') and self.image_list_model:
+            self.image_list_model.layoutChanged.emit()
+
+    def refresh_category_buttons_style(self) -> None:
+        """刷新类别按钮样式"""
+        for btn in self.category_buttons:
+            if hasattr(btn, 'update_style'):
+                btn.update_style()
+
+    def get_category_button_layout(self):
+        """获取类别按钮所在的布局"""
+        if hasattr(self, 'category_buttons_layout'):
+            return self.category_buttons_layout
+        return None
+
+    def clear_category_buttons(self) -> None:
+        """清空所有类别按钮"""
+        for btn in self.category_buttons:
+            btn.deleteLater()
+        self.category_buttons.clear()
+
+    def create_category_button(self, name: str, shortcut: Optional[str], count: int):
+        """创建类别按钮"""
+        btn = CategoryButton(name, shortcut, count, self)
+        self.category_buttons.append(btn)
+        if hasattr(self, 'category_buttons_layout'):
+            self.category_buttons_layout.addWidget(btn)
+        return btn
+
+    def set_category_button_count(self, name: str, count: int) -> None:
+        """更新类别按钮计数"""
+        for btn in self.category_buttons:
+            if btn.category_name == name:
+                btn.set_count(count)
+                break
+
+    def ensure_category_visible(self, index: int) -> None:
+        """滚动使指定索引的类别按钮可见"""
+        if 0 <= index < len(self.category_buttons):
+            btn = self.category_buttons[index]
+            if hasattr(self, 'category_scroll_area'):
+                self.category_scroll_area.ensureWidgetVisible(btn)
+
+    def highlight_category_button(self, index: int) -> None:
+        """高亮指定索引的类别按钮"""
+        for i, btn in enumerate(self.category_buttons):
+            btn.setSelected(i == index)
+
+    def display_image(self, image_data, path: Path) -> None:
+        """显示图片"""
+        if hasattr(self, 'image_label'):
+            if isinstance(image_data, QPixmap):
+                self.image_label.set_image(image_data)
+            else:
+                pixmap = self.convert_to_pixmap(image_data)
+                self.image_label.set_image(pixmap)
+
+    # ==================== ImageLoader 接口实现 ====================
+
+    def load_image(self, path: Path, priority: bool = False) -> None:
+        """请求加载图片"""
+        self.image_loader.load_image(str(path), priority=priority)
+
+    def preload_images(self, paths: list) -> None:
+        """预加载多张图片"""
+        self.image_loader.preload_images([str(p) for p in paths])
+
+    def is_cached(self, path: Path) -> bool:
+        """检查图片是否已缓存"""
+        return self.image_loader.is_cached(str(path))
+
+    def get_from_cache(self, path: Path):
+        """从缓存获取图片"""
+        return self.image_loader._get_from_cache(str(path))
+
+    def clear_cache(self) -> None:
+        """清理缓存"""
+        self.image_loader.clear_cache()
+
+    # ==================== ImageNavigator 接口实现 ====================
+
+    def select_after_removal(self, original_index: int) -> None:
+        """删除图片后智能选择下一张可见图片"""
+        if self._nav_manager:
+            self._nav_manager.select_after_removal(original_index)
+        else:
+            # 降级处理：直接设置索引
+            if self.image_files:
+                new_index = min(original_index, len(self.image_files) - 1)
+                self.current_index = max(0, new_index)
+            else:
+                self.current_index = -1
     
     def init_ui(self):
         """初始化美化的用户界面"""
@@ -1546,31 +2021,18 @@ class ImageClassifier(QMainWindow):
             self.statusBar.showMessage("✅ 图片分类工具已就绪")
     
     def load_images(self):
-        """开始智能加载目录下的图片"""
-        if not self.current_dir:
-            return
-
-        # 清理图片缓存
-        self.image_loader.clear_cache()
-
-        # 清空分类状态缓存（关键修复：重新加载目录时清除内存中的旧状态）
-        self.classified_images = {}
-        self.removed_images = set()
-
-        # 重置状态
-        self.all_image_files = []
-        self.image_files = []
-        self.current_index = -1
-        self.total_images = 0
+        """开始智能加载目录下的图片（委托给ImageNavigationManager）"""
+        # 设置加载状态，确保信号处理正常工作
         self.loading_in_progress = True
-        self.initial_batch_loaded = False
-        self.background_loading = False
+        self.background_loading = False  # 初始为False，on_initial_batch_ready中设为True
 
-        # 显示加载提示
-        self.statusBar.showMessage("🔍 正在后台扫描图片文件...")
-
-        # 启动智能文件扫描
-        self.file_scanner.scan_directory(self.current_dir)
+        if self._nav_manager:
+            self._nav_manager.load_images()
+        elif self.current_dir:
+            # 降级：Manager未初始化
+            self.logger.warning("[降级模式] ImageNavigationManager未初始化，使用直接扫描")
+            self.image_loader.clear_cache()
+            self.file_scanner.scan_directory(self.current_dir)
     
     # ===== 文件扫描事件处理 =====
     
@@ -1578,7 +2040,10 @@ class ImageClassifier(QMainWindow):
         """处理初始批次文件"""
         if not self.loading_in_progress:
             return
-            
+
+        # 立即设置后台加载标记，确保files_found信号不会被丢弃
+        self.background_loading = True
+
         self.logger.info(f"接收到初始批次: {len(initial_files)} 个文件")
         
         # 设置初始显示文件
@@ -1608,10 +2073,7 @@ class ImageClassifier(QMainWindow):
         location_type = "网络路径" if is_network_path else "本地路径"
         
         self.statusBar.showMessage(f"✅ {location_type}已就绪 {len(initial_files)} 张图片，后台继续扫描...")
-        
-        # 后台标记：程序已可用，全量扫描在后台继续
-        self.background_loading = True
-        
+
         self.logger.info("🚀 程序UI已完全启用，用户可立即使用")
 
     def _delayed_load_state(self):
@@ -1971,41 +2433,23 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"[优化8-预热] 进度回调错误: {e}")
 
     def jump_to_image(self, index):
-        """跳转到指定索引的图片
+        """跳转到指定索引的图片（委托给ImageNavigationManager）"""
+        self.logger.info(f"[跳转] 请求跳转到索引 {index}, 当前文件数 {len(self.image_files)}")
 
-        Args:
-            index: 目标图片的索引（0-based）
-        """
-        try:
-            if not self.image_files or index < 0 or index >= len(self.image_files):
-                self.logger.warning(f"无效的图片索引: {index}, 总图片数: {len(self.image_files) if self.image_files else 0}")
-                return
+        # 先设置当前请求的图片路径，用于回调时判断
+        if 0 <= index < len(self.image_files):
+            img_path = str(self.image_files[index])
+            real_path = str(self.get_real_file_path(img_path))
+            self._current_requested_image = str(Path(real_path).resolve())
 
-            # 设置当前索引
-            self.current_index = index
-            self.logger.info(f"跳转到图片索引: {index} / {len(self.image_files)}")
-
-            # 显示图片
-            self.show_current_image()
-
-            # 滚动图片列表到对应位置
-            # Phase 1.1: 修复变量名 image_list_widget -> image_list, 使用Model/View API
-            if hasattr(self, 'image_list') and self.image_list and self.image_list_model:
-                # Model/View架构：通过索引映射找到对应的行
-                if hasattr(self, '_original_to_filtered_index'):
-                    # 有过滤：从original_index查找filtered_row
-                    filtered_row = self._original_to_filtered_index.get(index)
-                    if filtered_row is not None:
-                        model_index = self.image_list_model.index(filtered_row, 0)
-                        self.image_list.scrollTo(model_index, QAbstractItemView.ScrollHint.PositionAtCenter)
-                else:
-                    # 没有过滤：直接使用索引
-                    if index < self.image_list_model.rowCount():
-                        model_index = self.image_list_model.index(index, 0)
-                        self.image_list.scrollTo(model_index, QAbstractItemView.ScrollHint.PositionAtCenter)
-
-        except Exception as e:
-            self.logger.error(f"跳转到图片索引 {index} 失败: {e}")
+        if self._nav_manager:
+            self._nav_manager.jump_to_image(index)
+        else:
+            # 降级：直接设置索引并显示
+            self.logger.warning("[降级模式] ImageNavigationManager未初始化")
+            if 0 <= index < len(self.image_files):
+                self.current_index = index
+                self.show_current_image()
 
     def on_scan_progress(self, message):
         """处理扫描进度"""
@@ -2427,20 +2871,19 @@ class ImageClassifier(QMainWindow):
 
     @performance_monitor
     def show_current_image(self):
-        """显示当前图片 - 防止多图刷新"""
-        # 防重入检查，避免多次触发
-        if hasattr(self, '_showing_image') and self._showing_image:
-            return
-            
-        self._showing_image = True
-        try:
-            # 直接调用内部方法，避免额外的事件处理
+        """显示当前图片（委托给ImageNavigationManager）"""
+        # 先设置当前请求的图片路径，用于回调时判断
+        if 0 <= self.current_index < len(self.image_files):
+            img_path = str(self.image_files[self.current_index])
+            real_path = str(self.get_real_file_path(img_path))
+            self._current_requested_image = str(Path(real_path).resolve())
+
+        if self._nav_manager:
+            self._nav_manager.show_current_image()
+        else:
+            # 降级：直接调用内部方法
+            self.logger.debug("[降级模式] ImageNavigationManager未初始化，使用内部方法显示图片")
             self._show_current_image_internal()
-            
-            # 仅异步更新UI状态，避免阻塞
-            QTimer.singleShot(10, lambda: self.schedule_ui_update('ui_state'))
-        finally:
-            self._showing_image = False
         
     def _show_current_image_internal(self):
         """内部显示当前图片方法 - 优化防止多图刷新"""
@@ -2621,105 +3064,36 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.debug(f"更新窗口标题失败: {e}")
     
-    def show_loading_placeholder(self, image_path):
+    def show_loading_placeholder(self, image_path=None):
         """显示加载占位符"""
         try:
             # 创建简单的加载占位符
             placeholder_size = QSize(400, 300)
             placeholder = QPixmap(placeholder_size)
             placeholder.fill(QColor(240, 240, 240))
-            
+
             # 立即显示占位符
             self.image_label.set_image(placeholder)
-            
+
             # 更新状态栏
-            self.statusBar.showMessage(f"🔄 正在加载: {Path(image_path).name}")
-            
+            if image_path:
+                self.statusBar.showMessage(f"🔄 正在加载: {Path(image_path).name}")
+            else:
+                self.statusBar.showMessage("🔄 正在加载图片...")
+
         except Exception as e:
             self.logger.debug(f"显示加载占位符失败: {e}")
-    
+
     def sync_image_list_selection(self):
-        """同步图片列表的选中状态"""
-        try:
-            # Phase 1.1 Migration: 使用 Model/View API 替代 QListWidget 遍历逻辑
-            model = self.image_list.model()
-            if not model:
-                return
+        """同步图片列表的选中状态（委托给ImageNavigationManager）"""
+        if self._nav_manager:
+            self._nav_manager.sync_image_list_selection()
 
-            # Codex Review修复：过滤后需要将original_index转换为filtered_row
-            if hasattr(self, '_original_to_filtered_index'):
-                # 有过滤：查找当前图片在过滤列表中的行号
-                filtered_row = self._original_to_filtered_index.get(self.current_index)
-                if filtered_row is not None:
-                    # 当前图片在过滤列表中
-                    idx = model.index(filtered_row, 0)
-                    if idx.isValid():
-                        self.image_list.selectionModel().setCurrentIndex(
-                            idx,
-                            QItemSelectionModel.SelectionFlag.ClearAndSelect
-                        )
-                        self.image_list.scrollTo(idx, QAbstractItemView.ScrollHint.EnsureVisible)
-                else:
-                    # 当前图片被过滤掉了，清除选中
-                    self.image_list.selectionModel().clearSelection()
-            else:
-                # 没有过滤：直接使用current_index作为行号
-                if 0 <= self.current_index < model.rowCount():
-                    idx = model.index(self.current_index, 0)
-                    if idx.isValid():
-                        self.image_list.selectionModel().setCurrentIndex(
-                            idx,
-                            QItemSelectionModel.SelectionFlag.ClearAndSelect
-                        )
-                        self.image_list.scrollTo(idx, QAbstractItemView.ScrollHint.EnsureVisible)
-
-        except Exception as e:
-            self.logger.debug(f"同步图片列表选中状态失败: {e}")
-    
     def preload_adjacent_images(self):
-        """预加载相邻图片（优化3：智能预加载范围）"""
-        if not self.image_files or self.current_index < 0:
-            return
+        """预加载相邻图片（委托给ImageNavigationManager）"""
+        if self._nav_manager:
+            self._nav_manager.preload_adjacent_images()
 
-        # 优化3：判断翻页方向（基于最近10次翻页的众数）
-        direction_history = self.user_behavior.get('direction_history', [])
-        if len(direction_history) >= 3:
-            # 计算众数方向：1=向前（下一张），-1=向后（上一张）
-            from collections import Counter
-            direction_counts = Counter(direction_history[-10:])  # 最近10次
-            primary_direction = direction_counts.most_common(1)[0][0]
-        else:
-            # 历史不足，默认向前
-            primary_direction = 1
-
-        # 优化3：根据网络/本地环境调整预加载范围
-        is_network = self.is_network_working_path if hasattr(self, 'is_network_working_path') else False
-
-        if is_network:
-            # 网络路径：保守策略
-            forward_range = 10  # 主方向10张
-            backward_range = 3  # 反方向3张
-        else:
-            # 本地路径：激进策略（本地快，可多预加载）
-            forward_range = 30  # 主方向30张
-            backward_range = 10  # 反方向10张
-
-        # 根据主方向调整范围
-        if primary_direction == 1:  # 向前翻页
-            start_idx = max(0, self.current_index - backward_range)
-            end_idx = min(len(self.image_files), self.current_index + forward_range + 1)
-        else:  # 向后翻页
-            start_idx = max(0, self.current_index - forward_range)
-            end_idx = min(len(self.image_files), self.current_index + backward_range + 1)
-
-        # 预加载指定范围内的图片
-        for i in range(start_idx, end_idx):
-            if i != self.current_index:  # 跳过当前图片
-                img_path = str(self.image_files[i])
-                # 计算文件的实际路径（根据操作模式和分类状态）
-                real_path = str(self.get_real_file_path(img_path))
-                self.image_loader.load_image(real_path, priority=False)
-    
     def log_image_info(self, image_path, pixmap=None):
         """记录图片详细信息"""
         if not self.enable_performance_logging:
@@ -2791,70 +3165,9 @@ class ImageClassifier(QMainWindow):
             return loop_enabled
 
     def prev_image(self):
-        """上一张图片（支持循环翻页，Codex Review修复：支持过滤列表导航）"""
-        # Codex最终Review修复：区分"未过滤"和"过滤结果为空"
-        if hasattr(self, '_visible_indices'):
-            # 过滤已激活
-            if not self._visible_indices:
-                # 过滤结果为空，不允许导航
-                toast_info(self, "当前过滤条件下没有图片")
-                return
-
-            # 有可见图片：在可见列表中导航
-            try:
-                current_pos = self._visible_indices.index(self.current_index)
-                if current_pos > 0:
-                    # 移动到上一张可见图片
-                    self.current_index = self._visible_indices[current_pos - 1]
-                    self._record_direction(-1)
-                    self.show_current_image()
-                else:
-                    # 已经是第一张可见图片
-                    loop_enabled = self._should_enable_loop()
-                    if loop_enabled:
-                        # 循环到最后一张可见图片
-                        self.current_index = self._visible_indices[-1]
-                        self.logger.debug(f"[循环翻页-过滤] 第1张可见 -> 第{len(self._visible_indices)}张可见")
-                        self.show_current_image()
-                    else:
-                        toast_info(self, "已经是第一张图片了！")
-            except ValueError:
-                # 当前图片不在可见列表中（被过滤掉了）
-                # 找到当前索引之前的最后一张可见图片（而不是跳到第一张）
-                prev_visible = None
-                for idx in reversed(self._visible_indices):
-                    if idx < self.current_index:
-                        prev_visible = idx
-                        break
-
-                if prev_visible is not None:
-                    # 找到了上一张可见图片
-                    self.current_index = prev_visible
-                    self.show_current_image()
-                else:
-                    # 当前索引之前没有可见图片了
-                    loop_enabled = self._should_enable_loop()
-                    if loop_enabled:
-                        # 循环到最后一张可见图片
-                        self.current_index = self._visible_indices[-1]
-                        self.logger.debug(f"[循环翻页-过滤] 第1张可见 -> 第{len(self._visible_indices)}张可见（从被过滤位置）")
-                        self.show_current_image()
-                    else:
-                        toast_info(self, "已经是第一张图片了！")
-        else:
-            # 没有过滤：原始逻辑
-            if self.current_index > 0:
-                self.current_index -= 1
-                self._record_direction(-1)
-                self.show_current_image()
-            else:
-                loop_enabled = self._should_enable_loop()
-                if loop_enabled:
-                    self.current_index = len(self.image_files) - 1
-                    self.logger.debug(f"[循环翻页] 第1张 -> 第{self.current_index + 1}张（最后一张）")
-                    self.show_current_image()
-                else:
-                    toast_info(self, "已经是第一张图片了！")
+        """上一张图片（委托给ImageNavigationManager）"""
+        if self._nav_manager:
+            self._nav_manager.prev_image()
 
     def _record_direction(self, direction):
         """记录翻页方向（优化3：智能预加载）"""
@@ -2865,70 +3178,10 @@ class ImageClassifier(QMainWindow):
             self.user_behavior['direction_history'] = self.user_behavior['direction_history'][-10:]
 
     def next_image(self):
-        """下一张图片（支持循环翻页，Codex Review修复：支持过滤列表导航）"""
-        # Codex最终Review修复：区分"未过滤"和"过滤结果为空"
-        if hasattr(self, '_visible_indices'):
-            # 过滤已激活
-            if not self._visible_indices:
-                # 过滤结果为空，不允许导航
-                toast_info(self, "当前过滤条件下没有图片")
-                return
+        """下一张图片（委托给ImageNavigationManager）"""
+        if self._nav_manager:
+            self._nav_manager.next_image()
 
-            # 有可见图片：在可见列表中导航
-            try:
-                current_pos = self._visible_indices.index(self.current_index)
-                if current_pos < len(self._visible_indices) - 1:
-                    # 移动到下一张可见图片
-                    self.current_index = self._visible_indices[current_pos + 1]
-                    self._record_direction(1)
-                    self.show_current_image()
-                else:
-                    # 已经是最后一张可见图片
-                    loop_enabled = self._should_enable_loop()
-                    if loop_enabled:
-                        # 循环到第一张可见图片
-                        self.current_index = self._visible_indices[0]
-                        self.logger.debug(f"[循环翻页-过滤] 第{len(self._visible_indices)}张可见 -> 第1张可见")
-                        self.show_current_image()
-                    else:
-                        toast_info(self, "已经是最后一张图片了！")
-            except ValueError:
-                # 当前图片不在可见列表中（被过滤掉了）
-                # 找到当前索引之后的第一张可见图片（而不是跳到第一张）
-                next_visible = None
-                for idx in self._visible_indices:
-                    if idx > self.current_index:
-                        next_visible = idx
-                        break
-
-                if next_visible is not None:
-                    # 找到了下一张可见图片
-                    self.current_index = next_visible
-                    self.show_current_image()
-                else:
-                    # 当前索引之后没有可见图片了
-                    loop_enabled = self._should_enable_loop()
-                    if loop_enabled:
-                        self.current_index = self._visible_indices[0]
-                        self.logger.debug(f"[循环翻页-过滤] 第{len(self._visible_indices)}张可见 -> 第1张可见（从被过滤位置）")
-                        self.show_current_image()
-                    else:
-                        toast_info(self, "已经是最后一张图片了！")
-        else:
-            # 没有过滤：原始逻辑
-            if self.current_index < len(self.image_files) - 1:
-                self.current_index += 1
-                self._record_direction(1)
-                self.show_current_image()
-            else:
-                loop_enabled = self._should_enable_loop()
-                if loop_enabled:
-                    self.current_index = 0
-                    self.logger.debug(f"[循环翻页] 第{len(self.image_files)}张（最后一张） -> 第1张")
-                    self.show_current_image()
-                else:
-                    toast_info(self, "已经是最后一张图片了！")
-    
     def prev_category(self):
         """选择上一个类别 - 参考原始实现"""
         if not self.category_buttons:
@@ -3872,11 +4125,21 @@ class ImageClassifier(QMainWindow):
             if is_filtering:
                 # 撤销分类后，图片状态从"已分类"变为"未分类"，需要刷新过滤列表
                 self.apply_image_filter()
+                # apply_image_filter可能会改变当前图片（如果被过滤掉了会自动跳转）
+                # 所以需要获取过滤后实际显示的图片路径
+                if 0 <= self.current_index < len(self.image_files):
+                    current_display_path = str(self.image_files[self.current_index])
+                else:
+                    current_display_path = None
+            else:
+                # 没有过滤，当前图片不变
+                current_display_path = image_path
 
-            # 单分类模式下，保持在当前图片，不自动跳转
+            # 单分类模式下，刷新类别按钮样式（针对当前实际显示的图片）
             if not self.is_multi_category:
                 self.refresh_category_buttons_style()
-                self.update_category_selection_for_current_image(image_path)
+                if current_display_path:
+                    self.update_category_selection_for_current_image(current_display_path)
 
             self.logger.info(f"分类已撤销: {file_name} 从 {category}")
 
@@ -5049,12 +5312,28 @@ class ImageClassifier(QMainWindow):
         if dialog.exec():
             # 检查是否有新类别添加
             new_count = len(self.categories)
-            if new_count > original_count:
-                added_count = new_count - original_count
+            added_count = new_count - original_count
+            skipped_categories = getattr(dialog, 'skipped_categories', [])
+
+            # 构建合并的 toast 消息
+            if added_count > 0 and skipped_categories:
+                # 有添加也有跳过
+                skipped_text = ', '.join(skipped_categories[:3])
+                if len(skipped_categories) > 3:
+                    skipped_text += f' 等{len(skipped_categories)}个'
+                toast_warning(self, f"已添加 {added_count} 个类别，{skipped_text} 已存在或已忽略")
+            elif added_count > 0:
+                # 只有添加
                 if added_count == 1:
-                    toast_success(self,"已添加 1 个新类别")
+                    toast_success(self, "已添加 1 个新类别")
                 else:
-                    toast_success(self,f"已添加 {added_count} 个新类别")
+                    toast_success(self, f"已添加 {added_count} 个新类别")
+            elif skipped_categories:
+                # 只有跳过
+                skipped_text = ', '.join(skipped_categories[:3])
+                if len(skipped_categories) > 3:
+                    skipped_text += f' 等{len(skipped_categories)}个'
+                toast_warning(self, f"类别 {skipped_text} 已存在或已忽略，未添加新类别")
     
     # ===== 图像加载器回调方法 =====
     
