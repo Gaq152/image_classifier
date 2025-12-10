@@ -310,6 +310,10 @@ class ImageClassifier(QMainWindow):
             self._file_ops_manager.mode_changed.connect(self.on_mode_changed)
             self._file_ops_manager.operation_failed.connect(self.on_operation_failed)
 
+            # 连接 CategoryManager 信号
+            self._category_manager.categories_changed.connect(self.on_categories_changed)
+            self._category_manager.selection_changed.connect(self.on_category_selection_changed)
+
         except Exception as e:
             self.logger.error(f"Manager初始化失败: {e}")
             # Manager初始化失败不中断程序，降级到原有实现
@@ -2507,6 +2511,19 @@ class ImageClassifier(QMainWindow):
         from ui.components.toast import toast_error
         toast_error(self, f"操作失败: {reason}")
 
+    # ===== 类别管理事件处理（来自CategoryManager）=====
+
+    def on_categories_changed(self, categories: list):
+        """类别列表变更"""
+        # Manager已更新状态，这里只需UI刷新
+        self.update_category_buttons()
+        self.schedule_ui_update('statistics', 'category_counts')
+
+    def on_category_selection_changed(self, index: int, name: str):
+        """类别选中状态变更"""
+        self.current_category_index = index
+        self.selected_category = name
+
     # ===== UI更新和显示方法 =====
     
     def schedule_ui_update(self, *components):
@@ -3819,54 +3836,6 @@ class ImageClassifier(QMainWindow):
             self._file_ops_manager.move_to_category(str(current_path), category_name)
             # Manager会触发file_moved信号，UI刷新在on_file_moved中处理
 
-    def _move_between_categories(self, image_path, old_category, new_category):
-        """在类别之间移动图片文件，包括从remove目录恢复"""
-        try:
-            source_file = Path(image_path)
-            file_name = source_file.name
-            parent_dir = self.current_dir.parent
-            
-            # 确定旧文件位置（优先检查是否在remove目录）
-            if image_path in self.removed_images:
-                # 如果图片在移除列表中，则从remove目录查找
-                old_dir = parent_dir / 'remove'
-                self.logger.debug(f"从removed_images确定旧位置为remove目录: {old_dir}")
-            elif old_category == 'remove':
-                # 如果明确指定旧类别是remove
-                old_dir = parent_dir / 'remove'
-            else:
-                # 正常的类别间移动
-                old_dir = parent_dir / old_category
-            old_file = old_dir / file_name
-            
-            # 确定新文件位置
-            new_dir = parent_dir / new_category
-            new_dir.mkdir(parents=True, exist_ok=True)
-            new_file = new_dir / file_name
-            
-            # 如果新目标文件已存在，添加编号
-            if new_file.exists():
-                counter = 1
-                name_stem = source_file.stem
-                suffix = source_file.suffix
-                while new_file.exists():
-                    new_name = f"{name_stem}_{counter}{suffix}"
-                    new_file = new_dir / new_name
-                    counter += 1
-            
-            # 移动文件（总是移动，不管原模式）
-            if old_file.exists():
-                shutil.move(str(old_file), str(new_file))
-                self.logger.info(f"文件移动成功: {old_file} -> {new_file}")
-            else:
-                # 如果旧文件不存在，执行正常的文件操作
-                self._execute_file_operation(image_path, new_category, is_remove=False)
-                
-        except Exception as e:
-            self.logger.error(f"类别间移动文件失败: {e}")
-            # 失败时回退到正常操作
-            self._execute_file_operation(image_path, new_category, is_remove=False)
-    
     def _update_single_image_status(self, image_index, image_path):
         """更新单个图片在列表中的状态图标"""
         try:
@@ -3909,258 +3878,6 @@ class ImageClassifier(QMainWindow):
         self._file_ops_manager._undo_classification(image_path, category)
         # Manager会触发file_restored信号，UI刷新在on_file_restored中处理
 
-    def _undo_removal(self, image_path):
-        """撤销删除：根据工作模式恢复图片"""
-        try:
-            source_file = Path(image_path)
-            file_name = source_file.name
-            parent_dir = self.current_dir.parent
-
-            # 确定源文件位置（remove目录中）
-            remove_dir = parent_dir / 'remove'
-            remove_file = remove_dir / file_name
-
-            if not remove_file.exists():
-                self.logger.warning(f"撤销删除时未找到要恢复的文件: {remove_file}")
-                return
-
-            # 根据工作模式决定操作方式
-            if self.is_copy_mode:
-                # 复制模式：直接删除remove目录中的文件（因为原文件仍在源目录）
-                remove_file.unlink()
-                self.logger.info(f"撤销删除（复制模式）: {file_name} 从remove目录删除")
-            else:
-                # 移动模式：从remove目录移动回原目录（未分类状态）
-                original_file = self.current_dir / file_name
-
-                # 如果原目录中已存在同名文件，添加编号
-                if original_file.exists():
-                    counter = 1
-                    name_stem = source_file.stem
-                    suffix = source_file.suffix
-                    while original_file.exists():
-                        new_name = f"{name_stem}_{counter}{suffix}"
-                        original_file = self.current_dir / new_name
-                        counter += 1
-
-                # 移动文件回原目录
-                remove_file.rename(original_file)
-                self.logger.info(f"撤销删除（移动模式）: {file_name} 恢复到原目录（未分类状态）")
-
-            # 清除删除记录
-            self.removed_images.discard(image_path)
-
-            # 立即同步保存状态（撤销操作必须立即生效）
-            self._save_state_sync()
-
-            # 更新UI和状态
-            self._update_single_image_status(self.current_index, image_path)
-            QTimer.singleShot(10, lambda: self.schedule_ui_update('category_buttons', 'category_counts', 'statistics'))
-
-            # 更新状态标记显示
-            if hasattr(self.image_label, 'update_status_badge'):
-                QTimer.singleShot(50, self.image_label.update_status_badge)
-
-            # Phase 1.2: 检查是否有过滤激活，如果有则刷新过滤列表
-            is_filtering = not (self.filter_unclassified and self.filter_classified and self.filter_removed)
-            if is_filtering:
-                # 撤销删除后，图片状态从"已移除"变为"未分类"，需要刷新过滤列表
-                self.apply_image_filter()
-
-            # 保持在当前图片，刷新UI显示状态
-            if not self.is_multi_category:
-                self.refresh_category_buttons_style()
-                self.update_category_selection_for_current_image(image_path)
-
-            self.logger.info(f"删除已撤销: {file_name}")
-
-        except Exception as e:
-            self.logger.error(f"撤销删除失败: {e}")
-
-    def _move_from_category_to_remove(self, image_path, old_category):
-        """从分类目录移动图片到remove目录"""
-        try:
-            source_file = Path(image_path)
-            file_name = source_file.name
-            parent_dir = self.current_dir.parent
-            
-            # 确定旧文件位置（分类目录中）
-            old_dir = parent_dir / old_category
-            old_file = old_dir / file_name
-            
-            # 确定新文件位置（remove目录）
-            remove_dir = parent_dir / 'remove'
-            remove_dir.mkdir(parents=True, exist_ok=True)
-            remove_file = remove_dir / file_name
-            
-            # 如果remove目录中已存在同名文件，添加编号
-            if remove_file.exists():
-                counter = 1
-                name_stem = source_file.stem
-                suffix = source_file.suffix
-                while remove_file.exists():
-                    new_name = f"{name_stem}_{counter}{suffix}"
-                    remove_file = remove_dir / new_name
-                    counter += 1
-            
-            # 移动文件
-            if old_file.exists():
-                shutil.move(str(old_file), str(remove_file))
-                self.logger.info(f"文件从分类目录移除: {old_file} -> {remove_file}")
-            else:
-                # 如果旧文件不存在，执行正常的移除操作
-                self._execute_file_operation(image_path, 'remove', is_remove=True)
-                
-        except Exception as e:
-            self.logger.error(f"从分类目录移除文件失败: {e}")
-            # 失败时回退到正常操作
-            self._execute_file_operation(image_path, 'remove', is_remove=True)
-    
-    def _move_from_remove_to_category(self, image_path, category_name):
-        """从remove目录移动图片到分类目录"""
-        try:
-            source_file = Path(image_path)
-            file_name = source_file.name
-            parent_dir = self.current_dir.parent
-            
-            # 确定remove目录中的文件位置
-            remove_dir = parent_dir / 'remove'
-            remove_file = remove_dir / file_name
-            
-            # 如果remove目录中没有这个文件，记录警告但继续操作
-            if not remove_file.exists():
-                self.logger.warning(f"Remove目录中未找到文件: {remove_file}")
-                # 仍然从原目录复制到分类目录（兜底方案）
-                self._execute_file_operation(image_path, category_name, is_remove=False)
-                return
-            
-            # 确定目标分类目录
-            target_dir = parent_dir / category_name
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_file = target_dir / file_name
-            
-            # 如果目标文件已存在，添加编号
-            if target_file.exists():
-                base_name = source_file.stem
-                ext = source_file.suffix
-                counter = 1
-                while target_file.exists():
-                    target_file = target_dir / f"{base_name}_{counter}{ext}"
-                    counter += 1
-            
-            # 执行移动操作（从remove目录移动到分类目录）
-            shutil.move(str(remove_file), str(target_file))
-            
-            self.logger.info(f"文件从remove目录恢复到分类目录: {file_name} -> {category_name}")
-            
-        except Exception as e:
-            self.logger.error(f"从remove目录恢复失败: {e}")
-            # 作为备用方案，尝试从原目录复制
-            try:
-                self._execute_file_operation(image_path, category_name, is_remove=False)
-                self.logger.info(f"使用备用方案从原目录复制: {file_name}")
-            except Exception as backup_error:
-                self.logger.error(f"备用方案也失败: {backup_error}")
-                raise FileOperationError(f"文件恢复失败: {e}")
-    
-    def _execute_file_operation(self, source_path, category_name, is_remove=False):
-        """执行实际的文件操作"""
-        try:
-            source_file = Path(source_path)
-            if not source_file.exists():
-                self.logger.warning(f"源文件不存在: {source_path}")
-                return
-            
-            # 修复：目标目录统一在图片目录的父目录下创建
-            parent_dir = self.current_dir.parent
-            if is_remove:
-                # 移除操作：在父目录下创建remove文件夹
-                target_dir = parent_dir / 'remove'
-            else:
-                # 分类操作：在父目录下的类别文件夹中
-                target_dir = parent_dir / category_name
-            
-            # 创建目标目录
-            target_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 确定目标文件路径
-            target_file = target_dir / source_file.name
-            
-            # 如果目标文件已存在，添加编号
-            if target_file.exists():
-                base_name = source_file.stem
-                ext = source_file.suffix
-                counter = 1
-                while target_file.exists():
-                    target_file = target_dir / f"{base_name}_{counter}{ext}"
-                    counter += 1
-            
-            # 执行文件操作
-            if self.is_copy_mode:
-                shutil.copy2(source_file, target_file)
-                operation_type = "复制"
-            else:
-                source_file.rename(target_file)
-                operation_type = "移动"
-            
-            self.logger.info(f"文件{operation_type}成功: {source_file.name} -> {target_file}")
-            
-        except Exception as e:
-            self.logger.error(f"文件操作失败: {e}")
-            # 操作失败时回滚状态
-            if is_remove:
-                self.removed_images.discard(source_path)
-            else:
-                if source_path in self.classified_images:
-                    if isinstance(self.classified_images[source_path], list):
-                        # 多分类模式：从列表中移除这个类别
-                        if category_name in self.classified_images[source_path]:
-                            self.classified_images[source_path].remove(category_name)
-                            if not self.classified_images[source_path]:
-                                del self.classified_images[source_path]
-                    else:
-                        # 单分类模式：完全移除记录
-                        del self.classified_images[source_path]
-            raise FileOperationError(f"文件操作失败: {e}")
-    
-    def _remove_copied_file_from_category(self, source_path, category_name):
-        """从指定类别目录中删除已复制的文件"""
-        try:
-            source_file = Path(source_path)
-            parent_dir = self.current_dir.parent
-            category_dir = parent_dir / category_name
-            
-            # 查找目标文件（可能有编号后缀）
-            target_files = []
-            base_name = source_file.stem
-            ext = source_file.suffix
-            
-            # 检查原文件名
-            original_target = category_dir / source_file.name
-            if original_target.exists():
-                target_files.append(original_target)
-            
-            # 检查带编号后缀的文件
-            counter = 1
-            while True:
-                numbered_target = category_dir / f"{base_name}_{counter}{ext}"
-                if numbered_target.exists():
-                    target_files.append(numbered_target)
-                    counter += 1
-                else:
-                    break
-            
-            # 删除找到的文件（通常只有一个）
-            for target_file in target_files:
-                # 简单的验证：检查文件大小是否相同
-                if target_file.stat().st_size == source_file.stat().st_size:
-                    target_file.unlink()
-                    self.logger.info(f"已删除复制的文件: {target_file}")
-                    break
-            
-        except Exception as e:
-            self.logger.error(f"删除复制文件失败: {e}")
-    
     def _get_file_hash(self, file_path):
         """计算文件的MD5哈希值"""
         try:
@@ -4300,70 +4017,6 @@ class ImageClassifier(QMainWindow):
             if not new_target.exists():
                 return str(new_target)
             counter += 1
-
-    def _execute_file_operation_with_check(self, source_path, category_name, is_remove=False):
-        """执行文件操作前先检查目标文件是否存在，确保重复检测不被绕过"""
-        try:
-            source_file = Path(source_path)
-            if not source_file.exists():
-                self.logger.warning(f"源文件不存在: {source_path}")
-                return
-            
-            # 计算目标路径
-            parent_dir = self.current_dir.parent
-            if is_remove:
-                target_dir = parent_dir / 'remove'
-            else:
-                target_dir = parent_dir / category_name
-            
-            target_file = target_dir / source_file.name
-            
-            # 关键：无论内存状态如何，都检查目标文件是否已存在
-            if target_file.exists():
-                self.logger.info(f"检测到目标文件已存在，触发重复处理: {target_file}")
-                # 触发重复文件处理逻辑
-                handled_target = self._handle_duplicate_file(source_path, str(target_file))
-                if handled_target is None:
-                    # 用户选择取消
-                    self.logger.info(f"用户取消文件操作: {source_file.name}")
-                    return
-                # 如果用户选择了重命名，更新目标路径
-                target_file = Path(handled_target)
-                
-                # 如果选择覆盖，需要在执行时直接覆盖
-                if str(target_file) == str(target_dir / source_file.name):
-                    self.logger.info(f"用户选择覆盖现有文件: {target_file}")
-            
-            # 执行实际的文件操作
-            self._execute_file_operation_direct(source_path, str(target_file), is_remove)
-            
-        except Exception as e:
-            self.logger.error(f"文件操作检查失败: {e}")
-            # 回退到原来的逻辑
-            self._execute_file_operation(source_path, category_name, is_remove)
-    
-    def _execute_file_operation_direct(self, source_path, target_path, is_remove=False):
-        """直接执行文件操作，不再检查重复"""
-        try:
-            source_file = Path(source_path)
-            target_file = Path(target_path)
-            
-            # 创建目标目录
-            target_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # 执行文件操作
-            if self.is_copy_mode:
-                shutil.copy2(source_file, target_file)
-                operation_type = "复制"
-            else:
-                source_file.rename(target_file)
-                operation_type = "移动"
-            
-            self.logger.info(f"文件{operation_type}成功: {source_file.name} -> {target_file}")
-            
-        except Exception as e:
-            self.logger.error(f"直接文件操作失败: {e}")
-            raise
 
     def refresh_categories(self):
         """刷新类别并同步文件状态"""
