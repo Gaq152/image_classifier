@@ -7,7 +7,7 @@
 
 import logging
 from PyQt6.QtCore import QThread, pyqtSignal
-from ....core.update_utils import fetch_manifest
+from core.update_utils import fetch_manifest
 
 
 class UpdateCheckerThread(QThread):

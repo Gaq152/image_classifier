@@ -14,11 +14,11 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QPushButton, QProgressBar, QApplication, QTextEdit, QMessageBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QPixmap
-from ..core.update_utils import download_with_progress, sha256_file, launch_self_update
-from ..utils.paths import get_update_dir
+from core.update_utils import download_with_progress, sha256_file, launch_self_update
+from utils.paths import get_update_dir
 from .components.toast import toast_error
 from .components.styles.theme import default_theme
-from ..utils.app_config import get_app_config
+from utils.app_config import get_app_config
 
 
 class UpdateInfoDialog(QDialog):

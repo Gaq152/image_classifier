@@ -17,7 +17,7 @@ from PyQt6.QtGui import QPixmap, QPainter, QFont
 from ..toast import toast_floating
 from ..styles import apply_enhanced_image_label_style
 from ..styles.widget_styles import WidgetStyles
-from ....utils.app_config import get_app_config
+from utils.app_config import get_app_config
 
 
 class EnhancedImageLabel(QLabel):
