@@ -1887,85 +1887,16 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"延迟加载类别失败: {e}")
     
     def _load_categories_only(self):
-        """只加载类别，不启动同步操作"""
+        """加载类别（通过CategoryManager）"""
+        if not self._category_manager:
+            self.logger.error("CategoryManager未初始化")
+            return
         if not self.current_dir:
             self.logger.warning("当前目录未设置，无法加载类别")
             return
-            
-        try:
-            self.logger.info("开始加载类别...")
-            self.categories = set()
-            removed_categories = []
-            
-            # 扫描图片目录的父目录下的同级目录作为类别
-            parent_dir = self.current_dir.parent
-            self.logger.info(f"扫描类别目录: {parent_dir}")
-            
-            for item in parent_dir.iterdir():
-                if item.is_dir():
-                    is_reserved = item.name in self.config.reserved_categories
-                    is_current_dir = item == self.current_dir
-                    is_ignored = self.config.is_category_ignored(item.name)
 
-                    if is_ignored:
-                        self.logger.info(f"⊘ 忽略类别目录: {item.name}")
-                    elif not is_reserved and not is_current_dir:
-                        self.categories.add(item.name)
-                        self.logger.info(f"✅ 发现类别目录: {item.name}")
-            
-            # 检查配置中的类别是否还存在对应目录
-            config_categories = set(self.config.category_shortcuts.keys())
-            
-            for category_name in config_categories:
-                category_dir = parent_dir / category_name
-                if category_dir.exists() and category_dir.is_dir():
-                    self.categories.add(category_name)
-                else:
-                    removed_categories.append(category_name)
-            
-            # 清理config.json中不存在的类别
-            if removed_categories:
-                for category in removed_categories:
-                    if category in self.config.category_shortcuts:
-                        del self.config.category_shortcuts[category]
-                        
-                # 清理分类状态中的无效类别
-                invalid_classifications = []
-                for img_path, category in self.classified_images.items():
-                    if category in removed_categories:
-                        invalid_classifications.append(img_path)
-                        
-                for img_path in invalid_classifications:
-                    del self.classified_images[img_path]
-            
-            self.logger.info(f"加载完成，共有类别: {len(self.categories)}")
-            
-            # 分配默认快捷键
-            self.config.assign_default_shortcuts(self.categories)
-
-            # 根据配置的排序模式排序类别（count模式需要分类数量统计）
-            category_counts = self._get_category_counts() if self.config.category_sort_mode == "count" else None
-            self.ordered_categories = self.config.get_sorted_categories(
-                self.categories, category_counts=category_counts
-            )
-
-            # 保存更新后的配置
-            self.config.save_config()
-
-            # 初始化类别计数
-            self.init_category_counts()
-
-            # 更新排序方向按钮的UI状态（从配置加载后同步）
-            self._sync_sort_button_state()
-
-            # 更新UI
-            self.update_category_buttons()
-            self.setup_shortcuts()
-            
-        except Exception as e:
-            self.logger.error(f"加载类别失败: {str(e)}")
-            self.categories = set()
-            self.ordered_categories = []
+        self._category_manager.load_categories(self.current_dir.parent)
+        # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
     
     def load_categories(self):
         """公共的加载类别方法，供对话框调用"""
@@ -5963,54 +5894,13 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"高亮类别失败: {e}")
     
     def rename_category(self, old_name, new_name):
-        """重命名类别"""
-        try:
-            if not self.current_dir:
-                toast_error(self,"当前目录未设置")
-                return
-                
-            old_path = self.current_dir.parent / old_name
-            new_path = self.current_dir.parent / new_name
-            
-            if not old_path.exists():
-                toast_error(self,f"类别目录不存在: {old_name}")
-                return
-                
-            if new_path.exists():
-                toast_error(self,f"目标类别已存在: {new_name}")
-                return
-            
-            # 重命名目录
-            old_path.rename(new_path)
-            
-            # 更新配置中的快捷键映射
-            if old_name in self.config.category_shortcuts:
-                shortcut = self.config.category_shortcuts.pop(old_name)
-                self.config.category_shortcuts[new_name] = shortcut
-            
-            # 更新分类状态中的类别名称
-            updates = {}
-            for img_path, category in self.classified_images.items():
-                if category == old_name:
-                    updates[img_path] = new_name
-            
-            for img_path, new_category in updates.items():
-                self.classified_images[img_path] = new_category
-            
-            # 保存配置和状态
-            self.config.save_config()
-            self.save_state()
-            
-            # 重新加载类别
-            self.load_categories()
-            
-            toast_success(self,f"类别已重命名: {old_name} → {new_name}")
-            self.logger.info(f"类别重命名成功: {old_name} → {new_name}")
-            
-        except Exception as e:
-            self.logger.error(f"重命名类别失败: {e}")
-            toast_error(self,f"重命名失败: {str(e)}")
-    
+        """重命名类别（通过CategoryManager）"""
+        if not self._category_manager:
+            self.logger.error("CategoryManager未初始化")
+            return
+        self._category_manager.rename_category(old_name, new_name)
+        # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
+
     def ignore_category(self, category_name):
         """忽略类别 - 不删除目录，只是不显示"""
         try:
@@ -6075,115 +5965,12 @@ class ImageClassifier(QMainWindow):
             toast_error(self, f"显示对话框失败: {str(e)}")
 
     def delete_category(self, category_name):
-        """删除类别 - 带二次确认"""
-        try:
-            if not self.current_dir:
-                toast_error(self,"当前目录未设置")
-                return
-                
-            category_path = self.current_dir.parent / category_name
-            
-            if not category_path.exists():
-                toast_error(self,f"类别目录不存在: {category_name}")
-                return
-            
-            # 统计目录中的图片数量
-            image_count = 0
-            if category_path.is_dir():
-                for file_path in category_path.iterdir():
-                    if file_path.is_file() and file_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff']:
-                        image_count += 1
-            
-            # 二次确认对话框
-            if image_count > 0:
-                reply = self.show_question_message(
-                    "确认删除类别", 
-                    f"类别目录 '{category_name}' 中有 {image_count} 张图片文件。\n\n"
-                    f"确认删除这个类别目录吗？\n"
-                    f"这将永久删除目录及其中的所有文件！"
-                )
-                
-                if reply != QMessageBox.StandardButton.Yes:
-                    self.logger.info(f"用户取消删除类别: {category_name}")
-                    return
-            else:
-                # 空目录只需简单确认
-                reply = self.show_question_message(
-                    "确认删除类别", 
-                    f"确认删除空的类别目录 '{category_name}' 吗？"
-                )
-                
-                if reply != QMessageBox.StandardButton.Yes:
-                    self.logger.info(f"用户取消删除空类别: {category_name}")
-                    return
-            
-            # 删除目录及其内容
-            shutil.rmtree(category_path)
-            
-            # 从配置中移除
-            if category_name in self.config.category_shortcuts:
-                del self.config.category_shortcuts[category_name]
-            
-            # 从分类状态中移除相关记录，并根据操作模式处理文件状态
-            to_remove = []
-            for img_path, category in self.classified_images.items():
-                if category == category_name:
-                    to_remove.append(img_path)
-            
-            # 清除分类记录
-            for img_path in to_remove:
-                del self.classified_images[img_path]
-            
-            # 根据操作模式处理文件状态
-            if not self.is_copy_mode:
-                # 移动模式：图片已从原目录移动到类别目录，删除类别后图片不再存在于原目录
-                # 需要从图片文件列表中移除这些图片
-                files_to_remove = []
-                for img_path in to_remove:
-                    img_file = Path(img_path)
-                    # 检查原目录中是否还有这个文件
-                    if not img_file.exists():
-                        files_to_remove.append(img_path)
-                
-                # 更新图片文件列表
-                if files_to_remove:
-                    self.image_files = [f for f in self.image_files if str(f) not in files_to_remove]
-                    self.total_images = len(self.image_files)
-                    
-                    # 调整当前索引
-                    if self.current_index >= len(self.image_files):
-                        self.current_index = max(0, len(self.image_files) - 1)
-                        
-                    self.logger.info(f"移动模式下删除类别，从图片列表中移除了 {len(files_to_remove)} 张图片")
-            
-            # 复制模式下不需要特殊处理，图片仍在原目录中，刷新时会自动恢复为未分类状态
-            
-            # 保存配置和状态
-            self.config.save_config()
-            self.save_state()
-            
-            # 重新加载类别
-            self.load_categories()
-            
-            # 刷新UI以反映变化
-            self.schedule_ui_update('image_list', 'category_buttons', 'category_counts', 'statistics')
-            
-            # 如果当前显示的图片被移除，需要重新显示
-            if (not self.is_copy_mode and self.image_files and 
-                0 <= self.current_index < len(self.image_files)):
-                self.show_current_image()
-            
-            # 根据图片数量显示不同的成功信息
-            if image_count > 0:
-                toast_success(self,f"类别已删除: {category_name} (删除了 {image_count} 张图片文件)")
-                self.logger.info(f"类别删除成功: {category_name}，删除了 {image_count} 张图片")
-            else:
-                # 空目录删除成功，不需要弹窗，只记录日志
-                self.logger.info(f"空类别删除成功: {category_name}")
-            
-        except Exception as e:
-            self.logger.error(f"删除类别失败: {e}")
-            toast_error(self,f"删除失败: {str(e)}")
+        """删除类别（通过CategoryManager）"""
+        if not self._category_manager:
+            self.logger.error("CategoryManager未初始化")
+            return
+        self._category_manager.delete_category(category_name)
+        # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
     
     def save_state(self):
         """异步保存当前状态到图片同级目录"""
