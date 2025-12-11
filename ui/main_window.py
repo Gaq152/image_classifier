@@ -313,6 +313,8 @@ class ImageClassifier(QMainWindow):
             # 连接 CategoryManager 信号
             self._category_manager.categories_changed.connect(self.on_categories_changed)
             self._category_manager.selection_changed.connect(self.on_category_selection_changed)
+            self._category_manager.mode_changed.connect(self.on_category_mode_changed)
+            self._category_manager.sort_mode_changed.connect(self.on_sort_mode_changed)
 
         except Exception as e:
             self.logger.error(f"Manager初始化失败: {e}")
@@ -2455,6 +2457,16 @@ class ImageClassifier(QMainWindow):
         self.current_category_index = index
         self.selected_category = name
 
+    def on_category_mode_changed(self, is_multi: bool):
+        """多分类模式变更"""
+        self.is_multi_category = is_multi
+        self.schedule_ui_update('ui_state', 'category_buttons')
+
+    def on_sort_mode_changed(self, sort_mode: str, ascending: bool):
+        """排序模式变更"""
+        self.schedule_ui_update('category_buttons')
+        self.statusBar.showMessage(f"✅ 排序已更新：{sort_mode}")
+
     # ===== UI更新和显示方法 =====
     
     def schedule_ui_update(self, *components):
@@ -3809,147 +3821,6 @@ class ImageClassifier(QMainWindow):
         self._file_ops_manager._undo_classification(image_path, category)
         # Manager会触发file_restored信号，UI刷新在on_file_restored中处理
 
-    def _get_file_hash(self, file_path):
-        """计算文件的MD5哈希值"""
-        try:
-            hash_md5 = hashlib.md5()
-            with open(file_path, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    hash_md5.update(chunk)
-            return hash_md5.hexdigest()
-        except Exception as e:
-            self.logger.error(f"计算文件哈希失败: {e}")
-            return None
-    
-    def _handle_duplicate_file(self, source_path, target_path):
-        """处理文件重复的情况"""
-        source_file = Path(source_path)
-        target_file = Path(target_path)
-        
-        # 计算哈希值比较
-        source_hash = self._get_file_hash(source_path)
-        target_hash = self._get_file_hash(target_path)
-        
-        # 判断是否为相同文件
-        is_same_file = (source_hash == target_hash and source_hash is not None)
-        
-        # 准备提示信息
-        if is_same_file:
-            hash_info = "✅ 文件内容完全相同（哈希值匹配）"
-            main_text = f"目标位置已存在同名文件：\n{target_file.name}"
-            detail_text = f"{hash_info}\n\n这是同一张图片，建议选择「覆盖」或「取消」。"
-        else:
-            hash_info = "⚠️ 文件内容不同（哈希值不匹配）"
-            main_text = f"目标位置已存在同名文件：\n{target_file.name}"
-            detail_text = f"{hash_info}\n\n虽然文件名相同，但这是不同的图片。"
-        
-        # 创建自定义消息框
-        msg = QMessageBox(self)
-        msg.setWindowTitle("文件名冲突")
-        msg.setText(main_text)
-        msg.setInformativeText(detail_text)
-        msg.setIcon(QMessageBox.Icon.Question)
-        
-        # 设置程序图标
-        try:
-            icon_path = self._get_resource_path('assets/icon.ico')
-            if icon_path and icon_path.exists():
-                msg.setWindowIcon(QIcon(str(icon_path)))
-        except Exception:
-            pass
-        
-        # 设置主题样式
-        c = default_theme.colors
-        msg.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {c.BACKGROUND_CARD};
-                color: {c.TEXT_PRIMARY};
-                border: 1px solid {c.BORDER_MEDIUM};
-                border-radius: 8px;
-                font-size: 14px;
-                min-width: 400px;
-            }}
-            QMessageBox QLabel {{
-                color: {c.TEXT_PRIMARY};
-                font-size: 14px;
-                padding: 10px;
-            }}
-            QMessageBox QPushButton {{
-                background-color: {c.PRIMARY};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-                margin: 2px;
-            }}
-            QMessageBox QPushButton:hover {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-            QMessageBox QPushButton:pressed {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-            QMessageBox QPushButton[text="覆盖"] {{
-                background-color: {c.ERROR};
-            }}
-            QMessageBox QPushButton[text="覆盖"]:hover {{
-                background-color: {c.ERROR_DARK};
-            }}
-            QMessageBox QPushButton[text="重命名"] {{
-                background-color: {c.WARNING};
-            }}
-            QMessageBox QPushButton[text="重命名"]:hover {{
-                background-color: {c.WARNING_DARK};
-            }}
-        """)
-        
-        # 添加中文按钮
-        overwrite_btn = msg.addButton("覆盖", QMessageBox.ButtonRole.AcceptRole)
-        rename_btn = msg.addButton("重命名", QMessageBox.ButtonRole.ActionRole)
-        cancel_btn = msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-        
-        # 设置默认按钮
-        if is_same_file:
-            msg.setDefaultButton(overwrite_btn)
-        else:
-            msg.setDefaultButton(rename_btn)
-        
-        # 显示对话框
-        msg.exec()
-        
-        clicked_button = msg.clickedButton()
-        
-        if clicked_button == overwrite_btn:
-            # 覆盖：返回原路径
-            self.logger.info(f"用户选择覆盖同名文件: {target_file.name}")
-            return target_path
-        elif clicked_button == rename_btn:
-            # 重命名：返回新路径
-            renamed_path = self._get_renamed_target(target_path)
-            self.logger.info(f"用户选择重命名文件: {target_file.name} -> {Path(renamed_path).name}")
-            return renamed_path
-        else:
-            # 取消：返回None
-            self.logger.info(f"用户取消文件操作: {target_file.name}")
-            return None
-    
-    def _get_renamed_target(self, target_path):
-        """获取重命名后的目标路径"""
-        target_file = Path(target_path)
-        base_name = target_file.stem
-        ext = target_file.suffix
-        parent_dir = target_file.parent
-        
-        counter = 1
-        while True:
-            new_target = parent_dir / f"{base_name}_{counter}{ext}"
-            if not new_target.exists():
-                return str(new_target)
-            counter += 1
-
-    def refresh_categories(self):
         """刷新类别并同步文件状态"""
         if self.current_dir:
             try:
