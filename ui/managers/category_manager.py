@@ -644,3 +644,21 @@ class CategoryManager(QObject):
                 updates[img_path] = new_list
         for img_path, new_value in updates.items():
             self._mutator.set_classified_image(img_path, new_value)
+
+    def _safe_save_config(self):
+        """安全保存配置（捕获异常，避免CRITICAL错误）"""
+        try:
+            self._state.config.save_config()
+            self._logger.debug("重试保存配置成功")
+        except Exception as e:
+            self._logger.error(f"重试保存配置失败（可能被外部程序占用）: {e}")
+            # 捕获异常，不再抛出，避免未捕获异常导致程序崩溃
+
+    def _safe_save_state(self):
+        """安全保存状态（捕获异常，避免CRITICAL错误）"""
+        try:
+            self._ui.save_state()
+            self._logger.debug("重试保存状态成功")
+        except Exception as e:
+            self._logger.error(f"重试保存状态失败（可能被外部程序占用）: {e}")
+            # 捕获异常，不再抛出
