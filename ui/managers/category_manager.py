@@ -511,9 +511,17 @@ class CategoryManager(QObject):
                     self._state.config.save_config()
                 except Exception as e:
                     if isinstance(e, PermissionError) or "Permission denied" in str(e):
-                        self._logger.warning("配置文件被占用，500ms后重试保存")
-                        # 包装成安全方法，避免重试失败导致CRITICAL错误
-                        QTimer.singleShot(500, lambda: self._safe_save_config())
+                        # 防重入：检查是否已有待处理的重试
+                        if not getattr(self._state.config, '_save_pending', False):
+                            self._logger.warning("配置文件被占用，500ms后重试保存")
+                            self._state.config._save_pending = True
+                            # 重试时清除 pending 标志
+                            def retry_save():
+                                self._state.config._save_pending = False
+                                self._safe_save_config()
+                            QTimer.singleShot(500, retry_save)
+                        else:
+                            self._logger.debug("已有待处理的保存重试，跳过本次重试")
                     else:
                         raise
 

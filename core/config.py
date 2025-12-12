@@ -27,6 +27,7 @@ class Config:
         self._lock = threading.Lock()
         self._save_lock = threading.Lock()  # 文件写入锁，防止并发保存
         self._last_save_time = 0  # 上次保存时间戳，用于防抖
+        self._save_pending = False  # 标志：是否有待处理的保存任务
         
         # 系统保留的快捷键和类别
         self.reserved_shortcuts = {
