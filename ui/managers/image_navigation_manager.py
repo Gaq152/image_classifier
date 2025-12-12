@@ -705,15 +705,22 @@ class ImageNavigationManager(QObject):
 
                     target_index = next_visible
             else:
-                # 无筛选模式：使用剩余列表的就近索引
+                # 无筛选模式：直接跳到下一张（如果有）
                 image_files = self._state.image_files
                 if not image_files:
                     self._mutator.set_current_index(-1)
                     self._ui.show_toast('info', "当前没有可显示的图片")
                     self.sync_image_list_selection()
                     return
-                # 如果原始索引超出范围，调整到最后一张
-                target_index = min(max(original_index, 0), len(image_files) - 1)
+
+                # 修复：删除/分类后应该跳到下一张，而不是停留在原索引
+                # 如果原索引后还有图片，跳到下一张；否则跳到前一张
+                if original_index < len(image_files) - 1:
+                    target_index = original_index + 1  # 下一张
+                elif original_index > 0:
+                    target_index = original_index - 1  # 前一张
+                else:
+                    target_index = 0  # 只剩一张或第一张
 
             # 更新索引并发射信号
             self._mutator.set_current_index(target_index)
