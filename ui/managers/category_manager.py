@@ -109,13 +109,7 @@ class CategoryManager(QObject):
             target_dir.mkdir(parents=True, exist_ok=True)
             self._mutator.add_category(name)
             self._state.config.assign_default_shortcuts(self._state.categories | {name})
-
-            # 保存配置（容错）
-            try:
-                self._state.config.save_config()
-            except Exception as save_error:
-                self._logger.warning(f"添加类别后保存配置失败（操作已完成）: {save_error}")
-
+            self._state.config.save_config()
             self._resort_categories()
             self._rebuild_category_buttons()
             self.categories_changed.emit(list(self._state.ordered_categories))
@@ -175,15 +169,9 @@ class CategoryManager(QObject):
             # 删除目录
             shutil.rmtree(str(category_path))
             self._cleanup_category_state(name)
-            self._mutator.remove_category(name)  # 从 categories 集合中移除
+            self._mutator.remove_category(name)
             self._state.config.category_shortcuts.pop(name, None)
-
-            # 保存配置（容错：即使保存失败，删除操作也已完成）
-            try:
-                self._state.config.save_config()
-            except Exception as save_error:
-                self._logger.warning(f"删除类别后保存配置失败（操作已完成）: {save_error}")
-                # 不抛出异常，让删除操作继续完成
+            self._state.config.save_config()
 
             # 移动模式：从图片文件列表中移除不存在的图片
             if not self._state.is_copy_mode and affected_paths:
@@ -208,14 +196,10 @@ class CategoryManager(QObject):
 
                     self._logger.info(f"移动模式下删除类别，从图片列表中移除了 {len(files_to_remove)} 张图片")
 
-            # 保存状态（容错：即使保存失败，操作也已完成）
-            try:
-                self._ui.save_state()
-            except Exception as save_error:
-                self._logger.warning(f"删除类别后保存状态失败（操作已完成）: {save_error}")
-                # 不抛出异常，让删除操作继续完成
+            # 保存状态
+            self._ui.save_state()
 
-            # 刷新过滤视图（分类记录已清理，需重算可见列表）
+            # 刷新过滤视图
             self._ui.apply_image_filter()
 
             self._resort_categories()
@@ -436,7 +420,7 @@ class CategoryManager(QObject):
             if ignored_removed:
                 for name in ignored_removed:
                     self._state.config.remove_ignored_category(name)
-                config_needs_save = True  # 标记需要保存，但延迟到末尾统一保存
+                config_needs_save = True
                 self._logger.info(f"已移除不存在的忽略类别: {', '.join(ignored_removed)}")
 
             for item in parent_dir.iterdir():
@@ -485,17 +469,12 @@ class CategoryManager(QObject):
                 config_needs_save = True  # 快捷键映射变化，需要保存配置
 
             if state_changed:
-                # 分类记录变动后落盘：启动阶段可能被占用，失败则延迟重试
+                # 分类记录变动后落盘
                 try:
                     self._ui.save_state()
                 except Exception as e:
-                    if isinstance(e, PermissionError) or "Permission denied" in str(e):
-                        self._logger.warning("状态文件被占用，500ms后重试保存")
-                        # 包装成 lambda 捕获异常
-                        QTimer.singleShot(500, lambda: self._safe_save_state())
-                    else:
-                        raise
-                # 注意：UI刷新由后续的categories_changed信号触发，避免重复刷新
+                    # 保存失败只记录日志，不中断流程
+                    self._logger.error(f"保存状态失败: {e}")
 
             # 分配默认快捷键并排序
             self._state.config.assign_default_shortcuts(categories)
@@ -505,25 +484,13 @@ class CategoryManager(QObject):
             self._mutator.set_categories(categories)
             self._mutator.set_ordered_categories(ordered)
 
-            # 统一保存配置（只在末尾保存一次，避免重复）
+            # 统一保存配置（只在末尾保存一次）
             if config_needs_save:
                 try:
                     self._state.config.save_config()
                 except Exception as e:
-                    if isinstance(e, PermissionError) or "Permission denied" in str(e):
-                        # 防重入：检查是否已有待处理的重试
-                        if not getattr(self._state.config, '_save_pending', False):
-                            self._logger.warning("配置文件被占用，500ms后重试保存")
-                            self._state.config._save_pending = True
-                            # 重试时清除 pending 标志
-                            def retry_save():
-                                self._state.config._save_pending = False
-                                self._safe_save_config()
-                            QTimer.singleShot(500, retry_save)
-                        else:
-                            self._logger.debug("已有待处理的保存重试，跳过本次重试")
-                    else:
-                        raise
+                    # 保存失败只记录日志，不中断流程
+                    self._logger.error(f"保存配置失败: {e}")
 
             # 初始化选中状态（修复Codex Review中等问题）
             self._current_category_index = 0
@@ -665,21 +632,3 @@ class CategoryManager(QObject):
                 updates[img_path] = new_list
         for img_path, new_value in updates.items():
             self._mutator.set_classified_image(img_path, new_value)
-
-    def _safe_save_config(self):
-        """安全保存配置（捕获异常，避免CRITICAL错误）"""
-        try:
-            self._state.config.save_config()
-            self._logger.debug("重试保存配置成功")
-        except Exception as e:
-            self._logger.error(f"重试保存配置失败（可能被外部程序占用）: {e}")
-            # 捕获异常，不再抛出，避免未捕获异常导致程序崩溃
-
-    def _safe_save_state(self):
-        """安全保存状态（捕获异常，避免CRITICAL错误）"""
-        try:
-            self._ui.save_state()
-            self._logger.debug("重试保存状态成功")
-        except Exception as e:
-            self._logger.error(f"重试保存状态失败（可能被外部程序占用）: {e}")
-            # 捕获异常，不再抛出
