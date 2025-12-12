@@ -3590,11 +3590,12 @@ class ImageClassifier(QMainWindow):
         self.filter_button.style().unpolish(self.filter_button)
         self.filter_button.style().polish(self.filter_button)
 
-    def apply_image_filter(self):
+    def apply_image_filter(self, suppress_show: bool = False):
         """
-        应用过滤器到图片列表
-        Phase 1.1: Model/View架构版本，保留缩略图缓存
-        Codex Review修复：空数据处理
+        应用过滤器到图片列表（支持抑制显示，避免重复刷新）
+
+        Args:
+            suppress_show: 是否抑制 show_current_image 调用（默认 False）
         """
         # Codex Review修复：空数据时也要更新Model，避免保留旧数据
         if not hasattr(self, 'image_files') or not self.image_files:
