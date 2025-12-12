@@ -55,7 +55,7 @@ from utils.app_config import get_app_config
 from core.scanner import FileScannerThread
 from core.image_loader import HighPerformanceImageLoader
 from utils.exceptions import ImageClassifierError, FileOperationError, ConfigError
-from utils.file_operations import normalize_folder_name, retry_file_operation, is_network_path
+from utils.file_operations import normalize_folder_name, retry_file_operation, is_network_path, remove_readonly
 from core.file_manager import FileOperationManager
 from core.update_utils import fetch_manifest, launch_self_update
 from utils.performance import performance_monitor
@@ -1897,7 +1897,7 @@ class ImageClassifier(QMainWindow):
             self.logger.warning("当前目录未设置，无法加载类别")
             return
 
-        self._category_manager.load_categories(self.current_dir.parent)
+        self._category_manager.load_categories()
         # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
     
     def load_categories(self):
@@ -2257,6 +2257,10 @@ class ImageClassifier(QMainWindow):
             # 检查索引是否有效（大于0且小于图片总数）
             if last_index <= 0 or not self.image_files or last_index >= len(self.image_files):
                 self.logger.debug(f"last_index 无效或为初始值: {last_index}, 不提示跳转")
+                # 修复：索引无效时显示第一张图片（如果有图片）
+                if self.image_files and self.current_index >= 0:
+                    self.logger.debug("显示第一张图片")
+                    self.show_current_image()
                 return
 
             # 弹出确认对话框
@@ -2324,8 +2328,11 @@ class ImageClassifier(QMainWindow):
                 self.jump_to_image(last_index)
                 toast_info(self, f"已跳转到第 {last_index + 1} 张图片")
             else:
-                # 用户选择从头开始
+                # 用户选择从头开始（修复：显示第一张图片）
                 self.logger.info("用户选择从头开始")
+                if self.image_files and self.current_index >= 0:
+                    self.show_current_image()
+                    toast_info(self, "从第一张图片开始")
 
         except Exception as e:
             self.logger.error(f"检查上次位置失败: {e}")
@@ -3257,11 +3264,15 @@ class ImageClassifier(QMainWindow):
     
     def confirm_category(self):
         """确认当前选中的类别"""
-        if (self.ordered_categories and 
+        if (self.ordered_categories and
             0 <= self.current_category_index < len(self.ordered_categories)):
             category_name = self.ordered_categories[self.current_category_index]
             self.move_to_category(category_name)
-    
+
+    def refresh_categories(self):
+        """刷新类别目录（F5快捷键 / 工具栏按钮回调）"""
+        self.refresh_and_sync()
+
     # ===== 事件处理方法 =====
     
     def on_image_list_item_clicked(self, index):
@@ -3779,6 +3790,12 @@ class ImageClassifier(QMainWindow):
             self._file_ops_manager.move_to_category(str(current_path), category_name)
             # Manager会触发file_moved信号，UI刷新在on_file_moved中处理
 
+    def get_current_image_path(self):
+        """获取当前图片路径"""
+        if 0 <= self.current_index < len(self.image_files):
+            return self.image_files[self.current_index]
+        return None
+
     def _update_single_image_status(self, image_index, image_path):
         """更新单个图片在列表中的状态图标"""
         try:
@@ -3821,44 +3838,52 @@ class ImageClassifier(QMainWindow):
         self._file_ops_manager._undo_classification(image_path, category)
         # Manager会触发file_restored信号，UI刷新在on_file_restored中处理
 
+    def refresh_and_sync(self):
         """刷新类别并同步文件状态"""
-        if self.current_dir:
-            try:
-                self.logger.info("开始刷新并同步目录状态...")
-                
-                # 先重新加载类别
-                self._load_categories_only()
-                
-                # 同步文件状态
-                sync_results = self._sync_file_states()
-                
-                # 强制重新计算类别计数
-                self.init_category_counts()
-                
-                # 健康检查并修复快捷键（这是关键修复）
-                QTimer.singleShot(100, self._check_and_fix_shortcuts)
-                
-                # 强制更新所有UI组件，无论是否检测到变化
-                self.schedule_ui_update('image_list', 'category_buttons', 'category_counts', 'statistics')
+        if not self._category_manager:
+            self.logger.error("CategoryManager未初始化")
+            return
+        if not self.current_dir:
+            self.logger.warning("当前目录未设置，跳过刷新")
+            return
+        try:
+            self.logger.info("开始刷新并同步目录状态...")
 
-                # Bug修复-P1：F5刷新后重新应用过滤状态（Codex方案：用标志位替代硬编码延迟）
-                # 在perform_batch_ui_update完成image_list更新后自动调用apply_image_filter
-                self._pending_reapply_filter = True
+            # 先重新加载类别
+            self._load_categories_only()
 
-                # 显示同步结果（只有在有变化时才显示）
-                if sync_results['changes_detected']:
-                    self._show_sync_results(sync_results)
-                    toast_success(self,"目录状态已刷新并同步")
-                else:
-                    # 即使没有检测到变化，也要显示刷新完成的信息
-                    self.statusBar.showMessage("🔄 目录状态已刷新")
-                    toast_success(self,"目录状态已刷新")
+            # 同步文件状态
+            sync_results = self._sync_file_states()
 
-                self.logger.info("目录状态刷新完成")
-                
-            except Exception as e:
-                self.logger.error(f"刷新目录状态失败: {e}")
-                toast_error(self,f"刷新失败: {str(e)}")
+            # 强制重新计算类别计数
+            self.init_category_counts()
+
+            # 健康检查并修复快捷键（这是关键修复）
+            QTimer.singleShot(100, self._check_and_fix_shortcuts)
+
+            # 更新UI组件（category_buttons和category_counts由categories_changed信号触发，避免重复）
+            self.schedule_ui_update('image_list', 'statistics')
+
+            # Bug修复-P1：F5刷新后重新应用过滤状态（Codex方案：用标志位替代硬编码延迟）
+            # 在perform_batch_ui_update完成image_list更新后自动调用apply_image_filter
+            self._pending_reapply_filter = True
+
+            # 显示同步结果（只有在有变化时才显示）
+            if sync_results.get('changes_detected'):
+                # 有变化时才持久化，减少无效写盘
+                self.save_state()
+                self._show_sync_results(sync_results)
+                toast_success(self, "目录状态已刷新并同步")
+            else:
+                # 即使没有检测到变化，也要显示刷新完成的信息
+                self.statusBar.showMessage("🔄 目录状态已刷新")
+                toast_success(self, "目录状态已刷新")
+
+            self.logger.info("目录状态刷新完成")
+
+        except Exception as e:
+            self.logger.error(f"刷新目录状态失败: {e}")
+            toast_error(self, f"刷新失败: {str(e)}")
     
     def _check_and_fix_shortcuts(self):
         """检查并修复快捷键"""
@@ -4006,19 +4031,60 @@ class ImageClassifier(QMainWindow):
         warning_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
         layout.addWidget(warning_label)
 
-        # 按钮
+        # 按钮布局（修复：危险操作按钮在左侧）
         button_layout = QHBoxLayout()
-        button_layout.addStretch()
 
-        cancel_button = QPushButton("取消")
-        cancel_button.setObjectName("cancelButton")
-        cancel_button.clicked.connect(dialog.reject)
-        button_layout.addWidget(cancel_button)
+        c = default_theme.colors
+        s = default_theme.sizes
 
+        # 统一的按钮基础样式
+        button_base_style = f"""
+            QPushButton {{
+                border: none;
+                border-radius: {s.RADIUS_MEDIUM};
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 120px;
+                font-size: {s.FONT_MD};
+            }}
+        """
+
+        # 确认按钮（危险操作，红色背景，放在左侧）
         confirm_button = QPushButton(f"确认迁移到{target_mode_name}模式")
-        confirm_button.setObjectName("primaryButton")
         confirm_button.clicked.connect(dialog.accept)
+        confirm_button.setStyleSheet(button_base_style + f"""
+            QPushButton {{
+                background-color: {c.ERROR};
+                color: {c.TEXT_ON_PRIMARY};
+            }}
+            QPushButton:hover {{
+                background-color: {c.ERROR_DARK};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.ERROR_DARK};
+            }}
+        """)
         button_layout.addWidget(confirm_button)
+
+        button_layout.addStretch()  # 弹簧在中间
+
+        # 取消按钮（安全操作，放在右侧，样式与确认按钮对等）
+        cancel_button = QPushButton("取消")
+        cancel_button.clicked.connect(dialog.reject)
+        cancel_button.setStyleSheet(button_base_style + f"""
+            QPushButton {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_PRIMARY};
+                border: 1px solid {c.BORDER_MEDIUM};
+            }}
+            QPushButton:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.BACKGROUND_PRESSED};
+            }}
+        """)
+        button_layout.addWidget(cancel_button)
 
         layout.addLayout(button_layout)
 
@@ -4147,8 +4213,15 @@ class ImageClassifier(QMainWindow):
                         'stat': file_path_obj.stat() if file_path_obj.exists() else None
                     }
 
-                    # 删除原文件
-                    file_path_obj.unlink()
+                    # 删除原文件（修复：移除只读属性后再删除）
+                    try:
+                        file_path_obj.unlink()
+                    except PermissionError as pe:
+                        # 只读文件，尝试移除只读属性后重试
+                        self.logger.warning(f"文件只读，尝试移除只读属性: {file_path}")
+                        remove_readonly(file_path_obj)
+                        retry_file_operation(file_path_obj.unlink, max_retries=2)
+
                     deleted_files.append(file_backup_info)
                     deleted_count += 1
                     self.logger.debug(f"删除原文件: {file_path}")

@@ -21,6 +21,7 @@ from typing import Optional, Union, List
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from .._main_window.state.interfaces import StateView, StateMutator, UIHooks, ImageNavigator
+from utils.file_operations import retry_file_operation, remove_readonly
 
 
 class FileOperationManager(QObject):
@@ -131,13 +132,17 @@ class FileOperationManager(QObject):
                     self._ui.refresh_category_buttons_style()
                     return
 
-                # 重置分类
+                # 重置分类：先创建新副本，再删除旧副本（避免删除失败影响新分类）
                 self._mutator.set_classified_image(file_path, category_name)
                 if was_removed:
                     self._move_from_remove_to_category(real_path, category_name)
                     self._mutator.remove_from_removed(file_path)
                 else:
                     self._execute_file_operation_with_check(real_path, category_name, is_remove=False)
+
+                # 创建新副本后，再删除旧类别副本（即使失败也不影响新分类）
+                if old_category:
+                    self._maybe_remove_copied_file(real_path, old_category)
 
             self._ui.save_state()
             self._ui.schedule_ui_update('category_buttons', 'category_counts', 'statistics', 'ui_state')
@@ -239,8 +244,14 @@ class FileOperationManager(QObject):
             if self._state.is_copy_mode:
                 # 复制模式：删除分类目录中的副本
                 if category_file.exists():
-                    category_file.unlink()
-                    self._logger.info("撤销分类(复制模式)：删除副本 %s", category_file)
+                    try:
+                        remove_readonly(category_file)  # 移除只读属性，避免删除失败
+                        retry_file_operation(category_file.unlink, max_retries=5, delay=0.2)
+                        self._logger.info("撤销分类(复制模式)：删除副本 %s", category_file)
+                    except Exception as e:
+                        # 副本删除失败，但仍然清除分类记录（原图还在原目录）
+                        self._logger.warning("删除副本失败（文件可能被占用），但已清除分类记录: %s", e)
+                        self._ui.show_toast('warning', f"副本删除失败（文件被占用），但已清除分类记录\n建议：关闭占用文件的程序后手动删除")
             else:
                 # 移动模式：搬回原目录
                 target_file = self._ensure_unique_name(target_file)
@@ -248,6 +259,7 @@ class FileOperationManager(QObject):
                     shutil.move(str(category_file), str(target_file))
                     self._logger.info("撤销分类(移动模式)：%s -> %s", category_file, target_file)
 
+            # 无论副本是否删除成功，都清除分类记录（复制模式下原图还在）
             self._mutator.remove_classified_image(file_path)
             self._ui.save_state_sync()
 
@@ -285,7 +297,11 @@ class FileOperationManager(QObject):
                 return
 
             if self._state.is_copy_mode:
-                # 复制模式：删除 remove 副本
+                # 复制模式：删除 remove 副本（修复：移除只读属性）
+                try:
+                    remove_readonly(remove_file)
+                except Exception as e:
+                    self._logger.warning(f"移除只读属性失败: {e}")
                 remove_file.unlink()
                 self._logger.info("撤销删除(复制模式)：删除 remove 副本 %s", remove_file)
             else:
@@ -345,6 +361,13 @@ class FileOperationManager(QObject):
                         # 检查目标是否存在，避免覆盖
                         if target_file.exists():
                             target_file = self._ensure_unique_name(target_file)
+
+                        # 修复：移动前移除只读属性，避免权限错误
+                        try:
+                            remove_readonly(source_file)
+                        except Exception as e:
+                            self._logger.warning(f"移除只读属性失败: {e}")
+
                         shutil.move(str(source_file), str(target_file))
                         self._logger.info("迁移移动: %s -> %s", source_file.name, target_file)
                 except Exception as inner:
@@ -363,6 +386,8 @@ class FileOperationManager(QObject):
                     remove_file = remove_dir / Path(img_path).name
                     if remove_file.exists():
                         try:
+                            # 修复：删除前移除只读属性
+                            remove_readonly(remove_file)
                             remove_file.unlink()
                             self._logger.info("清理remove副本: %s", remove_file.name)
                         except Exception as e:
@@ -465,6 +490,7 @@ class FileOperationManager(QObject):
 
         if self._state.is_copy_mode:
             shutil.copy2(source_file, target_file)
+            remove_readonly(target_file)  # 移除只读属性，防止后续删除失败
             op = "复制"
         else:
             shutil.move(str(source_file), str(target_file))
@@ -568,7 +594,8 @@ class FileOperationManager(QObject):
         for candidate in candidates:
             try:
                 if candidate.exists() and candidate.stat().st_size == src.stat().st_size:
-                    candidate.unlink()
+                    remove_readonly(candidate)  # 移除只读属性，避免删除失败
+                    retry_file_operation(candidate.unlink, max_retries=5, delay=0.2)
                     self._logger.info("已删除分类副本: %s", candidate)
                     break
             except Exception as e:

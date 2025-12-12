@@ -8,6 +8,8 @@ import hashlib
 import time
 import unicodedata
 import logging
+import os
+import stat
 from .exceptions import FileOperationError
 
 
@@ -60,6 +62,20 @@ def retry_file_operation(operation, max_retries=3, delay=1):
                 logger.error(f"文件操作最终失败: {e}")
                 raise FileOperationError(f"重试{max_retries}次后仍然失败: {e}")
     return None
+
+
+def remove_readonly(path):
+    """
+    移除文件的只读属性，避免 Windows 下删除失败
+
+    Args:
+        path: 文件路径（str 或 Path 对象）
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except Exception:
+        # 静默失败，不影响主流程
+        pass
 
 
 def normalize_folder_name(name):

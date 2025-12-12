@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TYPE_CHECKING, Union
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from ui._main_window.state.interfaces import (
     StateViewType,
@@ -409,6 +409,25 @@ class CategoryManager(QObject):
         categories: Set[str] = set()
         removed: List[str] = []
         try:
+            # 清理忽略列表中已不存在的目录
+            ignored_removed = []
+            for name in list(self._state.config.ignored_categories):
+                if not (parent_dir / name).is_dir():
+                    ignored_removed.append(name)
+
+            if ignored_removed:
+                for name in ignored_removed:
+                    self._state.config.remove_ignored_category(name)
+                try:
+                    self._state.config.save_config()
+                except Exception as e:
+                    if isinstance(e, PermissionError) or "Permission denied" in str(e):
+                        self._logger.warning("忽略列表写入被占用，500ms后重试")
+                        QTimer.singleShot(500, self._state.config.save_config)
+                    else:
+                        raise
+                self._logger.info(f"已移除不存在的忽略类别: {', '.join(ignored_removed)}")
+
             for item in parent_dir.iterdir():
                 if not item.is_dir():
                     continue
@@ -430,10 +449,40 @@ class CategoryManager(QObject):
                 else:
                     removed.append(name)
 
+            # 【BUG修复】检查 classified_images 中所有被引用的类别是否存在
+            # 收集所有被引用的类别
+            referenced_categories: Set[str] = set()
+            for category in self._state.classified_images.values():
+                if isinstance(category, str):
+                    referenced_categories.add(category)
+                elif isinstance(category, list):
+                    referenced_categories.update(category)
+
+            # 检查被引用的类别是否存在（排除已经在removed中的）
+            for name in referenced_categories:
+                if name not in removed and not (parent_dir / name).is_dir():
+                    removed.append(name)
+                    self._logger.warning(f"检测到不存在的类别引用: {name}，将清理相关分类记录")
+
+            state_changed = False
+
             # 清理不存在的类别
             for name in removed:
                 self._state.config.category_shortcuts.pop(name, None)
                 self._cleanup_category_state(name)
+                state_changed = True
+
+            if state_changed:
+                # 分类记录变动后落盘：启动阶段可能被占用，失败则延迟重试
+                try:
+                    self._ui.save_state()
+                except Exception as e:
+                    if isinstance(e, PermissionError) or "Permission denied" in str(e):
+                        self._logger.warning("状态文件被占用，500ms后重试保存")
+                        QTimer.singleShot(500, self._ui.save_state)
+                    else:
+                        raise
+                # 注意：UI刷新由后续的categories_changed信号触发，避免重复刷新
 
             # 分配默认快捷键并排序
             self._state.config.assign_default_shortcuts(categories)
@@ -442,7 +491,16 @@ class CategoryManager(QObject):
 
             self._mutator.set_categories(categories)
             self._mutator.set_ordered_categories(ordered)
-            self._state.config.save_config()
+
+            # 保存配置：启动阶段可能被占用，失败则延迟重试
+            try:
+                self._state.config.save_config()
+            except Exception as e:
+                if isinstance(e, PermissionError) or "Permission denied" in str(e):
+                    self._logger.warning("配置文件被占用，500ms后重试保存")
+                    QTimer.singleShot(500, self._state.config.save_config)
+                else:
+                    raise
 
             # 初始化选中状态（修复Codex Review中等问题）
             self._current_category_index = 0
