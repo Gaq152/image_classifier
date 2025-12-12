@@ -24,6 +24,8 @@ class Config:
         self.category_sort_mode = "name"  # 类别排序模式: "name", "shortcut" 或 "count"
         self.sort_ascending = True  # 排序方向: True=升序, False=降序
         self._lock = threading.Lock()
+        self._save_lock = threading.Lock()  # 文件写入锁，防止并发保存
+        self._last_save_time = 0  # 上次保存时间戳，用于防抖
         
         # 系统保留的快捷键和类别
         self.reserved_shortcuts = {
@@ -149,24 +151,37 @@ class Config:
             raise ConfigError(f"加载配置文件失败: {e}")
             
     def save_config(self):
-        """保存配置"""
+        """保存配置（带防抖和并发保护）"""
         if not self.config_file:
             return
 
-        try:
-            config = {
-                'category_order': self.category_order,
-                'category_shortcuts': self.category_shortcuts,
-                'ignored_categories': getattr(self, 'ignored_categories', []),  # 保存忽略列表
-                'category_sort_mode': getattr(self, 'category_sort_mode', 'name'),  # 保存排序模式
-                'sort_ascending': getattr(self, 'sort_ascending', True),  # 保存排序方向
-            }
-            # 确保配置文件目录存在
-            self.config_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=4)
-        except (OSError, IOError) as e:
-            raise ConfigError(f"保存配置文件失败: {e}")
+        # 防抖：如果200ms内已保存过，跳过本次保存
+        current_time = time.time()
+        if current_time - self._last_save_time < 0.2:
+            return
+
+        # 文件写入锁：确保同一时间只有一个线程在写入
+        with self._save_lock:
+            try:
+                config = {
+                    'category_order': self.category_order,
+                    'category_shortcuts': self.category_shortcuts,
+                    'ignored_categories': getattr(self, 'ignored_categories', []),
+                    'category_sort_mode': getattr(self, 'category_sort_mode', 'name'),
+                    'sort_ascending': getattr(self, 'sort_ascending', True),
+                }
+                # 确保配置文件目录存在
+                self.config_file.parent.mkdir(parents=True, exist_ok=True)
+
+                # 写入文件
+                with open(self.config_file, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, ensure_ascii=False, indent=4)
+
+                # 更新最后保存时间
+                self._last_save_time = time.time()
+
+            except (OSError, IOError) as e:
+                raise ConfigError(f"保存配置文件失败: {e}")
 
     def _migrate_update_config(self, config_data):
         """迁移更新相关配置到全局配置
