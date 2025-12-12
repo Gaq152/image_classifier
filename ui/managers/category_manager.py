@@ -577,8 +577,8 @@ class CategoryManager(QObject):
             # 更新最后操作的类别
             self._mutator.set_last_operation_category(category_name)
 
-            # 刷新过滤列表（分类后状态变化，需重算可见列表）
-            self._ui.apply_image_filter()
+            # 刷新过滤列表（分类后状态变化，需重算可见列表，抑制显示避免重复）
+            self._ui.apply_image_filter(suppress_show=True)
 
             # 根据分类模式处理导航和UI
             if not self._state.is_multi_category:
