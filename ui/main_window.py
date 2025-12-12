@@ -5995,6 +5995,57 @@ class ImageClassifier(QMainWindow):
             except Exception as backup_error:
                 self.logger.error(f"备份保存也失败: {backup_error}")
 
+    def closeEvent(self, event):
+        """程序关闭前的清理和保存"""
+        try:
+            self.logger.info("程序正在关闭，开始清理...")
+
+            # 1. 停止所有定时器
+            if hasattr(self, 'ui_update_timer'):
+                self.ui_update_timer.stop()
+
+            # 2. 停止后台线程
+            if hasattr(self, 'image_loader'):
+                try:
+                    self.image_loader.shutdown()
+                except Exception as e:
+                    self.logger.warning(f"停止图片加载器失败: {e}")
+
+            if hasattr(self, 'file_scanner'):
+                try:
+                    self.file_scanner.cancel_scan()
+                except Exception as e:
+                    self.logger.warning(f"停止文件扫描器失败: {e}")
+
+            # 3. 等待短暂时间让异步保存完成（等待500ms的重试任务）
+            QApplication.processEvents()
+            import time
+            time.sleep(0.6)  # 等待可能的 QTimer.singleShot(500, save_config) 完成
+
+            # 4. 最终同步保存（重试3次，避免权限问题）
+            for attempt in range(3):
+                try:
+                    if hasattr(self, 'config') and self.config:
+                        self.config.save_config()
+                    if hasattr(self, 'current_dir') and self.current_dir:
+                        self._save_state_sync()
+                    self.logger.info("最终状态保存成功")
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        self.logger.warning(f"保存失败，重试 {attempt + 1}/3: {e}")
+                        time.sleep(0.2)
+                    else:
+                        self.logger.error(f"最终保存失败（可能被外部程序占用）: {e}")
+
+            self.logger.info("程序清理完成")
+
+        except Exception as e:
+            self.logger.error(f"closeEvent 处理失败: {e}")
+        finally:
+            # 确保事件被接受
+            event.accept()
+
     def _create_styled_message_box(self, icon_type, title, text, buttons=None):
         """创建具有统一样式和中文按钮的消息框"""
 
