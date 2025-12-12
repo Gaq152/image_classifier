@@ -580,12 +580,19 @@ class CategoryManager(QObject):
             # 刷新过滤列表（分类后状态变化，需重算可见列表，抑制显示避免重复）
             self._ui.apply_image_filter(suppress_show=True)
 
+            # 记录过滤后的索引（可能已跳转）
+            new_index = self._state.current_index
+
             # 根据分类模式处理导航和UI
             if not self._state.is_multi_category:
                 # 单分类模式：自动跳转到下一张
-                # 修复：分类后直接 next_image，而不是 select_after_removal
-                # select_after_removal 用于删除场景，分类场景下图片仍在列表中
-                self._navigator.next_image()
+                # Codex修复：检查过滤是否已改变索引
+                if new_index != original_index:
+                    # 过滤已把焦点移到新图片，直接显示（避免被 next_image 当作"最后一张"）
+                    self._navigator.show_current_image()
+                else:
+                    # 仍在原图，正常翻页
+                    self._navigator.next_image()
             else:
                 # 多分类模式：保持当前图片，更新类别选择状态
                 self._ui.update_category_selection()
