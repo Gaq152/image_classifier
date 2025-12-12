@@ -1798,6 +1798,14 @@ class ImageClassifier(QMainWindow):
         dir_path = QFileDialog.getExistingDirectory(self, '选择图片目录')
         if dir_path:
             self.current_dir = Path(dir_path)
+
+            # 检测微信目录并提醒（只提醒一次）
+            if not hasattr(self, '_wechat_warned'):
+                self._wechat_warned = False
+            if not self._wechat_warned and self._check_wechat_directory(self.current_dir):
+                self._wechat_warned = True
+                self._show_wechat_warning()
+
             current_drive = self.current_dir.drive  # 例如 "D:"
 
             # 尝试从全局配置中获取盘符缓存
@@ -5996,23 +6004,15 @@ class ImageClassifier(QMainWindow):
                 self.logger.error(f"备份保存也失败: {backup_error}")
 
     def closeEvent(self, event):
-        """程序关闭前的清理和保存"""
+        """程序关闭前的清理和保存（简化版）"""
         try:
             self.logger.info("程序正在关闭，开始清理...")
 
-            # 1. 停止所有定时器
+            # 停止定时器
             if hasattr(self, 'ui_update_timer'):
                 self.ui_update_timer.stop()
 
-            # 2. 停止后台线程
-            if hasattr(self, 'image_loader'):
-                try:
-                    # HighPerformanceImageLoader 没有 shutdown 方法，跳过
-                    # 加载器会在程序退出时自动清理
-                    pass
-                except Exception as e:
-                    self.logger.warning(f"停止图片加载器失败: {e}")
-
+            # 停止后台线程
             if hasattr(self, 'file_scanner') and self.file_scanner:
                 try:
                     if hasattr(self.file_scanner, 'cancel_scan'):
@@ -6020,37 +6020,73 @@ class ImageClassifier(QMainWindow):
                 except Exception as e:
                     self.logger.warning(f"停止文件扫描器失败: {e}")
 
-            # 3. 等待短暂时间让异步保存完成（等待500ms的重试任务）
-            QApplication.processEvents()
-            import time
-            time.sleep(0.6)  # 等待可能的 QTimer.singleShot(500, save_config) 完成
-
-            # 4. 最终同步保存（重试3次，捕获权限错误但不崩溃）
-            for attempt in range(3):
-                try:
-                    if hasattr(self, 'config') and self.config:
-                        self.config.save_config()
-                    if hasattr(self, 'current_dir') and self.current_dir:
-                        self._save_state_sync()
-                    self.logger.info("最终状态保存成功")
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        self.logger.warning(f"保存失败，重试 {attempt + 1}/3: {e}")
-                        import time
-                        time.sleep(0.2)
-                    else:
-                        # 最终保存失败，记录错误但不崩溃（可能是微信目录被占用）
-                        self.logger.error(f"最终保存失败（文件可能被微信等程序占用）: {e}")
-                        self.logger.info("建议：请不要在微信目录中工作，或关闭占用程序后重试")
+            # 最终保存（单次，失败只记录日志）
+            try:
+                if hasattr(self, 'config') and self.config:
+                    self.config.save_config()
+                if hasattr(self, 'current_dir') and self.current_dir:
+                    self._save_state_sync()
+                self.logger.info("最终状态保存完成")
+            except Exception as e:
+                self.logger.error(f"最终保存失败: {e}")
 
             self.logger.info("程序清理完成")
 
         except Exception as e:
             self.logger.error(f"closeEvent 处理失败: {e}")
         finally:
-            # 确保事件被接受
             event.accept()
+
+    def _check_wechat_directory(self, path: Path) -> bool:
+        """检测是否为微信目录"""
+        path_str = str(path).lower()
+        return 'wechat' in path_str or '\\msg\\file\\' in path_str or '/msg/file/' in path_str
+
+    def _show_wechat_warning(self):
+        """显示微信目录警告"""
+        from ui.components.toast import toast_warning
+        c = default_theme.colors
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("⚠️ 微信目录警告")
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setText("检测到您正在微信的文件目录中工作")
+        msg_box.setInformativeText(
+            "微信会监控和锁定此目录中的文件，可能导致：\n"
+            "• 配置保存失败\n"
+            "• 状态保存失败\n"
+            "• 文件操作权限错误\n\n"
+            "建议：\n"
+            "1. 将图片复制到其他目录（如 D:\\图片分类\\）\n"
+            "2. 或关闭微信后使用\n\n"
+            "继续使用可能会遇到权限错误，但不影响基本功能。"
+        )
+
+        # 应用主题样式
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {c.BACKGROUND_CARD};
+                color: {c.TEXT_PRIMARY};
+                border-radius: 8px;
+            }}
+            QMessageBox QLabel {{
+                color: {c.TEXT_PRIMARY};
+            }}
+            QPushButton {{
+                background-color: {c.PRIMARY};
+                color: {c.TEXT_ON_PRIMARY};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.PRIMARY_DARK};
+            }}
+        """)
+
+        msg_box.exec()
 
     def _create_styled_message_box(self, icon_type, title, text, buttons=None):
         """创建具有统一样式和中文按钮的消息框"""

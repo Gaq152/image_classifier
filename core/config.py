@@ -26,8 +26,6 @@ class Config:
         self.sort_ascending = True  # 排序方向: True=升序, False=降序
         self._lock = threading.Lock()
         self._save_lock = threading.Lock()  # 文件写入锁，防止并发保存
-        self._last_save_time = 0  # 上次保存时间戳，用于防抖
-        self._save_pending = False  # 标志：是否有待处理的保存任务
         
         # 系统保留的快捷键和类别
         self.reserved_shortcuts = {
@@ -153,12 +151,11 @@ class Config:
             raise ConfigError(f"加载配置文件失败: {e}")
             
     def save_config(self):
-        """保存配置（带并发保护，移除防抖以避免数据丢失）"""
+        """保存配置（简化版：只加锁，失败抛出异常）"""
         if not self.config_file:
             return
 
         # 文件写入锁：确保同一时间只有一个线程在写入
-        # 注意：不使用防抖，因为每次配置变更都必须保存
         with self._save_lock:
             try:
                 config = {
