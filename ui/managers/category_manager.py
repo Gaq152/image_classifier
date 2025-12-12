@@ -415,18 +415,12 @@ class CategoryManager(QObject):
                 if not (parent_dir / name).is_dir():
                     ignored_removed.append(name)
 
+            config_needs_save = False  # 标志：是否需要保存配置
+
             if ignored_removed:
                 for name in ignored_removed:
                     self._state.config.remove_ignored_category(name)
-                try:
-                    self._state.config.save_config()
-                except Exception as e:
-                    if isinstance(e, PermissionError) or "Permission denied" in str(e):
-                        self._logger.warning("忽略列表写入被占用，500ms后重试")
-                        # 包装成 lambda 捕获异常，避免 CRITICAL 错误
-                        QTimer.singleShot(500, lambda: self._safe_save_config())
-                    else:
-                        raise
+                config_needs_save = True  # 标记需要保存，但延迟到末尾统一保存
                 self._logger.info(f"已移除不存在的忽略类别: {', '.join(ignored_removed)}")
 
             for item in parent_dir.iterdir():
@@ -472,6 +466,7 @@ class CategoryManager(QObject):
                 self._state.config.category_shortcuts.pop(name, None)
                 self._cleanup_category_state(name)
                 state_changed = True
+                config_needs_save = True  # 快捷键映射变化，需要保存配置
 
             if state_changed:
                 # 分类记录变动后落盘：启动阶段可能被占用，失败则延迟重试
@@ -494,15 +489,17 @@ class CategoryManager(QObject):
             self._mutator.set_categories(categories)
             self._mutator.set_ordered_categories(ordered)
 
-            # 保存配置：启动阶段可能被占用，失败则延迟重试
-            try:
-                self._state.config.save_config()
-            except Exception as e:
-                if isinstance(e, PermissionError) or "Permission denied" in str(e):
-                    self._logger.warning("配置文件被占用，500ms后重试保存")
-                    QTimer.singleShot(500, self._state.config.save_config)
-                else:
-                    raise
+            # 统一保存配置（只在末尾保存一次，避免重复）
+            if config_needs_save:
+                try:
+                    self._state.config.save_config()
+                except Exception as e:
+                    if isinstance(e, PermissionError) or "Permission denied" in str(e):
+                        self._logger.warning("配置文件被占用，500ms后重试保存")
+                        # 包装成安全方法，避免重试失败导致CRITICAL错误
+                        QTimer.singleShot(500, lambda: self._safe_save_config())
+                    else:
+                        raise
 
             # 初始化选中状态（修复Codex Review中等问题）
             self._current_category_index = 0
