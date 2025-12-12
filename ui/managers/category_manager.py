@@ -423,7 +423,8 @@ class CategoryManager(QObject):
                 except Exception as e:
                     if isinstance(e, PermissionError) or "Permission denied" in str(e):
                         self._logger.warning("忽略列表写入被占用，500ms后重试")
-                        QTimer.singleShot(500, self._state.config.save_config)
+                        # 包装成 lambda 捕获异常，避免 CRITICAL 错误
+                        QTimer.singleShot(500, lambda: self._safe_save_config())
                     else:
                         raise
                 self._logger.info(f"已移除不存在的忽略类别: {', '.join(ignored_removed)}")
@@ -479,7 +480,8 @@ class CategoryManager(QObject):
                 except Exception as e:
                     if isinstance(e, PermissionError) or "Permission denied" in str(e):
                         self._logger.warning("状态文件被占用，500ms后重试保存")
-                        QTimer.singleShot(500, self._ui.save_state)
+                        # 包装成 lambda 捕获异常
+                        QTimer.singleShot(500, lambda: self._safe_save_state())
                     else:
                         raise
                 # 注意：UI刷新由后续的categories_changed信号触发，避免重复刷新
