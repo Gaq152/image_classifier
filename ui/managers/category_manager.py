@@ -109,7 +109,13 @@ class CategoryManager(QObject):
             target_dir.mkdir(parents=True, exist_ok=True)
             self._mutator.add_category(name)
             self._state.config.assign_default_shortcuts(self._state.categories | {name})
-            self._state.config.save_config()
+
+            # 保存配置（容错）
+            try:
+                self._state.config.save_config()
+            except Exception as save_error:
+                self._logger.warning(f"添加类别后保存配置失败（操作已完成）: {save_error}")
+
             self._resort_categories()
             self._rebuild_category_buttons()
             self.categories_changed.emit(list(self._state.ordered_categories))
