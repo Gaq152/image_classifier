@@ -2427,16 +2427,22 @@ class ImageClassifier(QMainWindow):
     def on_file_moved(self, src: str, dst: str):
         """文件移动完成"""
         # Manager已更新状态，这里只需UI刷新
+        # 修复：分类后需要重新应用过滤，保持筛选状态
+        self._pending_reapply_filter = True
         self.schedule_ui_update('image_list', 'statistics', 'category_buttons')
         self.statusBar.showMessage(f"✅ 已分类到 {Path(dst).parent.name}")
 
     def on_file_removed(self, path: str):
         """文件移除完成"""
+        # 修复：移除后需要重新应用过滤，保持筛选状态
+        self._pending_reapply_filter = True
         self.schedule_ui_update('image_list', 'statistics')
         self.statusBar.showMessage(f"✅ 已移除")
 
     def on_file_restored(self, path: str):
         """文件恢复完成"""
+        # 修复：恢复后需要重新应用过滤，保持筛选状态
+        self._pending_reapply_filter = True
         self.schedule_ui_update('image_list', 'statistics', 'category_buttons')
         self.statusBar.showMessage(f"✅ 已撤销")
 
