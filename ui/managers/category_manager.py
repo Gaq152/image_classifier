@@ -171,7 +171,13 @@ class CategoryManager(QObject):
             self._cleanup_category_state(name)
             self._mutator.remove_category(name)  # 从 categories 集合中移除
             self._state.config.category_shortcuts.pop(name, None)
-            self._state.config.save_config()
+
+            # 保存配置（容错：即使保存失败，删除操作也已完成）
+            try:
+                self._state.config.save_config()
+            except Exception as save_error:
+                self._logger.warning(f"删除类别后保存配置失败（操作已完成）: {save_error}")
+                # 不抛出异常，让删除操作继续完成
 
             # 移动模式：从图片文件列表中移除不存在的图片
             if not self._state.is_copy_mode and affected_paths:
@@ -196,8 +202,12 @@ class CategoryManager(QObject):
 
                     self._logger.info(f"移动模式下删除类别，从图片列表中移除了 {len(files_to_remove)} 张图片")
 
-            # 保存状态
-            self._ui.save_state()
+            # 保存状态（容错：即使保存失败，操作也已完成）
+            try:
+                self._ui.save_state()
+            except Exception as save_error:
+                self._logger.warning(f"删除类别后保存状态失败（操作已完成）: {save_error}")
+                # 不抛出异常，让删除操作继续完成
 
             # 刷新过滤视图（分类记录已清理，需重算可见列表）
             self._ui.apply_image_filter()
