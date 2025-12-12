@@ -4906,6 +4906,13 @@ class ImageClassifier(QMainWindow):
         try:
             self.current_dir = Path(dir_path)
 
+            # 检测微信目录并提醒（只提醒一次）
+            if not hasattr(self, '_wechat_warned'):
+                self._wechat_warned = False
+            if not self._wechat_warned and self._check_wechat_directory(self.current_dir):
+                self._wechat_warned = True
+                self._show_wechat_warning()
+
             # 检查是否为网络路径
             path_str = str(self.current_dir)
             is_network_path = path_str.startswith('\\\\')
