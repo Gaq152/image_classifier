@@ -6007,13 +6007,16 @@ class ImageClassifier(QMainWindow):
             # 2. 停止后台线程
             if hasattr(self, 'image_loader'):
                 try:
-                    self.image_loader.shutdown()
+                    # HighPerformanceImageLoader 没有 shutdown 方法，跳过
+                    # 加载器会在程序退出时自动清理
+                    pass
                 except Exception as e:
                     self.logger.warning(f"停止图片加载器失败: {e}")
 
-            if hasattr(self, 'file_scanner'):
+            if hasattr(self, 'file_scanner') and self.file_scanner:
                 try:
-                    self.file_scanner.cancel_scan()
+                    if hasattr(self.file_scanner, 'cancel_scan'):
+                        self.file_scanner.cancel_scan()
                 except Exception as e:
                     self.logger.warning(f"停止文件扫描器失败: {e}")
 
@@ -6022,7 +6025,7 @@ class ImageClassifier(QMainWindow):
             import time
             time.sleep(0.6)  # 等待可能的 QTimer.singleShot(500, save_config) 完成
 
-            # 4. 最终同步保存（重试3次，避免权限问题）
+            # 4. 最终同步保存（重试3次，捕获权限错误但不崩溃）
             for attempt in range(3):
                 try:
                     if hasattr(self, 'config') and self.config:
@@ -6034,9 +6037,12 @@ class ImageClassifier(QMainWindow):
                 except Exception as e:
                     if attempt < 2:
                         self.logger.warning(f"保存失败，重试 {attempt + 1}/3: {e}")
+                        import time
                         time.sleep(0.2)
                     else:
-                        self.logger.error(f"最终保存失败（可能被外部程序占用）: {e}")
+                        # 最终保存失败，记录错误但不崩溃（可能是微信目录被占用）
+                        self.logger.error(f"最终保存失败（文件可能被微信等程序占用）: {e}")
+                        self.logger.info("建议：请不要在微信目录中工作，或关闭占用程序后重试")
 
             self.logger.info("程序清理完成")
 
