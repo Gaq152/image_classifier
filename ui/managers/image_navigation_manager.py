@@ -679,31 +679,29 @@ class ImageNavigationManager(QObject):
             visible_indices = self._get_visible_indices()
 
             if visible_indices is not None:
-                # 筛选模式：按"后 -> 前"优先级寻找最近的可见图片
-                if not visible_indices:
+                # 筛选模式：移除当前索引后再找最近可见项
+                # Codex修复：排除被移除的索引，确保跳到其他图片
+                candidates = [i for i in visible_indices if i != original_index]
+                if not candidates:
                     self._mutator.set_current_index(-1)
                     self._ui.show_toast('info', "当前没有可显示的图片")
                     self.sync_image_list_selection()
                     return
 
-                # 检查原始索引是否仍在可见列表中
-                if original_index in visible_indices:
-                    target_index = original_index
-                else:
-                    # 先找原始索引之后的第一张可见图片
-                    next_visible = next((i for i in visible_indices if i > original_index), None)
-                    if next_visible is None:
-                        # 如果后面没有，找原始索引之前的最后一张可见图片
-                        next_visible = next((i for i in reversed(visible_indices) if i < original_index), None)
+                # 先找原始索引之后的第一张可见图片
+                next_visible = next((i for i in candidates if i > original_index), None)
+                if next_visible is None:
+                    # 如果后面没有，找原始索引之前的最后一张可见图片
+                    next_visible = next((i for i in reversed(candidates) if i < original_index), None)
 
-                    if next_visible is None:
-                        # 没有可见图片了
-                        self._mutator.set_current_index(-1)
-                        self._ui.show_toast('info', "当前没有可显示的图片")
-                        self.sync_image_list_selection()
-                        return
+                if next_visible is None:
+                    # 没有可见图片了
+                    self._mutator.set_current_index(-1)
+                    self._ui.show_toast('info', "当前没有可显示的图片")
+                    self.sync_image_list_selection()
+                    return
 
-                    target_index = next_visible
+                target_index = next_visible
             else:
                 # 无筛选模式：直接跳到下一张（如果有）
                 image_files = self._state.image_files

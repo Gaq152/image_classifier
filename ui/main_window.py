@@ -3609,11 +3609,16 @@ class ImageClassifier(QMainWindow):
             self.image_label.clear()
             return
 
-        # 保存当前选中的图片路径
-        current_index = self.image_list.currentIndex()
+        # 保存当前选中的图片路径（优先使用状态索引，确保导航后正确定位）
         current_path = None
-        if current_index.isValid():
-            current_path = current_index.data(ImageListModel.ROLE_FULL_PATH)
+        if self.image_files and 0 <= self.current_index < len(self.image_files):
+            # 优先使用 current_index（导航后的新索引）
+            current_path = str(self.image_files[self.current_index])
+        else:
+            # 回退到列表选中项
+            current_index = self.image_list.currentIndex()
+            if current_index.isValid():
+                current_path = current_index.data(ImageListModel.ROLE_FULL_PATH)
 
         # Phase 1.1: 计算多分类集合（Codex Review发现multi_classified_images不存在）
         multi_classified = {
@@ -3705,14 +3710,14 @@ class ImageClassifier(QMainWindow):
             self.current_index = model_index.data(ImageListModel.ROLE_IMAGE_INDEX)
 
         # 更新图片显示
-        # Codex Review修复：过滤结果为空时清空显示
         if self.image_list_model.rowCount() > 0:
-            self.show_current_image()
+            if not suppress_show:  # 抑制时不显示
+                self.show_current_image()
         else:
-            # 过滤结果为空，清空显示
             self.current_index = -1
             self.image_label.clear()
-            toast_info(self, "当前过滤条件下没有图片")
+            if not suppress_show:  # 抑制时不显示toast
+                toast_info(self, "当前过滤条件下没有图片")
 
     def get_filter_stats(self):
         """获取过滤统计信息"""
