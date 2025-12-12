@@ -583,7 +583,9 @@ class CategoryManager(QObject):
             # 根据分类模式处理导航和UI
             if not self._state.is_multi_category:
                 # 单分类模式：自动跳转到下一张
-                self._navigator.select_after_removal(original_index)
+                # 修复：分类后直接 next_image，而不是 select_after_removal
+                # select_after_removal 用于删除场景，分类场景下图片仍在列表中
+                self._navigator.next_image()
             else:
                 # 多分类模式：保持当前图片，更新类别选择状态
                 self._ui.update_category_selection()
