@@ -152,16 +152,12 @@ class Config:
             raise ConfigError(f"加载配置文件失败: {e}")
             
     def save_config(self):
-        """保存配置（带防抖和并发保护）"""
+        """保存配置（带并发保护，移除防抖以避免数据丢失）"""
         if not self.config_file:
             return
 
-        # 防抖：如果200ms内已保存过，跳过本次保存
-        current_time = time.time()
-        if current_time - self._last_save_time < 0.2:
-            return
-
         # 文件写入锁：确保同一时间只有一个线程在写入
+        # 注意：不使用防抖，因为每次配置变更都必须保存
         with self._save_lock:
             try:
                 config = {
@@ -177,9 +173,6 @@ class Config:
                 # 写入文件
                 with open(self.config_file, 'w', encoding='utf-8') as f:
                     json.dump(config, f, ensure_ascii=False, indent=4)
-
-                # 更新最后保存时间
-                self._last_save_time = time.time()
 
             except (OSError, IOError) as e:
                 raise ConfigError(f"保存配置文件失败: {e}")
