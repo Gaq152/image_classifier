@@ -4481,7 +4481,29 @@ class ImageClassifier(QMainWindow):
         if not self.is_copy_mode and not self.is_multi_category:
             toast_warning(self,"移动模式不支持多分类功能，请先切换到复制模式")
             return
-        
+
+        # 从多分类切到单分类前：检查是否存在多标签图片
+        if self.is_multi_category:
+            multi_tagged = [
+                p for p, c in self.classified_images.items()
+                if isinstance(c, list) and len(c) > 1
+            ]
+            if multi_tagged:
+                toast_warning(
+                    self,
+                    f"检测到 {len(multi_tagged)} 张图片被分配了多个标签，无法切换到单分类模式。\n"
+                    "请先移除多余标签后再切换。"
+                )
+                return
+
+            # 归一化：List[str] (len==1) -> str，避免单分类逻辑拿到 list 造成异常
+            for p, c in list(self.classified_images.items()):
+                if isinstance(c, list):
+                    if len(c) == 1:
+                        self.classified_images[p] = c[0]
+                    elif len(c) == 0:
+                        del self.classified_images[p]
+
         self.is_multi_category = not self.is_multi_category
 
         # 使用统一的按钮状态更新方法
