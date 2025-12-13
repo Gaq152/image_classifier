@@ -1150,10 +1150,10 @@ class ImageClassifier(QMainWindow):
         toolbar.addSeparator()
 
         # 刷新按钮 - 使用统一样式
-        refresh_button = self.create_toolbar_button('↻', 'refresh_button',
+        self.refresh_button = self.create_toolbar_button('↻', 'refresh_button',
                                                    '刷新类别目录，同步外部变化 (F5)',
                                                    self.refresh_categories)
-        toolbar.addWidget(refresh_button)
+        toolbar.addWidget(self.refresh_button)
 
         # 从应用配置中读取主题设置
         current_theme = "light"
@@ -1188,16 +1188,16 @@ class ImageClassifier(QMainWindow):
             self.logger.warning(f"设置主题按钮状态失败: {e}")
 
         # 设置按钮 - 使用齿轮图标
-        settings_button = self.create_toolbar_button('⚙', 'settings_button',
+        self.settings_button = self.create_toolbar_button('⚙', 'settings_button',
                                                      '打开设置',
                                                      self.show_settings_dialog)
-        toolbar.addWidget(settings_button)
+        toolbar.addWidget(self.settings_button)
 
         # 帮助按钮 - 使用统一样式
-        help_button = self.create_toolbar_button('?', 'help_button',
+        self.help_button = self.create_toolbar_button('?', 'help_button',
                                                 '查看使用指南和快捷键',
                                                 self.show_help_dialog)
-        toolbar.addWidget(help_button)
+        toolbar.addWidget(self.help_button)
     
     def create_mode_button(self, toolbar):
         """创建图标化的模式选择按钮 - 直接点击切换"""
@@ -4750,6 +4750,22 @@ class ImageClassifier(QMainWindow):
                 for button in self.category_buttons:
                     if hasattr(button, 'update_label_colors'):
                         button.update_label_colors()
+
+            # 更新工具栏方形按钮样式（主题切换时需要刷新）
+            toolbar_buttons = [
+                ('mode_button', 'mode_button'),
+                ('category_mode_button', 'category_mode_button'),
+                ('refresh_button', 'refresh_button'),
+                ('theme_button', 'theme_button'),
+                ('settings_button', 'settings_button'),
+                ('help_button', 'help_button'),
+                ('filter_button', 'filter_button'),
+            ]
+            for attr_name, object_name in toolbar_buttons:
+                if hasattr(self, attr_name):
+                    button = getattr(self, attr_name)
+                    if button:
+                        button.setStyleSheet(ButtonStyles.get_square_button_style(object_name))
 
             # 强制重绘
             self.update()

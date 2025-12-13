@@ -843,3 +843,16 @@ class EnhancedImageLabel(QLabel):
         except Exception as e:
             self.logger.error(f"复制路径到剪贴板失败: {e}")
             toast_floating(self, "❌ 复制失败", 2000)
+
+    def apply_theme(self):
+        """应用主题到图像标签"""
+        try:
+            # 更新图像标签背景样式
+            self.setStyleSheet(WidgetStyles.get_image_label_style())
+
+            # 更新信息按钮样式
+            if hasattr(self, 'info_button') and self.info_button:
+                self.info_button.setStyleSheet(WidgetStyles.get_info_button_style())
+
+        except Exception as e:
+            self.logger.error(f"应用主题到图像标签失败: {e}")
