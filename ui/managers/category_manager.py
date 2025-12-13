@@ -533,30 +533,11 @@ class CategoryManager(QObject):
         self._mutator.set_ordered_categories(ordered)
 
     def _rebuild_category_buttons(self) -> None:
-        """根据当前 ordered_categories 重建按钮并绑定事件"""
-        self._ui.clear_category_buttons()
-        layout = self._ui.get_category_button_layout()
-        if layout is None:
-            return
-        self._category_buttons.clear()
-        counts = self.get_category_counts()
-        shortcuts = self._state.config.category_shortcuts
+        """根据当前 ordered_categories 重建按钮并绑定事件
 
-        for idx, name in enumerate(self._state.ordered_categories):
-            shortcut = shortcuts.get(name)
-            btn = self._ui.create_category_button(name, shortcut, counts.get(name, 0))
-            if btn is not None:
-                # 按钮点击触发选中并确认分类
-                try:
-                    btn.clicked.connect(lambda checked=False, n=name: self._on_button_clicked(n))
-                except Exception:
-                    pass
-                layout.addWidget(btn)
-                self._category_buttons.append(btn)
-                if idx == self._current_category_index:
-                    self._ui.highlight_category_button(idx)
-
-        self._ui.refresh_category_buttons_style()
+        注意：按钮重建现在由CategoryPanel负责，这个方法暂时保留为空操作
+        """
+        pass  # CategoryPanel现在负责按钮的创建和更新
 
     def _on_button_clicked(self, name: str) -> None:
         """按钮点击处理"""

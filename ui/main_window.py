@@ -32,6 +32,7 @@ from .components.widgets import (CategoryButton, EnhancedImageLabel,
                                 StatisticsPanel, ExpandableSearch)
 # Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
 from .models.image_list_model import ImageListModel
+from ._main_window.panels import CategoryPanel
 from .delegates.image_list_delegate import ImageListDelegate
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles, WidgetStyles
@@ -716,51 +717,6 @@ class ImageClassifier(QMainWindow):
         if hasattr(self, 'image_list_model') and self.image_list_model:
             self.image_list_model.layoutChanged.emit()
 
-    def refresh_category_buttons_style(self) -> None:
-        """刷新类别按钮样式"""
-        for btn in self.category_buttons:
-            if hasattr(btn, 'update_style'):
-                btn.update_style()
-
-    def get_category_button_layout(self):
-        """获取类别按钮所在的布局"""
-        if hasattr(self, 'category_buttons_layout'):
-            return self.category_buttons_layout
-        return None
-
-    def clear_category_buttons(self) -> None:
-        """清空所有类别按钮"""
-        for btn in self.category_buttons:
-            btn.deleteLater()
-        self.category_buttons.clear()
-
-    def create_category_button(self, name: str, shortcut: Optional[str], count: int):
-        """创建类别按钮"""
-        btn = CategoryButton(name, shortcut, count, self)
-        self.category_buttons.append(btn)
-        if hasattr(self, 'category_buttons_layout'):
-            self.category_buttons_layout.addWidget(btn)
-        return btn
-
-    def set_category_button_count(self, name: str, count: int) -> None:
-        """更新类别按钮计数"""
-        for btn in self.category_buttons:
-            if btn.category_name == name:
-                btn.set_count(count)
-                break
-
-    def ensure_category_visible(self, index: int) -> None:
-        """滚动使指定索引的类别按钮可见"""
-        if 0 <= index < len(self.category_buttons):
-            btn = self.category_buttons[index]
-            if hasattr(self, 'category_scroll_area'):
-                self.category_scroll_area.ensureWidgetVisible(btn)
-
-    def highlight_category_button(self, index: int) -> None:
-        """高亮指定索引的类别按钮"""
-        for i, btn in enumerate(self.category_buttons):
-            btn.setSelected(i == index)
-
     def display_image(self, image_data, path: Path) -> None:
         """显示图片"""
         if hasattr(self, 'image_label'):
@@ -981,10 +937,18 @@ class ImageClassifier(QMainWindow):
         
         # 图片列表区域 - 设置拉伸权重
         self.create_image_list_area(right_layout)
-        
-        # 类别按钮区域 - 设置拉伸权重  
-        self.create_category_area(right_layout)
-        
+
+        # 类别面板 - 使用CategoryPanel组件
+        self.category_panel = CategoryPanel(self.config, self)
+        right_layout.addWidget(self.category_panel, 1)  # 设置拉伸权重1
+
+        # 连接CategoryPanel信号
+        self.category_panel.category_selected.connect(self._on_category_selected)
+        self.category_panel.category_confirmed.connect(self.move_to_category)
+        self.category_panel.operation_requested.connect(self._on_category_operation_requested)
+        self.category_panel.sort_mode_changed.connect(self.change_category_sort_mode)
+        self.category_panel.sort_direction_toggled.connect(self.toggle_sort_direction)
+
         # 统计面板 - 固定高度，不参与拉伸
         self.statistics_panel = StatisticsPanel()
         right_layout.addWidget(self.statistics_panel, 0)  # 不拉伸
@@ -1212,192 +1176,6 @@ class ImageClassifier(QMainWindow):
         # Signal changed from itemClicked(QListWidgetItem) to clicked(QModelIndex)
         self.image_list.clicked.connect(self.on_image_list_item_clicked)
         layout.addWidget(self.image_list, 1)  # 设置拉伸权重1
-    
-    def create_category_area(self, layout):
-        """创建简洁的类别按钮区域"""
-        # 分类类别标题行 - 包含标题和添加按钮
-        category_title_container = QWidget()
-        category_title_container.setObjectName("category_title_container")
-        category_title_container.setStyleSheet("""
-            QWidget#category_title_container {
-                border-bottom: 2px solid #FF9800;
-                margin-bottom: 4px;
-                max-height: 28px;
-                min-height: 28px;
-            }
-        """)
-        category_title_layout = QHBoxLayout(category_title_container)
-        category_title_layout.setContentsMargins(6, 0, 6, 4)  # 底部留4px给橙色边框
-        category_title_layout.setSpacing(8)
-        category_title_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # 顶部对齐，避免遮挡底边框
-
-        # 分类类别标题
-        category_label = QLabel("🏷️ 分类类别")
-        category_label.setStyleSheet("""
-            QLabel {
-                font-size: 13px;
-                font-weight: bold;
-                color: #E65100;
-                border: none;
-                background-color: transparent;
-                padding: 0px;
-                margin: 0px;
-            }
-        """)
-        category_title_layout.addWidget(category_label)
-
-        # 添加弹性空间，推送右侧按钮到最右边
-        category_title_layout.addStretch()
-
-        # 排序方向按钮 - 升序/降序切换（tooltip在后面动态设置）
-        self.sort_direction_button = self.create_toolbar_button(
-            '↑' if self.config.sort_ascending else '↓',
-            'sort_direction_button',
-            '',  # tooltip将在_update_direction_button_tooltip中动态设置
-            self.toggle_sort_direction,
-            size=(18, 18)
-        )
-        self.sort_direction_button.setStyleSheet("""
-            QPushButton#sort_direction_button {
-                background-color: transparent;
-                color: #E65100;
-                border: none;
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#sort_direction_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#sort_direction_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-        """)
-        category_title_layout.addWidget(self.sort_direction_button)
-        # 设置初始tooltip（动态显示当前排序状态）
-        self._update_direction_button_tooltip()
-
-        # 排序按钮 - 类别排序选项
-        self.sort_button = self.create_toolbar_button('▼', 'sort_button',
-                                                     '类别排序方式',
-                                                     self.show_sort_menu,
-                                                     size=(18, 18))
-        # 应用样式
-        self.sort_button.setStyleSheet("""
-            QPushButton#sort_button {
-                background-color: transparent;
-                color: #E65100;
-                border: none;
-                border-radius: 3px;
-                font-size: 11px;
-                font-weight: normal;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#sort_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#sort_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-        """)
-        category_title_layout.addWidget(self.sort_button)
-
-        # 添加类别图标按钮 - "+"字符
-        add_button = self.create_toolbar_button('+', 'add_category_button',
-                                               '批量添加分类类别',
-                                               self.add_category,
-                                               size=(18, 18))
-        # 重写样式为透明背景橙色图标，与分类类别标题保持一致
-        add_button.setStyleSheet("""
-            QPushButton#add_category_button {
-                background-color: transparent;
-                color: #E65100;
-                border: none;
-                border-radius: 3px;
-                font-size: 14px;
-                font-weight: bold;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#add_category_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#add_category_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-        """)
-        category_title_layout.addWidget(add_button)
-
-        layout.addWidget(category_title_container, 0)  # 不拉伸
-        
-        # 类别按钮滚动区域 - 可随窗口拉伸
-        self.category_scroll = QScrollArea()
-        self.category_scroll.setObjectName("category_list")  # 设置对象名以便教程系统找到
-        self.category_scroll.setWidgetResizable(True)
-        self.category_scroll.setMinimumHeight(150)  # 设置最小高度
-        # 移除最大高度限制，让它能够拉伸
-        self.category_scroll.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #FFB74D;
-                border-radius: 4px;
-                background-color: #FFFFFF;
-            }
-            QScrollBar:vertical {
-                border: 1px solid #FFB74D;
-                background: #FFF8E1;
-                width: 10px;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:vertical {
-                background: #FF9800;
-                border-radius: 3px;
-                min-height: 15px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #F57C00;
-            }
-            QScrollBar::handle:vertical:pressed {
-                background: #E65100;
-            }
-            QScrollBar:horizontal {
-                border: 1px solid #FFB74D;
-                background: #FFF8E1;
-                height: 10px;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #FF9800;
-                border-radius: 3px;
-                min-width: 15px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #F57C00;
-            }
-            QScrollBar::handle:horizontal:pressed {
-                background: #E65100;
-            }
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical,
-            QScrollBar::add-line:horizontal,
-            QScrollBar::sub-line:horizontal {
-                border: none;
-                background: none;
-            }
-        """)
-        
-        self.category_widget = QWidget()
-        self.button_layout = QVBoxLayout(self.category_widget)
-        self.button_layout.setSpacing(3)
-        self.button_layout.setContentsMargins(4, 4, 4, 4)
-        
-        self.category_scroll.setWidget(self.category_widget)
-        layout.addWidget(self.category_scroll, 1)  # 设置拉伸权重1
 
     def create_toolbar_button(self, text: str, object_name: str, tooltip: str,
                              click_handler=None, size=(40, 40)) -> QPushButton:
@@ -2537,7 +2315,21 @@ class ImageClassifier(QMainWindow):
 
             for component in components_to_update:
                 if component == 'category_buttons':
-                    self._update_category_buttons_internal()
+                    # 使用CategoryPanel更新按钮
+                    if hasattr(self, 'category_panel'):
+                        # 获取当前图片的分类状态
+                        current_category = None
+                        if self.image_files and 0 <= self.current_index < len(self.image_files):
+                            current_path = str(self.image_files[self.current_index])
+                            current_category = self.classified_images.get(current_path)
+
+                        self.category_panel.update_data(
+                            self.ordered_categories,
+                            self.category_counts,
+                            self.current_category_index,
+                            self.categories,
+                            current_category
+                        )
                 elif component == 'category_counts':
                     self._update_category_counts_internal()
                 elif component == 'image_list':
@@ -2560,100 +2352,7 @@ class ImageClassifier(QMainWindow):
         if reapply_filter:
             self._pending_reapply_filter = False
             self.apply_image_filter()
-    
-    def _update_category_buttons_internal(self):
-        """内部类别按钮更新方法"""
-        # 清除现有按钮
-        for i in reversed(range(self.button_layout.count())):
-            widget = self.button_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
-        self.category_buttons.clear()
-        
-        # 创建按钮容器
-        container = QWidget()
-        container.setLayout(QVBoxLayout())
-        container.layout().setSpacing(2)
-        container.layout().setContentsMargins(0, 0, 0, 0)
-        
-        # 创建按钮组
-        button_group = QButtonGroup(self)
-        button_group.setExclusive(True)
-        
-        # 获取当前图片的分类状态
-        current_category = None
-        if self.image_files and 0 <= self.current_index < len(self.image_files):
-            current_path = str(self.image_files[self.current_index])
-            current_category = self.classified_images.get(current_path)
-        
-        # 确保ordered_categories存在且有效
-        if not hasattr(self, 'ordered_categories'):
-            self.ordered_categories = []
-        if not self.ordered_categories:
-            return
-            
-        # 按排序后的顺序添加按钮
-        for category_name in self.ordered_categories:
-            try:
-                btn = CategoryButton(category_name, self.config)         
-                
-                # 设置按钮为可切换状态，支持选中显示
-                btn.setCheckable(True)
-                
-                # 使用functools.partial来避免lambda的late binding问题
-                btn.clicked.connect(functools.partial(self.select_category, category_name))
-                
-                # 设置分类状态
-                if current_category is not None:
-                    if isinstance(current_category, list):
-                        # 多分类模式
-                        is_classified = category_name in current_category
-                        is_multi = len(current_category) > 1 and is_classified
-                        btn.set_classified(is_classified)
-                        btn.set_multi_classified(is_multi)
-                    else:
-                        # 单分类模式
-                        btn.set_classified(category_name == current_category)
-                        btn.set_multi_classified(False)
-                else:
-                    btn.set_classified(False)
-                    btn.set_multi_classified(False)
-                    
-                # 确保按钮的UI样式更新
-                btn.style().unpolish(btn)
-                btn.style().polish(btn)
-                
-                # 设置类别计数
-                btn.set_count(self.category_counts.get(category_name, 0))
-                
-                container.layout().addWidget(btn)
-                self.category_buttons.append(btn)
-                button_group.addButton(btn)
-                
-                # 如果是当前选中的类别，设置为选中状态
-                if (self.current_category_index < len(self.ordered_categories) and 
-                    category_name == self.ordered_categories[self.current_category_index]):
-                    btn.setChecked(True)
-                    
-            except Exception as e:
-                self.logger.error(f"创建类别按钮失败: {category_name}, 错误: {str(e)}")
-                continue
-        
-        # 添加弹性空间
-        container.layout().addStretch()
-        
-        # 将容器添加到滚动区域
-        self.button_layout.addWidget(container)
-        
-        # 确保初始状态正确：如果没有当前图片分类，默认选中第一个类别
-        if (self.category_buttons and self.current_category_index >= 0 and 
-            self.current_category_index < len(self.category_buttons)):
-            self.category_buttons[self.current_category_index].setChecked(True)
-        elif self.category_buttons and not any(btn.isChecked() for btn in self.category_buttons):
-            # 如果没有任何按钮被选中，默认选中第一个
-            self.current_category_index = 0
-            self.category_buttons[0].setChecked(True)
-    
+
     def _update_image_list_internal(self):
         """内部图片列表更新方法 - 完整显示所有图片"""
         try:
@@ -3226,72 +2925,19 @@ class ImageClassifier(QMainWindow):
             self._nav_manager.next_image()
 
     def prev_category(self):
-        """选择上一个类别 - 参考原始实现"""
-        if not self.category_buttons:
-            return
-            
-        # 取消当前选中
-        if 0 <= self.current_category_index < len(self.category_buttons):
-            self.category_buttons[self.current_category_index].setChecked(False)
-            
-        # 循环选择上一个（支持从头到尾的循环）
-        if self.current_category_index <= 0:
-            self.current_category_index = len(self.category_buttons) - 1
-        else:
-            self.current_category_index -= 1
-            
-        # 设置新的选中状态
-        self.category_buttons[self.current_category_index].setChecked(True)
-        
-        # 确保选中的按钮可见
-        scroll_area = self.findChild(QScrollArea)
-        if scroll_area:
-            scroll_area.ensureWidgetVisible(self.category_buttons[self.current_category_index])
-            
-        self.logger.info(f"选择类别: {self.ordered_categories[self.current_category_index]}")
-    
+        """选择上一个类别 - 委托给CategoryPanel"""
+        if hasattr(self, 'category_panel'):
+            self.category_panel.prev_category()
+
     def next_category(self):
-        """选择下一个类别 - 参考原始实现"""
-        if not self.category_buttons:
-            return
-            
-        # 取消当前选中
-        if 0 <= self.current_category_index < len(self.category_buttons):
-            self.category_buttons[self.current_category_index].setChecked(False)
-            
-        # 循环选择下一个（支持从尾到头的循环）
-        if self.current_category_index >= len(self.category_buttons) - 1:
-            self.current_category_index = 0
-        else:
-            self.current_category_index += 1
-            
-        # 设置新的选中状态
-        self.category_buttons[self.current_category_index].setChecked(True)
-        
-        # 确保选中的按钮可见
-        scroll_area = self.findChild(QScrollArea)
-        if scroll_area:
-            scroll_area.ensureWidgetVisible(self.category_buttons[self.current_category_index])
-            
-        self.logger.info(f"选择类别: {self.ordered_categories[self.current_category_index]}")
-    
-    def update_category_selection(self):
-        """更新类别选择状态"""
-        if (self.category_buttons and 
-            0 <= self.current_category_index < len(self.category_buttons)):
-            # 清除所有按钮的选中状态
-            for btn in self.category_buttons:
-                btn.setChecked(False)
-            
-            # 设置当前按钮为选中状态
-            self.category_buttons[self.current_category_index].setChecked(True)
-    
+        """选择下一个类别 - 委托给CategoryPanel"""
+        if hasattr(self, 'category_panel'):
+            self.category_panel.next_category()
+
     def confirm_category(self):
-        """确认当前选中的类别"""
-        if (self.ordered_categories and
-            0 <= self.current_category_index < len(self.ordered_categories)):
-            category_name = self.ordered_categories[self.current_category_index]
-            self.move_to_category(category_name)
+        """确认当前选中的类别 - 委托给CategoryPanel"""
+        if hasattr(self, 'category_panel'):
+            self.category_panel.confirm_category()
 
     def refresh_categories(self):
         """刷新类别目录（F5快捷键 / 工具栏按钮回调）"""
@@ -3431,56 +3077,6 @@ class ImageClassifier(QMainWindow):
 
         painter.end()
         return QIcon(pixmap)
-
-    def show_sort_menu(self):
-        """显示排序方式菜单"""
-
-        menu = QMenu(self)
-        menu.setStyleSheet(WidgetStyles.get_context_menu_style())
-
-        # 获取当前排序模式
-        current_mode = getattr(self.config, 'category_sort_mode', 'name')
-
-        # 三个单选菜单项 - 使用自定义复选框图标
-        action_name = QAction(self.create_checkbox_icon(current_mode == 'name'), "按名称排序", self)
-        action_name.triggered.connect(lambda: self.change_category_sort_mode('name'))
-        menu.addAction(action_name)
-
-        action_shortcut = QAction(self.create_checkbox_icon(current_mode == 'shortcut'), "按快捷键排序", self)
-        action_shortcut.triggered.connect(lambda: self.change_category_sort_mode('shortcut'))
-        menu.addAction(action_shortcut)
-
-        action_count = QAction(self.create_checkbox_icon(current_mode == 'count'), "按分类数量排序", self)
-        action_count.triggered.connect(lambda: self.change_category_sort_mode('count'))
-        menu.addAction(action_count)
-
-        # 在排序按钮下方显示菜单 - 智能定位防止超出窗口
-        # 先让菜单调整大小以获得准确的尺寸
-        menu.adjustSize()
-
-        # 获取按钮的右下角位置（改为右对齐）
-        button_global_rect = self.sort_button.mapToGlobal(self.sort_button.rect().bottomRight())
-        menu_size = menu.sizeHint()
-
-        # 获取主窗口的实际可见区域
-        window_rect = self.rect()
-        window_global_pos = self.mapToGlobal(window_rect.topLeft())
-        window_right = window_global_pos.x() + window_rect.width()
-        window_bottom = window_global_pos.y() + window_rect.height()
-
-        # 初始位置：按钮右下角，菜单右对齐
-        x = button_global_rect.x() - menu_size.width()
-        y = button_global_rect.y()
-
-        # 确保菜单不超出窗口左边界
-        if x < window_global_pos.x():
-            x = window_global_pos.x() + 5
-
-        # 如果菜单超出窗口底部，显示在按钮上方
-        if y + menu_size.height() > window_bottom - 10:  # 留10px底部边距
-            y = self.sort_button.mapToGlobal(self.sort_button.rect().topRight()).y() - menu_size.height()
-
-        menu.exec(QPoint(x, y))
 
     def _on_image_search(self, text: str):
         """处理图片列表搜索
@@ -3788,28 +3384,20 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.debug(f"更新列表项宽度失败: {e}")
 
-    def select_category(self, category_name):
-        """选择类别并更新视觉状态"""
+    def _on_category_selected(self, category_name: str):
+        """处理CategoryPanel的category_selected信号"""
         self.selected_category = category_name
         if category_name in self.ordered_categories:
-            # 更新当前选中的索引
             self.current_category_index = self.ordered_categories.index(category_name)
-            
-            # 清除所有按钮的选中状态
-            for btn in self.category_buttons:
-                btn.setChecked(False)
-            
-            # 设置当前按钮为选中状态
-            if 0 <= self.current_category_index < len(self.category_buttons):
-                self.category_buttons[self.current_category_index].setChecked(True)
-                
-                # 确保选中的按钮可见
-                scroll_area = self.findChild(QScrollArea)
-                if scroll_area:
-                    scroll_area.ensureWidgetVisible(self.category_buttons[self.current_category_index])
-                    
-            self.logger.info(f"鼠标选择类别: {category_name}")
-    
+
+    def _on_category_operation_requested(self, operation: str, data: dict):
+        """处理CategoryPanel的operation_requested信号"""
+        if operation == 'add_category':
+            # 调用原有的add_category方法
+            self.add_category()
+        else:
+            self.logger.warning(f"未知的类别操作: {operation}")
+
     def move_to_category(self, category_name):
         """分类当前图片到指定类别（通过FileOperationManager）"""
         if not self._file_ops_manager:
@@ -5214,91 +4802,9 @@ class ImageClassifier(QMainWindow):
             if hasattr(self, 'image_search_widget'):
                 self.image_search_widget.apply_theme()
 
-            # 更新类别标题容器
-            category_title_container = self.findChild(QWidget, "category_title_container")
-            if category_title_container:
-                category_title_container.setStyleSheet(f"""
-                    QWidget#category_title_container {{
-                        border-bottom: 2px solid {c.WARNING};
-                        margin-bottom: 4px;
-                        max-height: 28px;
-                        min-height: 28px;
-                    }}
-                """)
-
-            # 更新图片预览滚动区域
-            if hasattr(self, 'image_scroll_area'):
-                self.image_scroll_area.setStyleSheet(f"""
-                    QScrollArea {{
-                        border: 1px solid {c.BORDER_MEDIUM};
-                        border-radius: 4px;
-                        background-color: {c.BACKGROUND_SECONDARY};
-                    }}
-                """)
-
-            # 更新类别按钮滚动区域
-            if hasattr(self, 'category_scroll'):
-                self.category_scroll.setStyleSheet(f"""
-                    QScrollArea {{
-                        border: 1px solid {c.WARNING};
-                        border-radius: 4px;
-                        background-color: {c.BACKGROUND_SECONDARY};
-                    }}
-                    QScrollBar:vertical {{
-                        border: 1px solid {c.WARNING};
-                        background: {c.BACKGROUND_SECONDARY};
-                        width: 10px;
-                        border-radius: 3px;
-                    }}
-                    QScrollBar::handle:vertical {{
-                        background: {c.WARNING};
-                        border-radius: 3px;
-                        min-height: 15px;
-                    }}
-                    QScrollBar::handle:vertical:hover {{
-                        background: {c.WARNING_DARK};
-                    }}
-                    QScrollBar::handle:vertical:pressed {{
-                        background: {c.WARNING_DARK};
-                    }}
-                    QScrollBar:horizontal {{
-                        border: 1px solid {c.WARNING};
-                        background: {c.BACKGROUND_SECONDARY};
-                        height: 10px;
-                        border-radius: 3px;
-                    }}
-                    QScrollBar::handle:horizontal {{
-                        background: {c.WARNING};
-                        border-radius: 3px;
-                        min-width: 15px;
-                    }}
-                    QScrollBar::handle:horizontal:hover {{
-                        background: {c.WARNING_DARK};
-                    }}
-                    QScrollBar::handle:horizontal:pressed {{
-                        background: {c.WARNING_DARK};
-                    }}
-                    QScrollBar::add-line:vertical,
-                    QScrollBar::sub-line:vertical,
-                    QScrollBar::add-line:horizontal,
-                    QScrollBar::sub-line:horizontal {{
-                        border: none;
-                        background: none;
-                    }}
-                """)
-
-            # 更新类别按钮容器
-            if hasattr(self, 'category_widget'):
-                self.category_widget.setStyleSheet(f"""
-                    QWidget {{
-                        background-color: {c.BACKGROUND_SECONDARY};
-                    }}
-                """)
-
-            # 更新所有类别按钮的样式
-            if hasattr(self, 'category_buttons'):
-                for btn in self.category_buttons:
-                    apply_category_button_style(btn)
+            # 更新CategoryPanel主题
+            if hasattr(self, 'category_panel'):
+                self.category_panel.apply_theme()
 
             # 更新统计面板
             if hasattr(self, 'statistics_panel') and hasattr(self.statistics_panel, 'apply_theme'):
