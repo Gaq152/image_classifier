@@ -2480,6 +2480,8 @@ class ImageClassifier(QMainWindow):
         # Manager已更新状态，这里只需UI刷新
         self.update_category_buttons()
         self.schedule_ui_update('statistics', 'category_counts')
+        # 类别变化后重新绑定类别快捷键
+        self.setup_shortcuts()
 
     def on_category_selection_changed(self, index: int, name: str):
         """类别选中状态变更"""
@@ -5775,7 +5777,7 @@ class ImageClassifier(QMainWindow):
             
             # 过滤掉纯修饰键，避免日志噪音和冲突
             modifier_keys = {
-                Qt.Key.Key_Ctrl, Qt.Key.Key_Shift, Qt.Key.Key_Alt, 
+                Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt,
                 Qt.Key.Key_Meta, Qt.Key.Key_AltGr, Qt.Key.Key_CapsLock,
                 Qt.Key.Key_NumLock, Qt.Key.Key_ScrollLock
             }
