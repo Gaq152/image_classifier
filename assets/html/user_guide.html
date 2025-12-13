@@ -1,0 +1,181 @@
+<h2 style="border-bottom: 2px solid {{primary}}; padding-bottom: 8px; color: {{text_primary}};">详细使用指南</h2>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">文件管理</h3>
+
+<h4 style="color: {{text_primary}};">目录操作</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>打开目录</b>：选择包含待分类图片的根目录</li>
+<li><b>子目录处理</b>：程序会递归扫描所有子目录中的图片</li>
+<li><b>目录结构</b>：分类后的图片会按类别名创建对应文件夹</li>
+<li><b>移出目录</b>：删除的图片会移动到 "remove" 文件夹</li>
+</ul>
+
+<h4 style="color: {{text_primary}};">类别管理</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>新增类别</b>：单个添加或批量添加（逗号分隔）</li>
+<li><b>编辑类别</b>：右键类别按钮选择"编辑"</li>
+<li><b>删除类别</b>：右键类别按钮选择"删除"</li>
+<li><b>快捷键设置</b>：右键类别按钮选择"设置快捷键"</li>
+<li><b>类别限制</b>：类别名最长50个字符，支持中英文</li>
+</ul>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">图片浏览与操作</h3>
+
+<h4 style="color: {{text_primary}};">视图控制</h4>
+<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid {{border}};">
+<tr style="background-color: {{bg_secondary}};">
+<th style="width: 20%; padding: 8px; border: 1px solid {{border}}; text-align: left; color: {{text_primary}};">功能</th>
+<th style="width: 30%; padding: 8px; border: 1px solid {{border}}; text-align: left; color: {{text_primary}};">操作方法</th>
+<th style="width: 20%; padding: 8px; border: 1px solid {{border}}; text-align: left; color: {{text_primary}};">快捷键</th>
+<th style="width: 30%; padding: 8px; border: 1px solid {{border}}; text-align: left; color: {{text_primary}};">说明</th>
+</tr>
+<tr>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">适应窗口</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">菜单/快捷键</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">Ctrl+F</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">自动调整图片大小适应显示区域</td>
+</tr>
+<tr style="background-color: {{bg_hover}};">
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">放大图片</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">滚轮向上/菜单</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">Ctrl + =</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">放大图片，最大倍数可在设置中配置（默认3倍，最大20倍）</td>
+</tr>
+<tr>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">缩小图片</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">滚轮向下/菜单</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">Ctrl + -</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">缩小图片显示</td>
+</tr>
+<tr style="background-color: {{bg_hover}};">
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">原始大小</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">菜单/快捷键</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">Ctrl + 0</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">显示图片100%原始大小</td>
+</tr>
+<tr>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">拖拽移动</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">鼠标左键拖拽</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">-</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">移动图片查看不同区域</td>
+</tr>
+</table>
+
+<h4 style="color: {{text_primary}};">分类操作</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>复制模式</b>：保留原文件，复制到目标类别文件夹（默认）</li>
+<li><b>移动模式</b>：直接移动文件到目标类别文件夹</li>
+<li><b>分类方法</b>：双击类别按钮、使用快捷键或按回车键</li>
+<li><b>多分类模式</b>：同一张图片可分配到多个类别</li>
+<li><b>删除图片</b>：按 Delete 键将图片移动到 "remove" 文件夹</li>
+<li><b>撤销操作</b>：支持撤销分类（单/多分类）和撤销删除，再次点击已分类类别或已删除图片的 Delete 键即可撤销</li>
+</ul>
+
+<h4 style="color: {{text_primary}};">分类模式详解</h4>
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
+<h5 style="color: {{primary}}; margin-top: 0;">单分类模式（默认）</h5>
+<ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {{text_primary}};">
+<li>一张图片只能属于一个类别</li>
+<li>重新分类会自动从旧类别移动到新类别</li>
+<li>类别按钮显示绿色背景表示已分类</li>
+<li>适合传统的文件整理需求</li>
+</ul>
+</div>
+
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
+<h5 style="color: {{primary}}; margin-top: 0;">多分类模式（新功能）</h5>
+<ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {{text_primary}};">
+<li><b>灵活分类</b>：一张图片可以同时属于多个类别</li>
+<li><b>切换方式</b>：点击工具栏的"→/⇶"按钮切换单/多分类</li>
+<li><b>分类操作</b>：点击类别按钮添加分类，再次点击取消分类</li>
+<li><b>视觉反馈</b>：多分类的类别按钮显示蓝色背景</li>
+<li><b>应用场景</b>：标签化管理，如"风景+日落"、"人物+室内"等</li>
+</ul>
+
+<table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; margin: 10px 0; border: 1px solid {{border}};">
+<tr style="background-color: {{bg_secondary}};">
+<th style="padding: 8px; border: 1px solid {{border}}; text-align: left; color: {{text_primary}};">操作</th>
+<th style="padding: 8px; border: 1px solid {{border}}; text-align: left; color: {{text_primary}};">多分类模式行为</th>
+<th style="padding: 8px; border: 1px solid {{border}}; text-align: left; color: {{text_primary}};">单分类模式行为</th>
+</tr>
+<tr>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">首次分类</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">添加到类别列表</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">直接分类到该类别</td>
+</tr>
+<tr style="background-color: {{bg_hover}};">
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">已分类的类别</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">从列表中移除（取消分类）</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">撤销分类（复制模式移除该文件，移动模式文件返回原目录）</td>
+</tr>
+<tr>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">其他类别</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">同时添加到类别列表</td>
+<td style="padding: 8px; border: 1px solid {{border}}; color: {{text_primary}};">从旧类别移动到新类别</td>
+</tr>
+</table>
+</div>
+
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 20px 0;">
+<h5 style="color: {{primary}}; margin-top: 0;">多分类模式使用技巧</h5>
+<ul style="margin: 5px 0; padding-left: 20px; line-height: 1.6; color: {{text_primary}};">
+<li><b>标签化思维</b>：把类别当作标签，一张图片可以有多个标签</li>
+<li><b>快速取消</b>：再次点击已分类的类别按钮可快速取消该分类</li>
+<li><b>状态查看</b>：蓝色背景的类别按钮表示当前图片属于该类别</li>
+<li><b>物理文件</b>：图片会被复制到每个分类的文件夹中</li>
+<li><b>模式切换</b>：可随时在单分类和多分类模式间切换</li>
+</ul>
+</div>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">状态与统计</h3>
+
+<h4 style="color: {{text_primary}};">状态标识</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>已分类</b>：图片已成功分类到某个类别</li>
+<li><b>已移出</b>：图片已移动到移出目录</li>
+<li><b>未处理</b>：尚未分类的图片</li>
+<li><b>进度显示</b>：底部状态栏显示处理进度</li>
+</ul>
+
+<h4 style="color: {{text_primary}};">实时统计</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>总数统计</b>：显示图片总数和处理进度</li>
+<li><b>类别统计</b>：每个类别的图片数量</li>
+<li><b>效率统计</b>：分类速度和剩余时间估计</li>
+</ul>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">同步与刷新</h3>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>自动同步</b>：程序会定期检测外部文件变化</li>
+<li><b>手动刷新</b>：按 F5 键立即同步文件状态</li>
+<li><b>智能检测</b>：检测新增、删除、移动的文件</li>
+<li><b>状态保存</b>：工作状态自动保存，重启后恢复</li>
+</ul>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">高级设置</h3>
+
+<h4 style="color: {{text_primary}};">快捷键系统</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>自动分配</b>：数字键 1-9 和字母键 a-z 会自动分配给前 35 个类别</li>
+<li><b>手动设置</b>：右键类别按钮选择"设置快捷键"可自定义</li>
+<li><b>组合键</b>：支持 Ctrl、Alt、Shift 组合键，需手动设置</li>
+<li><b>冲突检测</b>：设置快捷键时会自动检测冲突，避开系统保留快捷键</li>
+<li><b>排序模式</b>：支持按类别名称、快捷键或分类数量排列</li>
+</ul>
+
+<h4 style="color: {{text_primary}};">性能优化</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>智能预加载</b>：自动预加载下一张图片提高浏览速度</li>
+<li><b>内存管理</b>：智能释放不需要的图片内存，减少占用</li>
+<li><b>多线程处理</b>：后台线程处理文件操作，界面保持流畅</li>
+<li><b>大图片优化</b>：自动检测大图并优化加载策略</li>
+<li><b>批量处理</b>：支持高效处理数千张图片</li>
+</ul>
+
+<h4 style="color: {{text_primary}};">网络存储优化</h4>
+<ul style="line-height: 1.8; color: {{text_primary}};">
+<li><b>SMB/NAS 支持</b>：支持 \\server\share 格式的网络路径</li>
+<li><b>网络缓存</b>：智能缓存网络图片提高访问速度</li>
+<li><b>自动重试</b>：网络操作失败时自动重试3次</li>
+<li><b>连接优化</b>：维护网络连接池提高效率</li>
+</ul>
