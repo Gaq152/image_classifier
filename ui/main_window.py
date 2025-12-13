@@ -96,6 +96,14 @@ class DisabledButtonEventFilter(QObject):
         return super().eventFilter(obj, event)
 
 
+class NoSearchListView(QListView):
+    """禁用键盘搜索的 QListView，避免与分类快捷键冲突"""
+    def keyboardSearch(self, search: str):
+        # 禁用默认的键盘搜索功能
+        # 原因：数字/字母快捷键用于分类，不应触发列表跳转
+        pass
+
+
 class ImageClassifier(QMainWindow):
     """
     主图像分类器窗口
@@ -1114,7 +1122,8 @@ class ImageClassifier(QMainWindow):
 
         # 图片列表容器 - 可随窗口拉伸
         # Phase 1.1 Migration: Replace QListWidget with QListView for performance
-        self.image_list = QListView()
+        # 使用 NoSearchListView 禁用键盘搜索，避免与分类快捷键冲突
+        self.image_list = NoSearchListView()
         self.image_list.setObjectName("image_list")  # 设置对象名以便教程系统找到
         self.image_list.setMinimumHeight(120)  # 设置最小高度
 
@@ -2434,16 +2443,15 @@ class ImageClassifier(QMainWindow):
 
     def on_file_moved(self, src: str, dst: str):
         """文件移动完成"""
-        # Manager已更新状态，这里只需UI刷新
-        # 修复：分类后需要重新应用过滤，保持筛选状态
-        self._pending_reapply_filter = True
+        # 注意：move_to_category 内部已经调用了 apply_image_filter 和 next_image
+        # 不再需要设置 _pending_reapply_filter，避免重复调用 show_current_image
         self.schedule_ui_update('image_list', 'statistics', 'category_buttons')
         self.statusBar.showMessage(f"✅ 已分类到 {Path(dst).parent.name}")
 
     def on_file_removed(self, path: str):
         """文件移除完成"""
-        # 修复：移除后需要重新应用过滤，保持筛选状态
-        self._pending_reapply_filter = True
+        # 注意：move_to_remove 内部已经调用了 apply_image_filter 和 select_after_removal
+        # 不再需要设置 _pending_reapply_filter，避免重复调用 show_current_image
         self.schedule_ui_update('image_list', 'statistics')
         self.statusBar.showMessage(f"✅ 已移除")
 

@@ -205,7 +205,7 @@ class FileOperationManager(QObject):
                 self._execute_file_operation_with_check(real_path, 'remove', is_remove=True)
 
             self._ui.save_state()
-            self._ui.apply_image_filter()  # 重新计算 visible_indices
+            self._ui.apply_image_filter(suppress_show=True)  # 重新计算 visible_indices，抑制显示避免重复
 
             # 关键修复：智能导航到最近可见项，避免跳到第二张
             self._navigator.select_after_removal(original_index)

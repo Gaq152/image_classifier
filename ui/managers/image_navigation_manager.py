@@ -294,13 +294,6 @@ class ImageNavigationManager(QObject):
 
     def show_current_image(self):
         """显示当前图片 - 防止多图刷新"""
-        # === 调试：记录调用来源 ===
-        try:
-            caller_info = traceback.extract_stack()[-2]
-            self._logger.info(f"[DEBUG-show_current_image] 调用来源: {caller_info.name}():{caller_info.lineno}, 索引={self._state.current_index}")
-        except:
-            pass
-
         # 防重入检查，避免多次触发
         if self._showing_image:
             return
@@ -481,17 +474,8 @@ class ImageNavigationManager(QObject):
         image_files = self._state.image_files
         current_index = self._state.current_index
 
-        # === 调试日志：开始 ===
-        self._logger.info(f"[DEBUG-next_image] 开始 - current_index={current_index}, total={len(image_files)}")
-
         # Codex最终Review修复：区分"未过滤"和"过滤结果为空"
         visible_indices = self._get_visible_indices()
-
-        # === 调试日志：筛选状态 ===
-        if visible_indices is not None:
-            self._logger.info(f"[DEBUG-next_image] 有筛选 - 可见数量={len(visible_indices)}")
-        else:
-            self._logger.info(f"[DEBUG-next_image] 无筛选")
 
         if visible_indices is not None:
             # 过滤已激活
@@ -503,20 +487,16 @@ class ImageNavigationManager(QObject):
             # 有可见图片：在可见列表中导航
             try:
                 current_pos = visible_indices.index(current_index)
-                # === 调试日志：当前位置 ===
-                self._logger.info(f"[DEBUG-next_image] 筛选模式 - 当前位置={current_pos}/{len(visible_indices)}")
 
                 if current_pos < len(visible_indices) - 1:
                     # 移动到下一张可见图片
                     next_idx = visible_indices[current_pos + 1]
-                    self._logger.info(f"[DEBUG-next_image] 跳到下一张 - 索引={next_idx}")
                     self._mutator.set_current_index(next_idx)
                     self._record_direction(1)
                     self.image_changed.emit(next_idx)
                     self.show_current_image()
                 else:
                     # 已经是最后一张可见图片
-                    self._logger.info(f"[DEBUG-next_image] 已是最后一张可见图片")
                     loop_enabled = self._should_enable_loop()
                     if loop_enabled:
                         # 循环到第一张可见图片
@@ -528,7 +508,6 @@ class ImageNavigationManager(QObject):
                         self._ui.show_toast('info', "已经是最后一张图片了！")
             except ValueError:
                 # 当前图片不在可见列表中（被过滤掉了）
-                self._logger.info(f"[DEBUG-next_image] 当前索引不在可见列表 - current_index={current_index}")
                 # 找到当前索引之后的第一张可见图片（而不是跳到第一张）
                 next_visible = None
                 for idx in visible_indices:
@@ -553,16 +532,13 @@ class ImageNavigationManager(QObject):
                         self._ui.show_toast('info', "已经是最后一张图片了！")
         else:
             # 没有过滤：原始逻辑
-            self._logger.info(f"[DEBUG-next_image] 无筛选模式")
             if current_index < len(image_files) - 1:
                 next_idx = current_index + 1
-                self._logger.info(f"[DEBUG-next_image] 跳到下一张 - 索引={next_idx}")
                 self._mutator.set_current_index(next_idx)
                 self._record_direction(1)
                 self.image_changed.emit(next_idx)
                 self.show_current_image()
             else:
-                self._logger.info(f"[DEBUG-next_image] 已是最后一张")
                 loop_enabled = self._should_enable_loop()
                 if loop_enabled:
                     self._mutator.set_current_index(0)
