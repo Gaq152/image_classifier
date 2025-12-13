@@ -128,6 +128,15 @@ class CategoryButton(QPushButton):
         except Exception as e:
             self.logger.error(f"更新标签颜色失败: {e}")
 
+    def update_style(self):
+        """更新按钮样式（主题切换时调用）"""
+        apply_category_button_style(self)
+        self.update_label_colors()
+        # 强制刷新样式
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
     def show_context_menu(self, pos):
         """显示右键菜单"""
         try:
