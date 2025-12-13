@@ -81,6 +81,13 @@ class InfoPanel(QWidget):
         """应用主题到面板"""
         c = default_theme.colors
 
+        # 设置面板背景
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {c.BACKGROUND_PRIMARY};
+            }}
+        """)
+
         # 更新提示文本样式
         if self.tips_label:
             self.tips_label.setStyleSheet(f"""
@@ -88,7 +95,7 @@ class InfoPanel(QWidget):
                     color: {c.TEXT_SECONDARY};
                     font-size: 11px;
                     padding: 4px 8px;
-                    background-color: {c.WARNING_LIGHT if not default_theme.is_dark else c.BACKGROUND_TERTIARY};
+                    background-color: {c.WARNING_LIGHT if not default_theme.is_dark else c.BACKGROUND_SECONDARY};
                     border: 1px solid {c.WARNING};
                     border-radius: 4px;
                     margin: 2px 0px;

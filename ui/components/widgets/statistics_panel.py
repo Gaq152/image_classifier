@@ -228,6 +228,13 @@ class StatisticsPanel(QWidget):
         try:
             c = default_theme.colors
 
+            # 设置面板背景
+            self.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {c.BACKGROUND_PRIMARY};
+                }}
+            """)
+
             # 更新标题标签样式
             if hasattr(self, 'findChildren'):
                 for label in self.findChildren(QLabel):

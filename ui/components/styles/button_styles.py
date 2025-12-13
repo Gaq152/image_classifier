@@ -130,11 +130,11 @@ class ButtonStyles:
 
     @staticmethod
     def get_square_button_style(object_name: str, size: str = "medium") -> str:
-        """正方形图标按钮样式（工具栏用）- 保持原始外观"""
+        """正方形图标按钮样式（工具栏用）- 支持主题切换"""
         return f"""
             QPushButton#{object_name} {{
-                background-color: #f5f5f5;
-                color: #424242;
+                background-color: {default_theme.colors.BACKGROUND_CARD};
+                color: {default_theme.colors.TEXT_SECONDARY};
                 border: none;
                 border-radius: 8px;
                 font-size: 18px;
@@ -142,10 +142,10 @@ class ButtonStyles:
                 text-align: center;
             }}
             QPushButton#{object_name}:hover {{
-                background-color: #e0e0e0;
+                background-color: {default_theme.colors.BACKGROUND_HOVER};
             }}
             QPushButton#{object_name}:pressed {{
-                background-color: #d0d0d0;
+                background-color: {default_theme.colors.BACKGROUND_PRESSED};
             }}
             QPushButton#{object_name}:disabled {{
                 background-color: {default_theme.colors.GRAY_200};
