@@ -320,6 +320,28 @@ class CategoryManager(QObject):
             self._logger.warning("移动模式不支持多分类")
             self._ui.show_toast('warning', "移动模式不支持多分类")
             return self._state.is_multi_category
+
+        # 从多分类切到单分类前：检查是否存在多标签图片
+        if self._state.is_multi_category:
+            multi_tagged = [
+                p for p, c in self._state.classified_images.items()
+                if isinstance(c, list) and len(c) > 1
+            ]
+            if multi_tagged:
+                self._ui.show_toast(
+                    'warning',
+                    f"存在 {len(multi_tagged)} 张图片被分配多个标签，无法切换到单分类模式。\n请先移除多余标签后再切换。"
+                )
+                return self._state.is_multi_category
+
+            # 归一化：List[str] (len==1) -> str
+            for p, c in list(self._state.classified_images.items()):
+                if isinstance(c, list):
+                    if len(c) == 1:
+                        self._mutator.set_classified_image(p, c[0])
+                    elif len(c) == 0:
+                        self._mutator.remove_classified_image(p)
+
         new_mode = not self._state.is_multi_category
         self._mutator.set_multi_category(new_mode)
         self._ui.save_state()

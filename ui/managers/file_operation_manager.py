@@ -126,6 +126,21 @@ class FileOperationManager(QObject):
                         self._execute_file_operation_with_check(real_path, category_name, is_remove=False)
             else:
                 # 单分类分支：相同分类即撤销
+                # 防御：单分类模式下不应出现 list 分类记录（可能来自历史状态/错误切换）
+                if isinstance(old_category, list):
+                    if len(old_category) == 1:
+                        old_category = old_category[0]
+                        self._mutator.set_classified_image(file_path, old_category)
+                    elif len(old_category) > 1:
+                        self._ui.show_toast(
+                            'warning',
+                            "当前图片已被分配多个标签，无法在单分类模式下继续操作，请切换到多分类模式或先移除多余标签"
+                        )
+                        return
+                    else:
+                        old_category = None
+                        self._mutator.remove_classified_image(file_path)
+
                 if old_category == category_name:
                     # 传入原始路径 file_path，_undo_classification 内部会处理状态清理
                     self._undo_classification(file_path, category_name)
@@ -148,9 +163,10 @@ class FileOperationManager(QObject):
             self._ui.schedule_ui_update('category_buttons', 'category_counts', 'statistics', 'ui_state')
             self._ui.refresh_category_buttons_style()
 
-            # 关键修复：分类后自动翻页（与 move_to_remove 保持一致）
+            # 分类后：单分类自动翻页，多分类保持当前图片（便于同图多标签）
             self._ui.apply_image_filter(suppress_show=True)
-            self._navigator.next_image()
+            if not self._state.is_multi_category:
+                self._navigator.next_image()
 
             target_dir = self._get_parent_dir() / category_name
             self.file_moved.emit(real_path, str(target_dir / Path(real_path).name))
@@ -242,24 +258,40 @@ class FileOperationManager(QObject):
 
             source_file = Path(file_path)
             parent_dir = current_dir.parent
-            category_file = parent_dir / category / source_file.name
-            target_file = current_dir / source_file.name
+
+            # 兼容处理：category 可能是 str 或 list
+            categories: List[str] = []
+            if isinstance(category, list):
+                categories = [c for c in category if isinstance(c, str) and c]
+            elif isinstance(category, str):
+                categories = [category]
+            if not categories:
+                return
 
             if self._state.is_copy_mode:
-                # 复制模式：删除分类目录中的副本
-                if category_file.exists():
-                    try:
-                        remove_readonly(category_file)  # 移除只读属性，避免删除失败
-                        retry_file_operation(category_file.unlink, max_retries=5, delay=0.2)
-                        self._logger.info("撤销分类(复制模式)：删除副本 %s", category_file)
-                    except Exception as e:
-                        # 副本删除失败，但仍然清除分类记录（原图还在原目录）
-                        self._logger.warning("删除副本失败（文件可能被占用），但已清除分类记录: %s", e)
-                        self._ui.show_toast('warning', f"副本删除失败（文件被占用），但已清除分类记录\n建议：关闭占用文件的程序后手动删除")
+                # 复制模式：删除分类目录中的副本（多分类时删除所有标签副本）
+                for cat in categories:
+                    category_file = parent_dir / cat / source_file.name
+                    if category_file.exists():
+                        try:
+                            remove_readonly(category_file)  # 移除只读属性，避免删除失败
+                            retry_file_operation(category_file.unlink, max_retries=5, delay=0.2)
+                            self._logger.info("撤销分类(复制模式)：删除副本 %s", category_file)
+                        except Exception as e:
+                            # 副本删除失败，但仍然清除分类记录（原图还在原目录）
+                            self._logger.warning("删除副本失败（文件可能被占用），但已清除分类记录: %s", e)
+                            self._ui.show_toast('warning', f"副本删除失败（文件被占用），但已清除分类记录\n建议：关闭占用文件的程序后手动删除")
             else:
-                # 移动模式：搬回原目录
-                target_file = self._ensure_unique_name(target_file)
-                if category_file.exists():
+                # 移动模式：搬回原目录（兼容异常状态：多分类记录时找第一个存在的文件）
+                category_file = None
+                for cat in categories:
+                    candidate = parent_dir / cat / source_file.name
+                    if candidate.exists():
+                        category_file = candidate
+                        break
+
+                target_file = self._ensure_unique_name(current_dir / source_file.name)
+                if category_file and category_file.exists():
                     shutil.move(str(category_file), str(target_file))
                     self._logger.info("撤销分类(移动模式)：%s -> %s", category_file, target_file)
 
