@@ -565,9 +565,6 @@ class CategoryManager(QObject):
         file_path = str(image_path)
         original_index = self._state.current_index
 
-        # === 调试日志：开始 ===
-        self._logger.info(f"[DEBUG-分类] 开始 - 索引={original_index}, 类别={category_name}, 多分类={self._state.is_multi_category}")
-
         try:
             # 委托给FileOperationManager执行分类
             self._file_ops.move_to_category(file_path, category_name)
@@ -581,28 +578,19 @@ class CategoryManager(QObject):
             # 记录过滤后的索引（可能已跳转）
             new_index = self._state.current_index
 
-            # === 调试日志：过滤后 ===
-            self._logger.info(f"[DEBUG-分类] 过滤后 - 原索引={original_index}, 新索引={new_index}, 已改变={new_index != original_index}")
-
             # 根据分类模式处理导航和UI
             if not self._state.is_multi_category:
                 # 单分类模式：自动跳转到下一张
                 # Codex修复：检查过滤是否已改变索引
                 if new_index != original_index:
                     # 过滤已把焦点移到新图片，直接显示（避免被 next_image 当作"最后一张"）
-                    self._logger.info(f"[DEBUG-分类] 索引已变，直接显示新图 - 索引={new_index}")
                     self._navigator.show_current_image()
                 else:
                     # 仍在原图，正常翻页
-                    self._logger.info(f"[DEBUG-分类] 索引未变，调用 next_image()")
                     self._navigator.next_image()
             else:
                 # 多分类模式：保持当前图片，更新类别选择状态
-                self._logger.info(f"[DEBUG-分类] 多分类模式，保持当前图")
                 self._ui.update_category_selection()
-
-            # === 调试日志：结束 ===
-            self._logger.info(f"[DEBUG-分类] 结束 - 最终索引={self._state.current_index}")
 
             # 发射选中变化信号
             self.selection_changed.emit(self._current_category_index, category_name)
