@@ -32,7 +32,7 @@ from .components.widgets import (CategoryButton, EnhancedImageLabel,
                                 StatisticsPanel, ExpandableSearch)
 # Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
 from .models.image_list_model import ImageListModel
-from ._main_window.panels import CategoryPanel, ImageViewPanel
+from ._main_window.panels import CategoryPanel, ImageViewPanel, InfoPanel
 from .delegates.image_list_delegate import ImageListDelegate
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles, WidgetStyles
@@ -867,31 +867,13 @@ class ImageClassifier(QMainWindow):
         self.category_panel.sort_mode_changed.connect(self.change_category_sort_mode)
         self.category_panel.sort_direction_toggled.connect(self.toggle_sort_direction)
 
-        # 统计面板 - 固定高度，不参与拉伸
-        self.statistics_panel = StatisticsPanel()
-        right_layout.addWidget(self.statistics_panel, 0)  # 不拉伸
-        
+        # 信息面板 - 包含统计信息和提示文本
+        self.info_panel = InfoPanel(self)
+        right_layout.addWidget(self.info_panel, 0)  # 不拉伸
 
-        # 提示文本 - 固定高度，添加灯泡图标
-        tips_label = QLabel('💡 ↑↓选择类别 | Enter确认 | 双击快速分类 | 滚轮缩放')
-        tips_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tips_label.setStyleSheet("""
-            QLabel {
-                color: #555;
-                font-size: 11px;
-                padding: 4px 8px;
-                background-color: #FFF8E1;
-                border: 1px solid #FFD54F;
-                border-radius: 4px;
-                margin: 2px 0px;
-                max-height: 24px;
-                min-height: 24px;
-                font-weight: 500;
-            }
-        """)
-        right_layout.addWidget(tips_label, 0)  # 不拉伸
+        # 保留statistics_panel引用（向后兼容）
+        self.statistics_panel = self.info_panel.statistics_panel
 
-        
         parent.addWidget(right_widget)
     
     def create_image_list_area(self, layout):
@@ -4692,6 +4674,10 @@ class ImageClassifier(QMainWindow):
             # 更新ImageViewPanel主题
             if hasattr(self, 'image_view_panel'):
                 self.image_view_panel.apply_theme()
+
+            # 更新InfoPanel主题
+            if hasattr(self, 'info_panel'):
+                self.info_panel.apply_theme()
 
             # 更新统计面板
             if hasattr(self, 'statistics_panel') and hasattr(self.statistics_panel, 'apply_theme'):
