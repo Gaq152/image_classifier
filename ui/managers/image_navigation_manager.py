@@ -294,6 +294,13 @@ class ImageNavigationManager(QObject):
 
     def show_current_image(self):
         """显示当前图片 - 防止多图刷新"""
+        # === 调试：记录调用来源 ===
+        try:
+            caller_info = traceback.extract_stack()[-2]
+            self._logger.info(f"[DEBUG-show_current_image] 调用来源: {caller_info.name}():{caller_info.lineno}, 索引={self._state.current_index}")
+        except:
+            pass
+
         # 防重入检查，避免多次触发
         if self._showing_image:
             return
