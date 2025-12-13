@@ -32,7 +32,7 @@ from .components.widgets import (CategoryButton, EnhancedImageLabel,
                                 StatisticsPanel, ExpandableSearch)
 # Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
 from .models.image_list_model import ImageListModel
-from ._main_window.panels import CategoryPanel
+from ._main_window.panels import CategoryPanel, ImageViewPanel
 from .delegates.image_list_delegate import ImageListDelegate
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
 from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles, WidgetStyles
@@ -800,8 +800,16 @@ class ImageClassifier(QMainWindow):
             splitter = QSplitter(Qt.Orientation.Horizontal)
             main_layout.addWidget(splitter)
             
-            # 创建左侧面板（图片显示）
-            self.create_left_panel(splitter)
+            # 创建左侧面板（图片显示） - 使用ImageViewPanel
+            self.image_view_panel = ImageViewPanel(self)
+            splitter.addWidget(self.image_view_panel)
+
+            # 连接ImageViewPanel信号
+            self.image_view_panel.remove_requested.connect(self.move_to_remove)
+
+            # 获取image_label引用（保持向后兼容）
+            self.image_label = self.image_view_panel.get_image_label()
+            self.image_scroll_area = self.image_view_panel.image_scroll_area
             
             # 创建右侧面板（控制区域）
             self.create_right_panel(splitter)
@@ -827,97 +835,7 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"用户界面初始化失败: {e}")
             raise ImageClassifierError(f"用户界面初始化失败: {e}")
-    
-    def create_left_panel(self, parent):
-        """创建简洁的左侧图片显示面板"""
-        left_widget = QWidget()
-        left_widget.setObjectName("left_panel")  # 设置对象名用于精确样式选择
-        left_widget.setStyleSheet("""
-            QWidget#left_panel {
-                background-color: #FFFFFF;
-                border: 1px solid #DEE2E6;
-                border-radius: 6px;
-            }
-        """)
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(6, 6, 6, 6)
-        
-        # 图片预览标题行 - 包含标题和移除按钮
-        title_container = QWidget()
-        title_container.setObjectName("title_container")
-        title_container.setStyleSheet("""
-            QWidget#title_container {
-                border-bottom: 1px solid #DEE2E6;
-                max-height: 28px;
-                min-height: 28px;
-            }
-        """)
-        title_layout = QHBoxLayout(title_container)
-        title_layout.setContentsMargins(6, 4, 6, 4)
-        title_layout.setSpacing(8)
 
-        # 图片预览标题
-        title_label = QLabel("🖼️ 图片预览")
-        title_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                font-weight: bold;
-                color: #495057;
-                border: none;
-            }
-        """)
-        title_layout.addWidget(title_label)
-
-        # 添加弹性空间，推送移除按钮到右侧
-        title_layout.addStretch()
-
-        # 移除按钮 - 现代化工具栏图标样式（红色）
-        self.delete_button = self.create_toolbar_button('🗑', 'remove_button',
-                                                       '移除当前图片到移除目录',
-                                                       self.move_to_remove,
-                                                       size=(24, 24))
-        # 重写样式为红色主题 - 正方形圆角设计
-        self.delete_button.setStyleSheet("""
-            QPushButton#remove_button {
-                background-color: #f44336;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-                font-weight: normal;
-                text-align: center;
-            }
-            QPushButton#remove_button:hover {
-                background-color: #e53935;
-            }
-            QPushButton#remove_button:pressed {
-                background-color: #d32f2f;
-            }
-        """)
-        title_layout.addWidget(self.delete_button)
-
-        left_layout.addWidget(title_container, 0)  # 不拉伸
-        
-        # 图片显示区域 - 主要拉伸区域
-        self.image_scroll_area = QScrollArea()
-        self.image_scroll_area.setObjectName("image_preview_container")  # 设置对象名以便教程系统找到
-        self.image_scroll_area.setWidgetResizable(True)
-        self.image_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #ADB5BD;
-                border-radius: 4px;
-                background-color: #F8F9FA;
-            }
-        """)
-
-        self.image_label = EnhancedImageLabel()
-        self.image_scroll_area.setWidget(self.image_label)
-
-        left_layout.addWidget(self.image_scroll_area, 1)  # 主要拉伸权重
-        
-        parent.addWidget(left_widget)
-    
     def create_right_panel(self, parent):
         """创建简洁的右侧控制面板"""
         right_widget = QWidget()
@@ -4667,41 +4585,6 @@ class ImageClassifier(QMainWindow):
                 for toolbar in toolbars:
                     toolbar.setStyleSheet(ToolbarStyles.get_main_toolbar_style())
 
-            # 更新左侧面板样式
-            left_panel = self.findChild(QWidget, "left_panel")
-            if left_panel:
-                left_panel.setStyleSheet(f"""
-                    QWidget#left_panel {{
-                        background-color: {c.BACKGROUND_PRIMARY};
-                        border: 1px solid {c.BORDER_MEDIUM};
-                        border-radius: 6px;
-                    }}
-                """)
-
-            # 更新左侧标题容器
-            title_container = self.findChild(QWidget, "title_container")
-            if title_container:
-                title_container.setStyleSheet(f"""
-                    QWidget#title_container {{
-                        border-bottom: 1px solid {c.BORDER_MEDIUM};
-                        max-height: 28px;
-                        min-height: 28px;
-                    }}
-                """)
-
-            # 更新图片预览标题标签
-            if hasattr(self, 'findChildren'):
-                for label in self.findChildren(QLabel):
-                    if label.text() == "🖼️ 图片预览":
-                        label.setStyleSheet(f"""
-                            QLabel {{
-                                font-size: 14px;
-                                font-weight: bold;
-                                color: {c.TEXT_SECONDARY};
-                                border: none;
-                            }}
-                        """)
-
             # 更新右侧面板样式
             right_panel = self.findChild(QWidget, "right_panel")
             if right_panel:
@@ -4805,6 +4688,10 @@ class ImageClassifier(QMainWindow):
             # 更新CategoryPanel主题
             if hasattr(self, 'category_panel'):
                 self.category_panel.apply_theme()
+
+            # 更新ImageViewPanel主题
+            if hasattr(self, 'image_view_panel'):
+                self.image_view_panel.apply_theme()
 
             # 更新统计面板
             if hasattr(self, 'statistics_panel') and hasattr(self.statistics_panel, 'apply_theme'):
