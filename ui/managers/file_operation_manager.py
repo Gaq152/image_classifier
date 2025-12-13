@@ -148,6 +148,10 @@ class FileOperationManager(QObject):
             self._ui.schedule_ui_update('category_buttons', 'category_counts', 'statistics', 'ui_state')
             self._ui.refresh_category_buttons_style()
 
+            # 关键修复：分类后自动翻页（与 move_to_remove 保持一致）
+            self._ui.apply_image_filter(suppress_show=True)
+            self._navigator.next_image()
+
             target_dir = self._get_parent_dir() / category_name
             self.file_moved.emit(real_path, str(target_dir / Path(real_path).name))
             self._logger.info("图片已归类到 %s: %s", category_name, Path(real_path).name)
