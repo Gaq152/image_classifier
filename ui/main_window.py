@@ -4052,7 +4052,7 @@ class ImageClassifier(QMainWindow):
             self.config.save_config()
 
             # 更新按钮图标和tooltip
-            self.sort_direction_button.setText('↑' if self.config.sort_ascending else '↓')
+            self.category_panel.sort_direction_button.setText('↑' if self.config.sort_ascending else '↓')
             self._update_direction_button_tooltip()
 
             # 重新排序类别
@@ -4098,13 +4098,13 @@ class ImageClassifier(QMainWindow):
         """根据当前排序模式和方向，动态更新方向按钮的tooltip"""
         current_text, action_text = self._get_sort_tooltip_texts()
         tooltip = f"当前：{current_text}\n点击切换为：{action_text}"
-        self.sort_direction_button.setToolTip(tooltip)
+        self.category_panel.sort_direction_button.setToolTip(tooltip)
 
     def _sync_sort_button_state(self):
         """同步排序方向按钮的UI状态（从配置加载后调用）"""
-        if hasattr(self, 'sort_direction_button'):
+        if hasattr(self, 'category_panel') and hasattr(self.category_panel, 'sort_direction_button'):
             # 更新按钮图标
-            self.sort_direction_button.setText('↑' if self.config.sort_ascending else '↓')
+            self.category_panel.sort_direction_button.setText('↑' if self.config.sort_ascending else '↓')
             # 更新tooltip
             self._update_direction_button_tooltip()
 
