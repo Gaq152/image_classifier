@@ -726,8 +726,10 @@ class EnhancedImageLabel(QLabel):
 
             # 更新详细信息
             # 更新路径信息（使用QTextEdit）
+            # Bug修复：使用 os.path.normpath 转换为 Windows 原生路径格式（反斜杠）
             if hasattr(self, 'path_text_edit'):
-                self.path_text_edit.setPlainText(file_info.absoluteFilePath())
+                native_path = os.path.normpath(file_info.absoluteFilePath())
+                self.path_text_edit.setPlainText(native_path)
 
             # 更新其他详细信息
             self.detailed_labels['created'].setText(f"创建时间: {datetime.fromtimestamp(file_stats.st_ctime).strftime('%Y-%m-%d %H:%M:%S')}")

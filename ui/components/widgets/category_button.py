@@ -2,23 +2,40 @@
 分类按钮组件
 
 自定义的类别按钮组件，支持快捷键显示、计数、右键菜单、多分类状态等功能。
+
+Phase 2.5 重构：使用信号机制替代 Parent Reaching 反模式
+- 所有业务操作通过信号通知父组件，而不是直接调用 main_window 方法
 """
 
 import logging
 from PyQt6.QtWidgets import (QPushButton, QLabel, QHBoxLayout, QDialog, QVBoxLayout,
                             QLineEdit, QMenu, QMessageBox)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
-from utils.file_operations import normalize_folder_name, retry_file_operation
-from utils.exceptions import FileOperationError
-from ...dialogs import CategoryShortcutDialog
-from ..toast import toast_warning, toast_error, toast_floating
+from ..toast import toast_error
 from ..styles import apply_category_button_style, WidgetStyles, ButtonStyles
 from ..styles.theme import default_theme
 
 
 class CategoryButton(QPushButton):
-    """自定义类别按钮"""
+    """自定义类别按钮
+
+    信号（Phase 2.5 重构）：
+        rename_requested: 请求重命名类别 (old_name, new_name)
+        shortcut_change_requested: 请求修改快捷键 (category_name)
+        ignore_requested: 请求忽略类别 (category_name)
+        delete_requested: 请求删除类别 (category_name)
+        manage_ignored_requested: 请求打开管理忽略类别对话框
+        classify_requested: 请求分类到该类别 (category_name) - 双击触发
+    """
+
+    # 信号定义
+    rename_requested = pyqtSignal(str, str)  # old_name, new_name
+    shortcut_change_requested = pyqtSignal(str)  # category_name
+    ignore_requested = pyqtSignal(str)  # category_name
+    delete_requested = pyqtSignal(str)  # category_name
+    manage_ignored_requested = pyqtSignal()
+    classify_requested = pyqtSignal(str)  # category_name
 
     def __init__(self, category_name, config, is_remove=False, parent=None):
         super().__init__(parent)
@@ -175,19 +192,12 @@ class CategoryButton(QPushButton):
             menu.exec(self.mapToGlobal(pos))
 
         except Exception as e:
-            # 获取主窗口用于显示Toast
-            main_window = self.parent()
-            while main_window and not hasattr(main_window, 'show_error_toast'):
-                main_window = main_window.parent()
-            if main_window:
-                main_window.show_error_toast(f"显示菜单失败: {e}")
-            else:
-                toast_error(self, f"显示菜单失败: {e}")
+            self.logger.error(f"显示右键菜单失败: {e}")
+            toast_error(self, f"显示菜单失败: {e}")
 
     def rename_category(self):
-        """重命名类别"""
+        """重命名类别 - 显示对话框并发射信号"""
         try:
-
             # 创建自定义对话框
             dialog = QDialog(self)
             dialog.setWindowTitle("修改类别名称")
@@ -233,96 +243,40 @@ class CategoryButton(QPushButton):
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 new_name = line_edit.text().strip()
                 if new_name and new_name != self.category_name:
-                    main_window = self.window()
-                    if main_window and hasattr(main_window, 'rename_category'):
-                        main_window.rename_category(self.category_name, new_name)
+                    # Phase 2.5: 使用信号通知父组件
+                    self.rename_requested.emit(self.category_name, new_name)
 
         except Exception as e:
-            # 获取主窗口用于显示Toast
-            main_window = self.parent()
-            while main_window and not hasattr(main_window, 'show_error_toast'):
-                main_window = main_window.parent()
-            if main_window:
-                main_window.show_error_toast(f"重命名失败: {e}")
-            else:
-                toast_error(self, f"重命名失败: {e}")
+            self.logger.error(f"重命名对话框失败: {e}")
+            toast_error(self, f"重命名失败: {e}")
 
     def change_shortcut(self):
-        """修改快捷键"""
+        """修改快捷键 - 发射信号让父组件处理"""
         try:
-
-            main_window = self.window()
-            if main_window and hasattr(main_window, 'config'):
-                dialog = CategoryShortcutDialog(main_window.config, self.category_name, self)
-                if dialog.exec():
-                    # 保存配置
-                    main_window.config.save_config()
-                    self.logger.info(f"快捷键已修改并保存: {self.category_name}")
-                    # 重新设置快捷键
-                    main_window.setup_shortcuts()
-
-                    # 重新计算排序列表（特别是"按快捷键排序"模式）
-                    categories = getattr(main_window, 'categories', None)
-                    if categories is not None:
-                        category_counts = None
-                        if main_window.config.category_sort_mode == "count":
-                            category_counts = main_window._get_category_counts()
-                        main_window.ordered_categories = main_window.config.get_sorted_categories(
-                            categories, category_counts=category_counts
-                        )
-
-                    # 更新类别按钮列表（重新排序）
-                    main_window.update_category_buttons()
-                    self.logger.info(f"类别按钮列表已更新")
-                    # 更新当前按钮文本
-                    self.update_text()
-
+            # Phase 2.5: 直接发射信号，让父组件处理对话框和后续逻辑
+            self.shortcut_change_requested.emit(self.category_name)
         except Exception as e:
-            # 获取主窗口用于显示Toast
-            main_window = self.parent()
-            while main_window and not hasattr(main_window, 'show_error_toast'):
-                main_window = main_window.parent()
-            if main_window:
-                main_window.show_error_toast(f"修改快捷键失败: {e}")
-            else:
-                toast_error(self, f"修改快捷键失败: {e}")
+            self.logger.error(f"请求修改快捷键失败: {e}")
+            toast_error(self, f"修改快捷键失败: {e}")
 
     def manage_ignored_categories(self):
-        """管理忽略的类别列表"""
+        """管理忽略的类别列表 - 发射信号让父组件处理"""
         try:
-            main_window = self.window()
-            if main_window and hasattr(main_window, 'show_manage_ignored_dialog'):
-                main_window.show_manage_ignored_dialog()
+            # Phase 2.5: 发射信号让父组件打开对话框
+            self.manage_ignored_requested.emit()
         except Exception as e:
-            # 获取主窗口用于显示Toast
-            main_window = self.parent()
-            while main_window and not hasattr(main_window, 'show_error_toast'):
-                main_window = main_window.parent()
-            if main_window:
-                main_window.show_error_toast(f"打开管理对话框失败: {e}")
-            else:
-                toast_error(self, f"打开管理对话框失败: {e}")
+            self.logger.error(f"请求管理忽略类别失败: {e}")
+            toast_error(self, f"打开管理对话框失败: {e}")
 
     def change_sort_mode(self, new_mode):
-        """切换排序模式"""
-        try:
-            main_window = self.window()
-            if main_window and hasattr(main_window, 'change_category_sort_mode'):
-                main_window.change_category_sort_mode(new_mode)
-        except Exception as e:
-            # 获取主窗口用于显示Toast
-            main_window = self.parent()
-            while main_window and not hasattr(main_window, 'show_error_toast'):
-                main_window = main_window.parent()
-            if main_window:
-                main_window.show_error_toast(f"切换排序模式失败: {e}")
-            else:
-                toast_error(self, f"切换排序模式失败: {e}")
+        """切换排序模式 - 该功能已迁移到 CategoryPanel，此方法保留以兼容旧代码"""
+        # Phase 2.5: 排序模式切换已由 CategoryPanel 直接处理
+        # 此方法仅保留空实现以防止旧代码调用报错
+        self.logger.warning(f"change_sort_mode 已弃用，排序模式切换请使用 CategoryPanel")
 
     def ignore_category(self):
-        """忽略类别"""
+        """忽略类别 - 显示确认对话框并发射信号"""
         try:
-            from ..styles.theme import default_theme
             c = default_theme.colors
 
             # 创建自定义消息框
@@ -361,24 +315,16 @@ class CategoryButton(QPushButton):
             clicked_button = msg_box.clickedButton()
 
             if clicked_button == yes_button:
-                main_window = self.window()
-                if main_window and hasattr(main_window, 'ignore_category'):
-                    main_window.ignore_category(self.category_name)
+                # Phase 2.5: 使用信号通知父组件
+                self.ignore_requested.emit(self.category_name)
 
         except Exception as e:
-            # 获取主窗口用于显示Toast
-            main_window = self.parent()
-            while main_window and not hasattr(main_window, 'show_error_toast'):
-                main_window = main_window.parent()
-            if main_window:
-                main_window.show_error_toast(f"忽略类别失败: {e}")
-            else:
-                toast_error(self, f"忽略类别失败: {e}")
+            self.logger.error(f"忽略类别对话框失败: {e}")
+            toast_error(self, f"忽略类别失败: {e}")
 
     def delete_category(self):
-        """删除类别"""
+        """删除类别 - 显示确认对话框并发射信号"""
         try:
-            from ..styles.theme import default_theme
             c = default_theme.colors
 
             # 创建自定义消息框
@@ -417,19 +363,12 @@ class CategoryButton(QPushButton):
             clicked_button = msg_box.clickedButton()
 
             if clicked_button == yes_button:
-                main_window = self.window()
-                if main_window and hasattr(main_window, 'delete_category'):
-                    main_window.delete_category(self.category_name)
+                # Phase 2.5: 使用信号通知父组件
+                self.delete_requested.emit(self.category_name)
 
         except Exception as e:
-            # 获取主窗口用于显示Toast
-            main_window = self.parent()
-            while main_window and not hasattr(main_window, 'show_error_toast'):
-                main_window = main_window.parent()
-            if main_window:
-                main_window.show_error_toast(f"删除类别失败: {e}")
-            else:
-                toast_error(self, f"删除类别失败: {e}")
+            self.logger.error(f"删除类别对话框失败: {e}")
+            toast_error(self, f"删除类别失败: {e}")
 
     def mousePressEvent(self, event):
         """处理鼠标按下事件"""
@@ -439,33 +378,8 @@ class CategoryButton(QPushButton):
             super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        """处理双击事件 - 支持多分类模式下的选中/取消选择"""
+        """处理双击事件 - 发射分类信号"""
         if not self.is_remove:
-            # 获取主窗口并调用分类方法
-            main_window = self.window()
-            if main_window:
-                # 在多分类模式下，双击可以选中或取消选择
-                if main_window.is_multi_category:
-                    # 多分类模式：双击切换选择状态
-                    main_window.move_to_category(self.category_name)
-                else:
-                    # 单分类模式：保持原有逻辑，检查是否已分类
-                    if hasattr(main_window, 'image_files') and hasattr(main_window, 'current_index') and main_window.image_files:
-                        if 0 <= main_window.current_index < len(main_window.image_files):
-                            current_path = str(main_window.image_files[main_window.current_index])
-                            current_category = main_window.classified_images.get(current_path)
-
-                            # 检查是否已分类到该类别
-                            already_classified = False
-                            if isinstance(current_category, list):
-                                already_classified = self.category_name in current_category
-                            else:
-                                already_classified = current_category == self.category_name
-
-                            # 多分类模式下，已分类的图片再次点击会触发撤销，所以需要继续执行
-                            # 单分类模式下，也需要支持撤销，所以也要继续执行
-                            # 删除原有的"避免重复处理"逻辑，让 move_to_category 方法处理撤销逻辑
-
-                    # 如果未分类或分类到其他类别，则进行分类操作
-                    main_window.move_to_category(self.category_name)
+            # Phase 2.5: 双击时发射分类请求信号，让父组件处理分类逻辑
+            self.classify_requested.emit(self.category_name)
         event.accept()

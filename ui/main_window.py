@@ -696,12 +696,15 @@ class ImageClassifier(QMainWindow):
             QMessageBox.critical(self, title, message)
 
     def show_question(self, title: str, message: str) -> bool:
-        """显示确认对话框"""
-        reply = QMessageBox.question(
-            self, title, message,
+        """显示确认对话框（中文按钮）"""
+        msgBox = self._create_styled_message_box(
+            QMessageBox.Icon.Question,
+            title,
+            message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        return reply == QMessageBox.StandardButton.Yes
+        msgBox.setDefaultButton(QMessageBox.StandardButton.No)
+        return msgBox.exec() == QMessageBox.StandardButton.Yes
 
     def show_progress_dialog(self, title: str, message: str, maximum: int = 100):
         """显示进度对话框"""
@@ -1742,6 +1745,11 @@ class ImageClassifier(QMainWindow):
             # 移动模式下，补充已分类和已移除的图片到列表
             self._supplement_moved_files_to_list()
 
+            # Bug修复：状态加载后重新计算类别计数
+            # 确保 categories 和 classified_images 都已加载后再计算
+            if self.categories:
+                self.init_category_counts()
+
             # 应用过滤器（如果按钮已创建）
             if hasattr(self, 'filter_button'):
                 self.apply_image_filter()
@@ -2315,21 +2323,24 @@ class ImageClassifier(QMainWindow):
             # 将 Path 对象转换为字符串，适配 Model 接口
             display_files = [str(f) for f in self.image_files[start_index:end_index]]
 
-            # 2. 预计算多分类集合 (O(N) -> Set lookup)
+            # 2. 获取有效分类记录（只包含类别仍然存在的分类）
+            valid_classified_images = self._get_valid_classified_images()
+
+            # 3. 预计算多分类集合 (O(N) -> Set lookup)
             multi_classified = {
-                p for p, c in self.classified_images.items()
+                p for p, c in valid_classified_images.items()
                 if isinstance(c, list) and len(c) > 1
             }
 
-            # 3. 批量初始化 Model (高性能)
+            # 4. 批量初始化 Model (高性能，使用有效分类记录)
             self.image_list_model._init_data(
                 display_files,
-                self.classified_images,
+                valid_classified_images,
                 self.removed_images,
                 multi_classified
             )
 
-            # 4. 恢复选中状态
+            # 5. 恢复选中状态
             # 确保当前索引在显示范围内
             if 0 <= self.current_index < len(display_files):
                 # 获取 ModelIndex (Row=current_index, Col=0)
@@ -2349,12 +2360,34 @@ class ImageClassifier(QMainWindow):
                 
         except Exception as e:
             self.logger.error(f"更新图片列表失败: {e}")
-    
+
+    def _get_valid_classified_images(self) -> dict:
+        """获取有效的分类记录（只包含类别仍然存在的分类）
+
+        当类别被忽略后，对应的分类记录不应该显示为"已分类"状态。
+        此方法过滤掉类别已不存在的分类记录。
+
+        Returns:
+            dict: 有效的分类记录 {path: category}
+        """
+        valid_classified = {}
+        for path, cat in self.classified_images.items():
+            if isinstance(cat, list):
+                # 多分类：只保留仍然存在的类别
+                valid_cats = [c for c in cat if c in self.categories]
+                if valid_cats:
+                    valid_classified[path] = valid_cats
+            elif cat in self.categories:
+                valid_classified[path] = cat
+        return valid_classified
+
     def _update_statistics_internal(self):
         """内部统计更新方法"""
         try:
             total_images = len(self.image_files)
-            classified_count = len(self.classified_images)
+            # 使用有效分类记录（只计算类别仍然存在的分类）
+            valid_classified = self._get_valid_classified_images()
+            classified_count = len(valid_classified)
             removed_count = len(self.removed_images)
             
             # 统计面板显示真实的数据，不显示滑动窗口信息
@@ -2399,8 +2432,17 @@ class ImageClassifier(QMainWindow):
             elif category in self.categories:
                 self.category_counts[category] = self.category_counts.get(category, 0) + 1
 
-        # 通过 CategoryPanel 同步按钮计数，避免依赖空的 self.category_buttons
-        if hasattr(self, 'category_panel'):
+        # Bug修复：如果按数量排序，需要重新排序并重建按钮
+        sort_mode = getattr(self.config, 'category_sort_mode', 'name')
+        if sort_mode == 'count' and hasattr(self, 'category_panel'):
+            # 按数量排序模式：重新排序类别列表
+            self.ordered_categories = self.config.get_sorted_categories(
+                self.categories, category_counts=self.category_counts
+            )
+            # 重建按钮（会自动使用新的排序顺序和计数）
+            self.update_category_buttons()
+        elif hasattr(self, 'category_panel'):
+            # 其他排序模式：只更新计数标签
             self.category_panel.update_counts(self.category_counts)
     
     # ===== 状态管理方法 =====
@@ -2486,7 +2528,7 @@ class ImageClassifier(QMainWindow):
     def init_category_counts(self):
         """初始化类别计数"""
         self.category_counts.clear()
-        
+
         # 从 classified_images 获取分类记录计数
         for img_path, category in self.classified_images.items():
             # 处理多分类情况
@@ -2496,7 +2538,14 @@ class ImageClassifier(QMainWindow):
                         self.category_counts[cat] = self.category_counts.get(cat, 0) + 1
             elif category in self.categories:
                 self.category_counts[category] = self.category_counts.get(category, 0) + 1
-        
+
+        # Bug修复：如果按数量排序，需要重新排序类别列表
+        sort_mode = getattr(self.config, 'category_sort_mode', 'name')
+        if sort_mode == 'count':
+            self.ordered_categories = self.config.get_sorted_categories(
+                self.categories, category_counts=self.category_counts
+            )
+
         # 更新按钮显示
         self.update_category_buttons()
     
@@ -3093,9 +3142,13 @@ class ImageClassifier(QMainWindow):
             if current_index.isValid():
                 current_path = current_index.data(ImageListModel.ROLE_FULL_PATH)
 
-        # Phase 1.1: 计算多分类集合（Codex Review发现multi_classified_images不存在）
+        # Bug修复：只考虑类别仍然有效的分类记录
+        # 当类别被忽略后，对应的分类记录不应该显示为"已分类"状态
+        valid_classified_images = self._get_valid_classified_images()
+
+        # Phase 1.1: 计算多分类集合（只考虑有效分类）
         multi_classified = {
-            p for p, c in self.classified_images.items()
+            p for p, c in valid_classified_images.items()
             if isinstance(c, list) and len(c) > 1
         }
 
@@ -3112,9 +3165,9 @@ class ImageClassifier(QMainWindow):
             img_path_str = str(img_path)
             file_name = Path(img_path_str).name
 
-            # 判断状态
+            # 判断状态（使用有效分类记录）
             is_removed = img_path_str in self.removed_images
-            is_classified = img_path_str in self.classified_images
+            is_classified = img_path_str in valid_classified_images
             is_unclassified = not is_removed and not is_classified
 
             # 检查状态过滤
@@ -3137,10 +3190,10 @@ class ImageClassifier(QMainWindow):
                 file_name = Path(img_path_str).name
                 max_text_width = max(max_text_width, font_metrics.horizontalAdvance(file_name))
 
-        # 更新Model数据（保留缩略图缓存，传递原始索引）
+        # 更新Model数据（使用有效分类记录，保留缩略图缓存，传递原始索引）
         self.image_list_model.update_data(
             filtered_files,
-            self.classified_images,
+            valid_classified_images,  # 使用有效分类记录
             self.removed_images,
             multi_classified,  # 使用局部计算的多分类集合
             original_indices  # 传递原始索引，确保ROLE_IMAGE_INDEX返回正确值
@@ -3258,12 +3311,71 @@ class ImageClassifier(QMainWindow):
             self.current_category_index = self.ordered_categories.index(category_name)
 
     def _on_category_operation_requested(self, operation: str, data: dict):
-        """处理CategoryPanel的operation_requested信号"""
+        """处理CategoryPanel的operation_requested信号
+
+        Phase 2.5 扩展：支持 CategoryButton 发出的所有业务操作
+        """
         if operation == 'add_category':
-            # 调用原有的add_category方法
-            self.add_category()
+            # 显示添加类别对话框
+            self.show_add_category_dialog()
+        elif operation == 'rename_category':
+            # 重命名类别
+            old_name = data.get('old_name')
+            new_name = data.get('new_name')
+            if old_name and new_name:
+                self.rename_category(old_name, new_name)
+        elif operation == 'change_shortcut':
+            # 修改快捷键
+            category_name = data.get('category_name')
+            if category_name:
+                self._handle_shortcut_change(category_name)
+        elif operation == 'ignore_category':
+            # 忽略类别
+            category_name = data.get('category_name')
+            if category_name:
+                self.ignore_category(category_name)
+        elif operation == 'delete_category':
+            # 删除类别
+            category_name = data.get('category_name')
+            if category_name:
+                self.delete_category(category_name)
+        elif operation == 'manage_ignored':
+            # 打开管理忽略类别对话框
+            self.show_manage_ignored_dialog()
         else:
             self.logger.warning(f"未知的类别操作: {operation}")
+
+    def _handle_shortcut_change(self, category_name: str):
+        """处理快捷键修改请求
+
+        Phase 2.5: 从 CategoryButton 移动到主窗口的快捷键修改逻辑
+        """
+        try:
+            dialog = CategoryShortcutDialog(self.config, category_name, self)
+            if dialog.exec():
+                # 保存配置
+                self.config.save_config()
+                self.logger.info(f"快捷键已修改并保存: {category_name}")
+
+                # 重新设置快捷键
+                self.setup_shortcuts()
+
+                # 重新计算排序列表（特别是"按快捷键排序"模式）
+                if self.categories is not None:
+                    category_counts = None
+                    if self.config.category_sort_mode == "count":
+                        category_counts = self._get_category_counts()
+                    self.ordered_categories = self.config.get_sorted_categories(
+                        self.categories, category_counts=category_counts
+                    )
+
+                # 更新类别按钮列表（重新排序）
+                self.update_category_buttons()
+                self.logger.info(f"类别按钮列表已更新")
+
+        except Exception as e:
+            self.logger.error(f"修改快捷键失败: {e}")
+            toast_error(self, f"修改快捷键失败: {e}")
 
     def move_to_category(self, category_name):
         """分类当前图片到指定类别（通过FileOperationManager）"""
@@ -4098,8 +4210,12 @@ class ImageClassifier(QMainWindow):
         if hasattr(self, 'image_label'):
             self.image_label.fit_to_window()
     
-    def add_category(self):
-        """添加新类别"""
+    def show_add_category_dialog(self):
+        """显示添加类别对话框（UI操作方法）
+
+        注意：此方法原名为 add_category()，为避免与 StateView 的
+        add_category(category: str) 方法冲突而重命名。
+        """
         if not self.current_dir:
             toast_warning(self,'请先选择图片目录')
             return
@@ -5268,7 +5384,10 @@ class ImageClassifier(QMainWindow):
         # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
 
     def ignore_category(self, category_name):
-        """忽略类别 - 不删除目录，只是不显示"""
+        """忽略类别 - 不删除目录，只是不显示
+
+        注意：忽略类别时保留分类记录，这样恢复类别后分类状态自动恢复
+        """
         try:
             if not self.current_dir:
                 toast_error(self, "当前目录未设置")
@@ -5280,30 +5399,10 @@ class ImageClassifier(QMainWindow):
                 if category_name in self.config.category_shortcuts:
                     del self.config.category_shortcuts[category_name]
 
-                # 从分类状态中移除相关记录（可选）
-                # 注意：这里不删除实际文件，只是清理内存中的分类记录
-                to_remove = []
-                for img_path, category in self.classified_images.items():
-                    # 处理单分类模式
-                    if isinstance(category, str) and category == category_name:
-                        to_remove.append(img_path)
-                    # 处理多分类模式
-                    elif isinstance(category, list) and category_name in category:
-                        # 从列表中移除该类别
-                        category.remove(category_name)
-                        # 如果列表为空，则完全移除该记录
-                        if not category:
-                            to_remove.append(img_path)
-
-                # 清除分类记录
-                for img_path in to_remove:
-                    del self.classified_images[img_path]
-
-                # 保存配置和状态
+                # 保存配置（不保存分类状态，保留分类记录以便恢复）
                 self.config.save_config()
-                self.save_state()
 
-                # 重新加载类别
+                # 重新加载类别（会自动过滤掉忽略的类别）
                 self.load_categories()
 
                 # 刷新UI

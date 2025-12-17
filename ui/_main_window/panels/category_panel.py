@@ -463,6 +463,14 @@ class CategoryPanel(QWidget):
                 # 连接点击信号
                 btn.clicked.connect(functools.partial(self._on_button_clicked, category_name))
 
+                # Phase 2.5: 连接 CategoryButton 的业务信号
+                btn.rename_requested.connect(self._on_rename_requested)
+                btn.shortcut_change_requested.connect(self._on_shortcut_change_requested)
+                btn.ignore_requested.connect(self._on_ignore_requested)
+                btn.delete_requested.connect(self._on_delete_requested)
+                btn.manage_ignored_requested.connect(self._on_manage_ignored_requested)
+                btn.classify_requested.connect(self._on_classify_requested)
+
                 # 设置分类状态
                 if current_category is not None:
                     if isinstance(current_category, list):
@@ -609,6 +617,43 @@ class CategoryPanel(QWidget):
         painter.end()
 
         return QIcon(pixmap)
+
+    # ========== Phase 2.5: CategoryButton 信号处理 ==========
+
+    def _on_rename_requested(self, old_name: str, new_name: str):
+        """处理重命名请求 - 转发到 operation_requested"""
+        self.operation_requested.emit('rename_category', {
+            'old_name': old_name,
+            'new_name': new_name
+        })
+
+    def _on_shortcut_change_requested(self, category_name: str):
+        """处理修改快捷键请求 - 转发到 operation_requested"""
+        self.operation_requested.emit('change_shortcut', {
+            'category_name': category_name
+        })
+
+    def _on_ignore_requested(self, category_name: str):
+        """处理忽略类别请求 - 转发到 operation_requested"""
+        self.operation_requested.emit('ignore_category', {
+            'category_name': category_name
+        })
+
+    def _on_delete_requested(self, category_name: str):
+        """处理删除类别请求 - 转发到 operation_requested"""
+        self.operation_requested.emit('delete_category', {
+            'category_name': category_name
+        })
+
+    def _on_manage_ignored_requested(self):
+        """处理管理忽略类别请求 - 转发到 operation_requested"""
+        self.operation_requested.emit('manage_ignored', {})
+
+    def _on_classify_requested(self, category_name: str):
+        """处理分类请求（双击）- 使用 category_confirmed 信号"""
+        self.category_confirmed.emit(category_name)
+
+    # ========== 主题应用 ==========
 
     def apply_theme(self):
         """应用主题到面板"""
