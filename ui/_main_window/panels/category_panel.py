@@ -366,6 +366,64 @@ class CategoryPanel(QWidget):
         for btn in self._category_buttons:
             if hasattr(btn, 'update_style'):
                 btn.update_style()
+            # 强制重绘
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def update_classification_state(self, current_category, last_operation_category: str = None):
+        """更新按钮的分类状态显示（不重建按钮）
+
+        Args:
+            current_category: 当前图片的分类状态（str 或 list 或 None）
+            last_operation_category: 上次操作的类别名（用于保持选中状态）
+        """
+        if not self._category_buttons:
+            return
+
+        # 处理多分类模式
+        if isinstance(current_category, list) and current_category:
+            for i, btn in enumerate(self._category_buttons):
+                is_classified = btn.category_name in current_category
+                is_multi = len(current_category) > 1 and is_classified
+                btn.set_classified(is_classified)
+                btn.set_multi_classified(is_multi)
+
+                # 选中逻辑：优先上次操作的类别，其次第一个已分类类别
+                if last_operation_category and last_operation_category == btn.category_name:
+                    btn.setChecked(True)
+                    self._current_category_index = i
+                elif not last_operation_category and btn.category_name == current_category[0]:
+                    btn.setChecked(True)
+                    self._current_category_index = i
+                else:
+                    btn.setChecked(i == self._current_category_index)
+            return
+
+        # 单分类模式或未分类
+        for i, btn in enumerate(self._category_buttons):
+            is_classified = (btn.category_name == current_category) if current_category else False
+            btn.set_classified(is_classified)
+            btn.set_multi_classified(False)
+
+            # 选中逻辑
+            if last_operation_category and last_operation_category == btn.category_name:
+                btn.setChecked(True)
+                self._current_category_index = i
+            elif current_category and btn.category_name == current_category:
+                btn.setChecked(True)
+                self._current_category_index = i
+            else:
+                btn.setChecked(i == self._current_category_index)
+
+    def update_counts(self, category_counts: dict) -> None:
+        """更新按钮上的类别计数（不重建按钮）
+
+        Args:
+            category_counts: 各类别的分类数量字典
+        """
+        self._category_counts = category_counts
+        for btn in self._category_buttons:
+            btn.set_count(category_counts.get(btn.category_name, 0))
 
     def update_sort_direction_button(self, ascending: bool):
         """更新排序方向按钮"""

@@ -299,11 +299,7 @@ class FileOperationManager(QObject):
             self._mutator.remove_classified_image(file_path)
             self._ui.save_state_sync()
 
-            # 刷新过滤视图（撤销分类后状态变化，需重算可见列表）
-            self._ui.apply_image_filter()
-
-            self._ui.schedule_ui_update('category_buttons', 'category_counts', 'statistics')
-            self._ui.refresh_category_buttons_style()
+            # 只发射信号，由主窗口统一处理 UI 更新，避免重复刷新
             self.file_restored.emit(file_path)
         except Exception as e:
             self._logger.error("撤销分类失败: %s", e)
@@ -349,11 +345,7 @@ class FileOperationManager(QObject):
             self._mutator.remove_from_removed(file_path)
             self._ui.save_state_sync()
 
-            # 刷新过滤视图和当前图片（修复Codex Review中等问题）
-            self._ui.apply_image_filter()
-            self._navigator.show_current_image()
-
-            self._ui.schedule_ui_update('category_buttons', 'category_counts', 'statistics')
+            # 只发射信号，由主窗口统一处理 UI 更新，避免重复刷新
             self.file_restored.emit(file_path)
         except Exception as e:
             self._logger.error("撤销删除失败: %s", e)
