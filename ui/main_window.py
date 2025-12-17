@@ -2121,23 +2121,39 @@ class ImageClassifier(QMainWindow):
 
     def on_file_moved(self, src: str, dst: str):
         """文件移动完成"""
-        # 注意：move_to_category 内部已经调用了 apply_image_filter 和 next_image
-        # 不再需要设置 _pending_reapply_filter，避免重复调用 show_current_image
-        self.schedule_ui_update('image_list', 'statistics', 'category_buttons')
+        # 优化：只更新受影响图片的状态，不重建整个列表
+        # 分类操作不改变列表内容，只改变状态显示
+        if hasattr(self, 'image_list_model'):
+            is_classified = src in self.classified_images
+            is_multi = isinstance(self.classified_images.get(src), list) and len(self.classified_images.get(src, [])) > 1
+            self.image_list_model.update_status_by_path(src, is_classified, is_removed=False, is_multi=is_multi)
+        # 更新统计和计数（不包含 image_list，避免重建列表）
+        self.schedule_ui_update('statistics', 'category_counts', 'category_buttons')
         self.statusBar.showMessage(f"✅ 已分类到 {Path(dst).parent.name}")
 
     def on_file_removed(self, path: str):
         """文件移除完成"""
-        # 注意：move_to_remove 内部已经调用了 apply_image_filter 和 select_after_removal
-        # 不再需要设置 _pending_reapply_filter，避免重复调用 show_current_image
-        self.schedule_ui_update('image_list', 'statistics')
+        # 优化：只更新受影响图片的状态，不重建整个列表
+        if hasattr(self, 'image_list_model'):
+            self.image_list_model.update_status_by_path(path, is_classified=False, is_removed=True, is_multi=False)
+        # 更新统计（不包含 image_list，避免重建列表）
+        self.schedule_ui_update('statistics')
         self.statusBar.showMessage(f"✅ 已移除")
 
     def on_file_restored(self, path: str):
         """文件恢复完成"""
-        # 修复：恢复后需要重新应用过滤，保持筛选状态
-        self._pending_reapply_filter = True
-        self.schedule_ui_update('image_list', 'statistics', 'category_buttons')
+        # 优化：先更新单个项的状态
+        if hasattr(self, 'image_list_model'):
+            is_classified = path in self.classified_images
+            is_removed = path in self.removed_images
+            is_multi = isinstance(self.classified_images.get(path), list) and len(self.classified_images.get(path, [])) > 1
+            self.image_list_model.update_status_by_path(path, is_classified, is_removed, is_multi)
+        # 撤销操作可能影响过滤结果，直接应用过滤（内部会调用 show_current_image）
+        self.apply_image_filter()
+        # 更新统计和计数
+        self.schedule_ui_update('statistics', 'category_counts', 'category_buttons')
+        # 刷新按钮样式（撤销分类后需要更新已分类状态显示）
+        self.refresh_category_buttons_style()
         self.statusBar.showMessage(f"✅ 已撤销")
 
     def on_mode_changed(self, is_copy_mode: bool):
@@ -2213,7 +2229,22 @@ class ImageClassifier(QMainWindow):
                 components_to_update.discard('current_image')
                 components_to_update.discard('ui_state')  # ui_state会在current_image中处理
 
-            for component in components_to_update:
+            # 定义组件更新优先级，确保 category_counts 在 category_buttons 之前执行
+            # 这样 category_panel.update_data() 拿到的是最新的计数值
+            update_priority = {
+                'category_counts': 0,    # 最先执行，更新计数字典
+                'statistics': 1,         # 其次更新统计面板
+                'category_buttons': 2,   # 再更新类别按钮（依赖最新计数）
+                'image_list': 3,         # 图片列表
+                'ui_state': 4,           # UI状态
+            }
+            # 按优先级排序，未定义的组件放最后
+            ordered_updates = sorted(
+                components_to_update,
+                key=lambda item: update_priority.get(item, len(update_priority))
+            )
+
+            for component in ordered_updates:
                 if component == 'category_buttons':
                     # 使用CategoryPanel更新按钮
                     if hasattr(self, 'category_panel'):
@@ -2358,7 +2389,7 @@ class ImageClassifier(QMainWindow):
         """内部类别计数更新方法"""
         # 重新计算类别计数
         self.category_counts.clear()
-        
+
         for img_path, category in self.classified_images.items():
             # 处理多分类情况
             if isinstance(category, list):
@@ -2367,11 +2398,10 @@ class ImageClassifier(QMainWindow):
                         self.category_counts[cat] = self.category_counts.get(cat, 0) + 1
             elif category in self.categories:
                 self.category_counts[category] = self.category_counts.get(category, 0) + 1
-        
-        # 更新按钮显示
-        for btn in self.category_buttons:
-            category_name = btn.category_name
-            btn.set_count(self.category_counts.get(category_name, 0))
+
+        # 通过 CategoryPanel 同步按钮计数，避免依赖空的 self.category_buttons
+        if hasattr(self, 'category_panel'):
+            self.category_panel.update_counts(self.category_counts)
     
     # ===== 状态管理方法 =====
     
@@ -2605,89 +2635,26 @@ class ImageClassifier(QMainWindow):
         try:
             # 获取当前图片的分类状态
             current_category = self.classified_images.get(image_path)
-            
-            # 处理多分类模式 - 当多个类别同时标记为已分类
+
+            # 使用 CategoryPanel 更新分类状态显示
+            if hasattr(self, 'category_panel'):
+                self.category_panel.update_classification_state(
+                    current_category,
+                    self.last_operation_category
+                )
+                # 同步 current_category_index
+                self.current_category_index = self.category_panel._current_category_index
+
+            # 记录日志
             if isinstance(current_category, list) and current_category:
-                # 标记所有已分类的类别
-                for i, btn in enumerate(self.category_buttons):
-                    # 如果类别在已分类列表中，设置为已分类状态
-                    is_classified = btn.category_name in current_category
-                    
-                    # 设置标准分类状态
-                    btn.set_classified(is_classified)
-                    
-                    # 设置多分类状态标记 - 当列表长度>1且当前类别在列表中时
-                    is_multi = len(current_category) > 1 and is_classified
-                    btn.set_multi_classified(is_multi)
-                    
-                    # 选中上次操作的类别或第一个已分类的类别
-                    if self.last_operation_category and self.last_operation_category in self.ordered_categories:
-                        # 优先选中上次操作的类别
-                        should_check = btn.category_name == self.last_operation_category
-                        if btn.category_name == self.last_operation_category:
-                            self.current_category_index = i
-                    elif btn.category_name == current_category[0]:
-                        # 如果没有上次操作记录，选中第一个已分类的类别
-                        should_check = True
-                        self.current_category_index = i
-                    else:
-                        should_check = False
-                        
-                    btn.setChecked(should_check)
-                
                 self.logger.debug(f"图片 {Path(image_path).name} 已分类到多个类别: {current_category}")
-                return
-                
-            # 优先保持上次操作的类别选择，以便快速连续分类
-            if (self.last_operation_category and 
-                self.last_operation_category in self.ordered_categories):
-                # 保持上次操作的类别选中状态
-                self.current_category_index = self.ordered_categories.index(self.last_operation_category)
-                
-                # 更新类别按钮状态：选中状态 + 分类状态
-                for i, btn in enumerate(self.category_buttons):
-                    btn.setChecked(i == self.current_category_index)
-                    is_classified = btn.category_name == current_category
-                    btn.set_classified(is_classified)
-                    # 清除多分类状态
-                    btn.set_multi_classified(False)
-                
-                self.logger.debug(f"保持上次操作类别选择: {self.last_operation_category}")
-                return
-            
-            # 如果没有上次操作记录，则根据当前图片的分类状态设置
-            if current_category and current_category in self.ordered_categories:
-                # 找到对应类别的索引
-                self.current_category_index = self.ordered_categories.index(current_category)
-                
-                # 更新类别按钮选中状态
-                for i, btn in enumerate(self.category_buttons):
-                    btn.setChecked(i == self.current_category_index)
-                    # 设置已分类状态
-                    is_classified = btn.category_name == current_category
-                    btn.set_classified(is_classified)
-                    # 清除多分类状态
-                    btn.set_multi_classified(False)
-                
+            elif current_category:
                 self.logger.debug(f"图片 {Path(image_path).name} 已分类到: {current_category}")
             else:
-                # 未分类图片，保持当前选择或选择第一个类别
-                if self.current_category_index < 0 and self.category_buttons:
-                    self.current_category_index = 0
-                    
-                for i, btn in enumerate(self.category_buttons):
-                    btn.setChecked(i == self.current_category_index)
-                    btn.set_classified(False)
-                    # 清除多分类状态
-                    btn.set_multi_classified(False)
-                
-                self.logger.debug(f"图片 {Path(image_path).name} 未分类，保持当前选择")
-                
+                self.logger.debug(f"图片 {Path(image_path).name} 未分类")
+
         except Exception as e:
             self.logger.error(f"更新图片类别选择状态失败: {e}")
-        
-        # 强制刷新按钮样式
-        self.refresh_category_buttons_style()
       
     def update_window_title(self, image_path):
         """更新窗口标题 - 顶部显示目录名+进度"""
@@ -5604,10 +5571,7 @@ class ImageClassifier(QMainWindow):
 
     def refresh_category_buttons_style(self):
         """强制刷新所有类别按钮的样式"""
-        if not self.category_buttons:
-            return
-            
-        for btn in self.category_buttons:
-            btn.style().unpolish(btn)
-            btn.style().polish(btn)
-        self.logger.debug("强制刷新类别按钮样式")
+        # 使用 CategoryPanel 刷新按钮样式
+        if hasattr(self, 'category_panel'):
+            self.category_panel.refresh_buttons_style()
+            self.logger.debug("强制刷新类别按钮样式")

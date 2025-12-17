@@ -172,6 +172,34 @@ class ImageListModel(QAbstractListModel):
             # 仅通知状态角色改变，触发 Delegate 重绘
             self.dataChanged.emit(idx, idx, [self.ROLE_STATUS_TYPE])
 
+    def update_status_by_path(self, path: str, is_classified: bool,
+                               is_removed: bool, is_multi: bool):
+        """
+        O(1) 通过路径更新图片状态
+        用于分类/删除操作后的轻量级状态更新，避免重建整个列表
+        """
+        path_str = str(path)
+        if path_str not in self._path_map:
+            return
+
+        row = self._path_map[path_str]
+        if row < 0 or row >= len(self._data):
+            return
+
+        item = self._data[row]
+
+        # 检查状态是否真的改变，避免不必要的信号发射
+        if (item.status != is_classified or
+            item.is_removed != is_removed or
+            item.is_multi != is_multi):
+
+            item.status = is_classified
+            item.is_removed = is_removed
+            item.is_multi = is_multi
+
+            idx = self.index(row, 0)
+            self.dataChanged.emit(idx, idx, [self.ROLE_STATUS_TYPE])
+
     def set_thumbnail(self, path, icon: QIcon):
         """
         更新缩略图并管理 LRU 缓存
