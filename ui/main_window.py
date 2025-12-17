@@ -4002,9 +4002,9 @@ class ImageClassifier(QMainWindow):
             # 更新方向按钮的tooltip（因为排序模式变了）
             self._update_direction_button_tooltip()
 
-            # 显示提示（使用详细描述）
+            # 显示提示（统一格式）
             current_text, _ = self._get_sort_tooltip_texts()
-            toast_success(self, f"已切换到：{current_text}")
+            toast_success(self, f"已切换：{current_text}")
             self.logger.info(f"类别排序模式已切换为: {new_mode}")
 
         except Exception as e:
@@ -4031,9 +4031,9 @@ class ImageClassifier(QMainWindow):
             # 更新UI
             self.update_category_buttons()
 
-            # 显示提示（使用详细描述）
-            _, action_text = self._get_sort_tooltip_texts()
-            toast_success(self, f"已切换为：{action_text}")
+            # 显示提示（统一格式，显示当前状态）
+            current_text, _ = self._get_sort_tooltip_texts()
+            toast_success(self, f"已切换：{current_text}")
             self.logger.info(f"排序方向已切换")
 
         except Exception as e:
@@ -4044,19 +4044,20 @@ class ImageClassifier(QMainWindow):
         """获取当前排序状态的tooltip文案
 
         Returns:
-            tuple: (当前状态描述, 切换后状态描述)
+            tuple: (当前状态简短描述, 切换后状态简短描述)
         """
         mode = self.config.category_sort_mode
         is_asc = self.config.sort_ascending
 
         # 状态描述映射表 (mode, is_ascending) -> (当前状态, 切换后状态)
+        # 统一格式："{模式} {方向}"
         status_map = {
-            ('name', True):     ("按名称 (A → Z)", "名称倒序 (Z → A)"),
-            ('name', False):    ("按名称 (Z → A)", "名称顺序 (A → Z)"),
-            ('shortcut', True): ("按快捷键 (1 → 9 → A)", "快捷键倒序 (Z → 1)"),
-            ('shortcut', False):("按快捷键 (Z → A → 1)", "快捷键顺序 (1 → Z)"),
-            ('count', True):    ("按数量 (少 → 多)", "数量从多到少"),
-            ('count', False):   ("按数量 (多 → 少)", "数量从少到多"),
+            ('name', True):     ("名称 A→Z", "名称 Z→A"),
+            ('name', False):    ("名称 Z→A", "名称 A→Z"),
+            ('shortcut', True): ("快捷键 1→Z", "快捷键 Z→1"),
+            ('shortcut', False):("快捷键 Z→1", "快捷键 1→Z"),
+            ('count', True):    ("数量 少→多", "数量 多→少"),
+            ('count', False):   ("数量 多→少", "数量 少→多"),
         }
 
         return status_map.get((mode, is_asc), ("未知状态", "切换方向"))
