@@ -376,7 +376,7 @@ class TabbedHelpDialog(QDialog):
         # 查看更多链接
         if len(VERSION_HISTORY) > 3:
             branch = self._get_git_branch()
-            changelog_url = f"https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/blob/{branch}/CHANGELOG.md"
+            changelog_url = f"https://github.com/Gaq152/image_classifier/blob/{branch}/CHANGELOG.md"
             changelog_link = f'''
             <div style="background-color: {c.BACKGROUND_HOVER}; padding: 15px; border-radius: 8px; margin: 10px 0; text-align: center; border: 1px dashed {c.BORDER_MEDIUM};">
             <p style="margin: 0; color: {c.TEXT_SECONDARY};">

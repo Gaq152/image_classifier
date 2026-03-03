@@ -50,6 +50,6 @@ class UpdateCheckerThread(QThread):
             # 发送成功信号
             self.check_success.emit(manifest, self.endpoint, self.token or '')
         except Exception as e:
-            self.logger.debug(f"[后台更新检查] 检查失败: {e}")
+            self.logger.warning(f"[后台更新检查] 检查失败: endpoint={self.endpoint}, error={e}")
             # 发送失败信号
             self.check_failed.emit(str(e))
