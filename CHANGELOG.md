@@ -7,6 +7,38 @@
 
 ---
 
+## [7.0.0] - 2026-03-03
+
+### 🌟 版本概述
+
+本次版本完成仓库和发布链路从 GitLab 到 GitHub 的迁移，新增 GitHub Actions 自动发布流程，并修复更新设置持久化与日志可观测性问题。
+
+**主要亮点**：
+- 🚀 新增 GitHub Actions 自动构建发布流程（v* 标签触发）
+- 🔄 自动更新源迁移到 GitHub Releases（manifest + 版本化资产下载）
+- 📖 README 双语改造（英文主文档 + 中文文档）
+- 🛠️ 修复恢复默认设置后更新端点未持久化的问题
+- 🔍 更新检查失败日志增强，输出 endpoint 便于排查
+
+### ✨ 新增
+- 新增 `.github/workflows/build-release.yml` 发布流水线
+- 新增 `README_CN.md` 中文文档
+
+### 🔄 变更
+- 更新默认更新端点为：`https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json`
+- 更新下载 URL 生成逻辑，适配 GitHub Releases
+- 联系信息更新：公司 `GAQ`，反馈邮箱 `anlife123456@gmail.com`
+
+### 🐛 修复
+- 修复“恢复默认设置”后仅更新 UI 未写回配置文件的问题
+- 修复更新检查失败日志级别过低（DEBUG）导致不可见的问题
+- 增强失败日志内容，新增 endpoint URL 输出
+
+### 🗑️ 移除
+- 移除 `.gitlab-ci.yml`（改由 GitHub Actions 承担发布）
+
+---
+
 ## [6.6.0] - 2025-12-02
 
 ### 🌟 版本概述
