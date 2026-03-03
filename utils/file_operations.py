@@ -8,6 +8,8 @@ import hashlib
 import time
 import unicodedata
 import logging
+import os
+import stat
 from .exceptions import FileOperationError
 
 
@@ -62,6 +64,20 @@ def retry_file_operation(operation, max_retries=3, delay=1):
     return None
 
 
+def remove_readonly(path):
+    """
+    移除文件的只读属性，避免 Windows 下删除失败
+
+    Args:
+        path: 文件路径（str 或 Path 对象）
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except Exception:
+        # 静默失败，不影响主流程
+        pass
+
+
 def normalize_folder_name(name):
     """
     规范化文件夹名称，确保编码一致性
@@ -86,16 +102,40 @@ def normalize_folder_name(name):
 
 def is_network_path(path):
     """
-    检查路径是否为网络路径
-    
+    检查路径是否为网络路径（包括UNC路径和映射的网络驱动器）
+
     Args:
         path: 文件路径
-        
+
     Returns:
         bool: 是否为网络路径
     """
+    import sys
+    from pathlib import Path
+
     path_str = str(path)
-    return path_str.startswith(('\\\\', '//', 'smb://', 'ftp://', 'http://', 'https://'))
+
+    # 1. 检查明确的UNC路径
+    if path_str.startswith(('\\\\', '//', 'smb://', 'ftp://', 'http://', 'https://')):
+        return True
+
+    # 2. Windows: 检查映射的网络驱动器
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            path_obj = Path(path_str)
+            drive = path_obj.drive
+
+            if drive:
+                # 使用 Windows API 获取驱动器类型
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive + '\\')
+                # DRIVE_REMOTE = 4 表示网络驱动器
+                return drive_type == 4
+        except Exception:
+            # 如果检测失败，回退到基础判断
+            pass
+
+    return False
 
 
 def validate_file_operation_preconditions(src_path, dst_path=None):

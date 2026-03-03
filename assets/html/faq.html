@@ -1,0 +1,76 @@
+<h2 style="border-bottom: 2px solid {{primary}}; padding-bottom: 8px; color: {{text_primary}};">常见问题解答</h2>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">图片显示和操作</h3>
+
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
+<h4 style="color: {{primary}};">Q: 图片显示很慢或模糊？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 对于大图片和网络路径，程序会自动检测并启用性能优化模式，提供最佳的显示效果。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 缩放后图片位置错乱？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 按 Ctrl+F 键重置为适应窗口模式，或按 Ctrl+0 显示原始大小。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 删除的图片会永久消失吗？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 不会，删除的图片会移动到 "remove" 目录中。再次按 Delete 键即可撤销删除，将图片从 remove 目录恢复。</p>
+</div>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">分类和管理</h3>
+
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
+<h4 style="color: {{primary}};">Q: 如何撤销错误的分类操作？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> <b>单分类模式</b>：再次点击已分类的类别按钮可以撤销分类（复制模式移除该文件，移动模式文件返回原目录）。<b>多分类模式</b>：再次点击已分类的类别按钮可以移除该分类。<b>撤销删除</b>：再次按 Delete 键可以从 remove 目录恢复。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 如何重新开始新手教程？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 在菜单栏点击"帮助" → "显示新手教程"即可重新启动交互式引导教程。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 如何开启自动更新功能？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 在菜单栏点击"设置"打开设置面板，在"更新"选项中开启"自动检查更新"。程序会定期检查新版本，下载完成后提示重启更新。也可以在帮助菜单中手动点击"检查更新"。</p>
+</div>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">网络存储</h3>
+
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
+<h4 style="color: {{primary}};">Q: 支持网络驱动器（NAS）吗？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 支持，默认启用"网络路径优化"设置以提高性能。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 网络断开后程序崩溃？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序有文件操作重试机制，网络操作失败时会自动重试3次。建议保持网络稳定以获得最佳性能。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: SMB 共享访问很慢？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 默认启用"SMB缓存优化"，程序会缓存常用图片以提高访问速度。</p>
+</div>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">性能和优化</h3>
+
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
+<h4 style="color: {{primary}};">Q: 处理大量图片时程序卡顿？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序会根据图片数量和系统性能自动调整优化策略，包括减少动画效果和智能预加载。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 内存占用过高？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序会自动管理内存，也可以手动清理缓存（帮助对话框中的清理按钮）。</p>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 如何清理程序产生的缓存？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 在帮助对话框中点击"清理SMB缓存"按钮，或手动删除用户目录下的 .image_classifier_cache 文件夹。</p>
+</div>
+
+<h3 style="color: {{text_primary}}; margin-top: 20px;">故障排除</h3>
+
+<div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
+<h4 style="color: {{primary}};">常见问题诊断步骤</h4>
+<ol style="line-height: 1.8; color: {{text_primary}};">
+<li><b>检查日志</b>：查看 logs/image_classifier.log 了解错误详情</li>
+<li><b>重启程序</b>：简单重启通常能解决临时问题</li>
+<li><b>清理缓存</b>：清理程序缓存解决数据冲突</li>
+<li><b>检查权限</b>：确保对目标目录有读写权限</li>
+<li><b>更新程序</b>：下载最新版本获得 bug 修复</li>
+</ol>
+
+<h4 style="color: {{primary}}; margin-top: 15px;">获取帮助</h4>
+<p style="line-height: 1.6; color: {{text_primary}};">如果问题仍未解决，请将错误日志和操作步骤反馈给我们：</p>
+<p style="background-color: {{bg_secondary}}; padding: 12px; border-left: 4px solid {{primary}}; margin: 10px 0;">
+<b style="color: {{text_primary}};">问题反馈邮箱：</b><br>
+<a href="copy://{{support_email}}" style="color: {{primary}}; text-decoration: none; font-size: 15px; font-weight: bold; cursor: pointer;">
+{{support_email}}
+</a>
+<span style="color: {{text_secondary}}; font-size: 13px; margin-left: 10px;">（点击复制邮箱地址）</span>
+</p>
+</div>
