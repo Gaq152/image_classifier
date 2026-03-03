@@ -72,7 +72,7 @@ class AppConfig:
             # 自动更新相关配置
             "auto_update_enabled": True,  # 自动检查更新开关
             "last_update_check_ts": 0,  # 最后检查更新的时间戳
-            "update_endpoint": "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json",  # 更新检查端点
+            "update_endpoint": "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json",  # 更新检查端点
             "update_token": "",  # 更新令牌（可选）
             "pending_update": {},  # 待处理的更新信息
             # 工作目录相关配置
@@ -306,7 +306,7 @@ class AppConfig:
     def update_endpoint(self) -> str:
         """获取更新检查端点"""
         return self._config.get("update_endpoint",
-            "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json")
+            "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json")
 
     @update_endpoint.setter
     def update_endpoint(self, value: str):

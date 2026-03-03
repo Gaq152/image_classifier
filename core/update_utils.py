@@ -29,8 +29,8 @@ from PyQt6.QtWidgets import QApplication
 
 from utils.paths import get_update_dir
 
-# 可选：在企业内网环境下内置只读访问令牌，默认为空
-BUILTIN_UPDATE_TOKEN = "Bearer gldt-GFPBbdC1zTZrrsGtVg6S"
+# Public GitHub Releases 默认无需令牌，保留可选令牌能力用于私有源
+BUILTIN_UPDATE_TOKEN = ""
 
 def resolve_token(preferred: Optional[str] = None) -> Optional[str]:
     if preferred:
@@ -65,10 +65,11 @@ def sha256_file(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
 
 def _build_request(url: str, token: Optional[str]) -> Request:
     req = Request(url)
-    # GitLab 私有仓库鉴权：
+    # 鉴权策略（兼容多种后端）：
     # - 若 token 形如 "user:token" 或以 "Basic " 开头，则使用 Basic Auth
     # - 若 token 以 "Bearer " 开头，则使用 Bearer Token
-    # - 其他情况，默认使用 PRIVATE-TOKEN 头
+    # - 其他情况，默认使用 Authorization 头
+    # - GitHub Public Releases 默认无需 token
     if token:
         token = token.strip()
         try:
@@ -82,10 +83,10 @@ def _build_request(url: str, token: Optional[str]) -> Request:
             elif token.lower().startswith('bearer '):
                 req.add_header('Authorization', token)
             else:
-                req.add_header('PRIVATE-TOKEN', token)
+                req.add_header('Authorization', f'Bearer {token}')
         except Exception:
-            # 兜底：按 PRIVATE-TOKEN 处理
-            req.add_header('PRIVATE-TOKEN', token)
+            # 兜底：按 Bearer 处理
+            req.add_header('Authorization', f'Bearer {token}')
     # 避免被缓存
     req.add_header('Cache-Control', 'no-cache')
     req.add_header('Pragma', 'no-cache')
@@ -242,7 +243,7 @@ def ensure_persistent_updater(target_exe: Path) -> Path:
     batch_path = update_dir / "update.bat"
 
     manifest_url = (
-        "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json"
+        "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json"
     )
     escaped_target = _escape_win_path(str(exe_path))
     escaped_dir = _escape_win_path(str(exe_dir))

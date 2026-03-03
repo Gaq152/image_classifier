@@ -602,14 +602,14 @@ DOWNLOAD_INFO = {
     "exe_name_template": "ImageClassifier_v{version}.exe",
     "exe_name_chinese_template": "图像分类工具_v{version}.exe",
     "expected_size_mb": "~86MB",
-    "gitlab_project_id": "820",
-    "package_registry_base": "https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier"
+    "github_repo": "Gaq152/image_classifier",
+    "releases_base": "https://github.com/Gaq152/image_classifier/releases"
 }
 
 # 联系信息
 CONTACT_INFO = {
-    "support_email": "gonganqi@gddi.com.cn",
-    "company": "GDDI",
+    "support_email": "anlife123456@gmail.com",
+    "company": "GAQ",
     "copyright_year": "2024"
 }
 
@@ -638,12 +638,12 @@ def get_version_badge_info() -> Dict:
 
 def get_download_urls() -> Dict:
     """获取下载链接信息"""
-    base_url = DOWNLOAD_INFO["package_registry_base"]
     version = __version__
-    
+    release_base = DOWNLOAD_INFO["releases_base"]
+
     return {
-        "specific_version": f"{base_url}/{version}/ImageClassifier_v{version}.exe",
-        "latest": f"{base_url}/latest/ImageClassifier_v{version}.exe",
+        "specific_version": f"{release_base}/download/v{version}/ImageClassifier_v{version}.exe",
+        "latest": f"{release_base}/latest/download/ImageClassifier_v{version}.exe",
         "exe_name": DOWNLOAD_INFO["exe_name_template"].format(version=version),
         "exe_name_chinese": DOWNLOAD_INFO["exe_name_chinese_template"].format(version=version)
     }
@@ -652,10 +652,10 @@ def get_manifest_url(latest: bool = True, version: str = None) -> str:
     """返回 manifest.json 的下载地址。
     latest=True 时返回 latest 路径，否则需要传入版本号。
     """
-    base_url = DOWNLOAD_INFO["package_registry_base"]
+    release_base = DOWNLOAD_INFO["releases_base"]
     if latest or not version:
-        return f"{base_url}/latest/manifest.json"
-    return f"{base_url}/{version}/manifest.json"
+        return f"{release_base}/latest/download/manifest.json"
+    return f"{release_base}/download/v{version}/manifest.json"
 
 def get_latest_version_info() -> Dict:
     """获取最新版本的详细信息"""
