@@ -1,4 +1,8 @@
-# 图像分类工具 (Image Classifier)
+<p align="right">
+  <strong>English</strong> | <a href="./README_CN.md">简体中文</a>
+</p>
+
+# Image Classifier
 
 <div align="center">
 
@@ -7,359 +11,122 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
-一个高性能的图像分类整理工具，支持智能预加载、网络路径优化、多种图像格式、自定义快捷键等功能。
+A high-performance desktop app for organizing and classifying large image collections.
 
-
-
-[快速下载](#快速下载) • [功能特性](#功能特性) • [安装使用](#安装使用) • [开发指南](#开发指南) • [构建发布](#构建发布)
+[Download](#download) • [Features](#features) • [Installation](#installation) • [Usage](#usage) • [Build](#build--release) • [Update](#auto-update)
 
 </div>
 
-## 📖 项目简介
+## Overview
 
-图像分类工具是一个基于 PyQt6 开发的桌面应用程序，专为需要快速整理和分类大量图片的用户设计。该工具具有直观的用户界面，支持多种图像格式，提供了高效的图像预加载和智能分类功能。
+Image Classifier is a PyQt6-based Windows application designed for fast image triage and folder-based classification. It supports large datasets, custom shortcuts, network path optimization, and persistent workflow state.
 
-## 📥 快速下载
+## Download
 
-**最新版本**: [访问 Releases 页面下载](https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier/-/releases)
+- Latest release page: https://github.com/Gaq152/image_classifier/releases
+- Latest manifest: https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json
 
-| 版本 | 平台 | 下载链接 | 大小 |
-|------|------|----------|------|
-| v6.6.0 | Windows | [ImageClassifier_v6.6.0.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/6.6.0/ImageClassifier_v6.6.0.exe) | ~86MB |
-| Latest | Windows | [ImageClassifier_latest.exe](https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/ImageClassifier_v6.6.0.exe) | ~86MB |
+| Version | Platform | Asset |
+|---|---|---|
+| Latest | Windows | `ImageClassifier_vX.Y.Z.exe` |
 
-> 💡 **快速开始**: 下载exe文件后双击即可运行，无需安装Python环境。
+## Features
 
-### 🎯 适用场景
+- Multi-format support: JPG, JPEG, PNG, BMP, GIF, TIFF, WebP
+- High-performance image preload and cache strategy
+- Custom category shortcuts (1-9, A-Z)
+- Copy / move modes and single / multi-category modes
+- Network path optimization for SMB/NAS scenarios
+- Persistent classification state and config
+- Built-in update check from GitHub Releases manifest
 
-- 📸 摄影师整理作品集
-- 🎨 设计师管理素材库
-- 📂 个人照片分类整理
-- 🏢 企业图片资产管理
-- 🔍 大批量图片快速筛选
+## Installation
 
-## ✨ 功能特性
+### Option 1: Run executable (recommended)
 
-### 🚀 核心功能
+1. Open: https://github.com/Gaq152/image_classifier/releases
+2. Download the latest `ImageClassifier_vX.Y.Z.exe`
+3. Double-click to run
 
-- **🖼️ 多格式支持**: 支持 JPG、JPEG、PNG、BMP、GIF、TIFF、WebP 等主流图像格式
-- **⚡ 智能预加载**: 高性能图像加载机制，支持大图片快速预览
-- **🏷️ 快速分类**: 自定义分类按钮，支持快捷键操作
-- **🌐 网络路径优化**: 针对网络共享路径进行性能优化
-- **📁 批量处理**: 支持文件夹扫描和批量图片操作
-- **💾 状态保存**: 自动保存工作进度和用户设置
-
-### 🎛️ 用户界面
-
-- **现代化设计**: 简洁美观的用户界面，支持高DPI显示
-- **双面板布局**: 图片列表 + 分类操作区域
-- **实时预览**: 高质量图片预览，支持缩放和全屏查看
-- **进度显示**: 实时显示扫描和处理进度
-- **状态栏信息**: 显示当前文件信息和系统状态
-
-### ⌨️ 操作特性
-
-- **自定义快捷键**: 为每个分类设置专属快捷键（1-9, A-Z）
-- **键盘导航**: 支持方向键浏览图片和选择类别
-- **多种分类模式**: 支持移动/复制模式，单分类/多分类模式切换
-- **右键菜单**: 丰富的上下文菜单操作
-
-### 🔧 技术特性
-
-- **高性能**: 多线程处理，优化内存使用
-- **日志系统**: 完整的操作日志记录
-- **错误处理**: 完善的异常处理机制
-- **配置管理**: 灵活的配置文件系统
-- **性能监控**: 内置性能监控功能
-
-## 🛠️ 技术栈
-
-| 组件 | 技术 | 版本要求 | 用途 |
-|------|------|----------|------|
-| **GUI框架** | PyQt6 | >= 6.4.0 | 用户界面框架 |
-| **图像处理** | OpenCV | >= 4.5.0 | 图像读取和处理 |
-| **图像库** | Pillow | >= 9.0.0 | 图像格式支持 |
-| **系统监控** | psutil | >= 5.8.0 | 系统资源监控 |
-| **打包工具** | PyInstaller | >= 5.0.0 | 应用程序打包 |
-
-## 📋 系统要求
-
-### 最低要求
-- **操作系统**: Windows 7 或更高版本
-- **Python版本**: Python 3.8+
-- **内存**: 4GB RAM
-- **存储空间**: 200MB 可用空间
-
-### 推荐配置
-- **操作系统**: Windows 10/11 64位
-- **Python版本**: Python 3.10+
-- **内存**: 8GB RAM 或更多
-- **存储空间**: 1GB 可用空间
-- **显示器**: 1920x1080 分辨率或更高
-
-## 🚀 安装使用
-
-### 方式一：直接运行（推荐）
-
-下载已编译的可执行文件，无需安装Python环境：
-
-1. 访问项目地址：https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier
-2. 进入 **Releases** 页面下载最新版本的 `ImageClassifier_vx.x.x.exe`
-3. 双击运行即可使用
-
-> 💡 **下载提示**: 点击 Release 页面的下载链接即可获取最新版本，无需克隆整个项目。
-
-### 方式二：源码运行
-
-适合开发者或需要自定义的用户：
+### Option 2: Run from source
 
 ```bash
-# 1. 克隆项目
-git clone https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier.git
-cd image-classifier
-
-# 2. 安装依赖
+git clone https://github.com/Gaq152/image_classifier.git
+cd image_classifier
 pip install -r requirements.txt
-
-# 3. 运行程序
 python run.py
 ```
 
-## 📖 使用指南
+## Usage
 
-### 基本操作流程
+1. Launch the app
+2. Open an image folder
+3. Add categories
+4. Classify with buttons or shortcuts
 
-1. **启动程序**: 运行下载的 `ImageClassifier_vx.x.x.exe` 或 `python run.py`
-2. **选择目录**: 点击工具栏的"打开文件夹"按钮，选择包含图片的目录
-3. **创建分类**: 在分类区域添加需要的分类类别
-4. **开始分类**: 
-   - 在图片列表中选择图片
-   - 点击对应的分类按钮或使用快捷键
-   - 图片将被移动到相应的分类文件夹
+### Default shortcuts
 
-### 快捷键说明
+| Shortcut | Action |
+|---|---|
+| `←` `→` | Previous/next image |
+| `↑` `↓` | Navigate categories |
+| `Enter` | Classify to selected category |
+| `1`-`9`, `A`-`Z` | Quick classify |
+| `Delete` | Move to remove folder |
+| `F5` | Refresh folder |
+| `Ctrl+F` | Fit image to window |
+| `Ctrl +/-/0` | Zoom in/out/reset |
 
-| 快捷键 | 功能 | 说明 |
-|--------|------|------|
-| `←` `→` | 图片导航 | 在图片列表中前后浏览 |
-| `↑` `↓` | 类别导航 | 在类别列表中上下选择 |
-| `Enter` | 确认分类 | 将当前图片分类到选中类别 |
-| `1`-`9`, `A`-`Z` | 快速分类 | 使用数字或字母快捷键快速分类 |
-| `Delete` | 移出图片 | 将图片移动到remove目录 |
-| `F5` | 刷新 | 重新扫描当前目录 |
-| `Ctrl+F` | 适应窗口 | 图片适应窗口大小 |
-| `Ctrl +/-/0` | 缩放控制 | 放大/缩小/重置图片缩放 |
+## Project Structure
 
-### 配置文件
-
-程序会在当前目录生成以下配置文件：
-- `logs/image_classifier.log`: 操作日志
-
-程序会在图片目录的同级目录下生成以下配置文件：
-- `config.json`: 类别记录和快捷键配置
-- `classification_state.json`: 工作状态以及分类信息保存
-
-## 🏗️ 项目结构
-
-```
+```text
 image_classifier/
-├── 📁 assets/              # 资源文件
-│   └── icon.ico            # 应用程序图标
-├── 📁 core/                # 核心功能模块
-│   ├── config.py           # 配置管理
-│   ├── file_manager.py     # 文件操作管理
-│   ├── image_loader.py     # 图像加载器
-│   └── scanner.py          # 文件扫描器
-├── 📁 ui/                  # 用户界面模块
-│   ├── main_window.py      # 主窗口
-│   ├── dialogs.py          # 对话框
-│   └── widgets.py          # 自定义组件
-├── 📁 utils/               # 工具模块
-│   ├── exceptions.py       # 异常定义
-│   ├── file_operations.py  # 文件操作工具
-│   └── performance.py      # 性能监控
-├── 📁 logs/                # 日志目录
-├── main.py                 # 主入口文件
-├── run.py                  # 启动脚本
-├── build.py                # 构建脚本
-├── requirements.txt        # 依赖列表
-└── README.md              # 项目说明
+├── core/                # core logic
+├── ui/                  # UI modules and dialogs
+├── utils/               # utility modules
+├── assets/              # icons and static assets
+├── run.py               # app launcher
+├── main.py              # entry point
+├── build.py             # local build script
+└── _version_.py         # single source of version metadata
 ```
 
-## 🔨 开发指南
+## Build & Release
 
-### 开发环境搭建
+### GitHub Actions release pipeline
+
+- Workflow file: `.github/workflows/build-release.yml`
+- Trigger: `push` tags matching `v*`
+- Output assets:
+  - `ImageClassifier_vX.Y.Z.exe`
+  - `manifest.json`
+
+### Local build
 
 ```bash
-# 1. 克隆项目
-git clone https://gitlab.desauto.cn/rd/delivery/data_process/image_classifier.git
-cd image-classifier
-
-# 2. 创建虚拟环境（推荐）
-python -m venv venv
-venv\Scripts\activate  # Windows
-
-# 3. 安装开发依赖
 pip install -r requirements.txt
-
-# 4. 运行开发版本
-python run.py
-```
-
-### 代码规范
-
-- 使用 Python 3.8+ 语法特性
-- 遵循 PEP 8 代码风格
-- 使用类型注解提高代码可读性
-- 完善的错误处理和日志记录
-- 模块化设计，职责单一
-
-### 主要模块说明
-
-#### Core模块
-- **config.py**: 管理应用配置、快捷键设置等
-- **image_loader.py**: 高性能图像加载，支持多线程和缓存
-- **scanner.py**: 文件系统扫描，支持多种图像格式
-- **file_manager.py**: 文件操作管理，包括移动、复制等
-
-#### UI模块
-- **main_window.py**: 主界面实现，包含所有用户交互逻辑
-- **widgets.py**: 自定义UI组件，如图片预览、分类按钮等
-- **dialogs.py**: 各种对话框实现
-
-#### Utils模块
-- **file_operations.py**: 文件操作工具函数
-- **performance.py**: 性能监控和优化工具
-- **exceptions.py**: 自定义异常类定义
-
-## 📦 构建发布
-
-### 🤖 自动化发布流程
-
-项目使用 GitLab CI/CD 实现自动化构建和发布：
-
-**发布流程**：
-1. 推送版本标签（如 `v6.2.0`）
-2. 自动触发 CI/CD 构建流程
-3. 生成优化的 EXE 文件
-4. 上传到 Package Registry
-5. 创建 GitLab Release 页面
-
-**构建特性**：
-- ✅ 单文件exe，无需额外依赖
-- ✅ 包含应用图标和资源文件  
-- ✅ 优化文件体积（约86MB）
-- ✅ 支持Windows 7+系统
-- ✅ 自动版本号管理
-
-### 🛠️ 本地构建（开发用）
-
-开发者可以使用本地构建脚本进行测试：
-
-```bash
-# 安装构建依赖
 pip install pyinstaller
-
-# 运行构建脚本
 python build.py
 ```
 
-> 📌 **注意**: 正式发布请使用 CI/CD 流程，确保构建一致性和版本管理。
+## Auto Update
 
-## 🐛 问题排查
+The app checks updates using:
 
-### 常见问题
+- Manifest endpoint: `https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json`
+- Download URL: provided by the `url` field in `manifest.json`
 
-**Q: 程序启动失败？**
-A: 确保系统满足最低要求，Windows 7+ 和足够的内存空间。
+`manifest.json` fields used by the app:
+- `version`
+- `url`
+- `sha256`
+- `size_bytes`
+- `notes`
 
-**Q: 图片加载缓慢？**
-A: 检查图片大小和格式，程序对超大图片（>50MB）可能需要更长加载时间。
+## Changelog
 
-**Q: 快捷键不响应？**
-A: 确保程序窗口获得焦点，避免与其他程序的快捷键冲突。
+See [CHANGELOG.md](CHANGELOG.md).
 
-**Q: 网络路径访问问题？**
-A: 确保有足够的网络权限，程序对网络路径进行了特殊优化。
+## License
 
-### 日志查看
-
-程序运行时会生成详细日志：
-- 位置：`logs/image_classifier.log`
-- 包含：操作记录、错误信息、性能数据
-- 用途：问题诊断和性能分析
-
-## 🤝 贡献指南
-
-欢迎提交问题报告和功能请求！
-
-### 报告问题
-
-1. 在 GitLab 项目的 Issues 页面创建新问题
-2. 描述问题的重现步骤
-3. 提供错误日志和系统信息
-4. 如可能，提供截图说明
-
-### 贡献代码
-
-1. Fork 项目到您的 GitLab 账户
-2. 创建特性分支：`git checkout -b feature/amazing-feature`
-3. 提交更改：`git commit -m 'Add amazing feature'`
-4. 推送分支：`git push origin feature/amazing-feature`
-5. 创建 Merge Request
-
-## 📚 开发文档
-
-### 版本管理系统
-
-本项目使用统一的版本管理系统，详细使用方法请参考：
-
-**[📋 版本管理系统说明 → VERSION_MANAGEMENT.md](VERSION_MANAGEMENT.md)**
-
-该文档包含：
-- 🎯 版本信息获取和使用方式
-- 🚀 完整的版本更新流程
-- 🔧 自动化工具使用指南
-- 💡 最佳实践和故障排除
-
-> 💡 **开发者必读**: 修改版本号前请务必阅读版本管理文档，确保版本信息同步更新。
-
-## 📄 更新日志
-
-查看完整的更新历史和详细信息：
-
-**[📋 查看完整更新日志 → CHANGELOG.md](CHANGELOG.md)**
-
-### 🎯 最新版本 - v6.4.0 (2025-10-30)
-
-**主要更新**：
-- 🎓 全新教程引导系统：首次使用时自动启动七步交互式教程，大幅降低学习成本
-- ✨ 虚拟组件技术：创新的 mock widgets 机制，教程中可交互但不实际操作
-- 💬 智能气泡提示：动态定位的 TutorialBubble，自适应窗口边界和主题风格
-- 🎨 教程主题集成：教程界面完全适配亮色/暗色主题，视觉体验一致
-- ⚙️ 全局配置架构：app_config.json 统一管理主题、教程、更新等应用级设置
-- 📍 上次位置恢复：支持跳转到上次处理的图片位置，工作流更连续
-
-> 💡 **提示**: 点击上方链接查看所有版本的详细更新内容、修复说明和新增功能。
-
-
-## 📜 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 🙏 致谢
-
-- [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) - 强大的GUI框架
-- [OpenCV](https://opencv.org/) - 计算机视觉库
-- [Pillow](https://pillow.readthedocs.io/) - Python图像处理库
-- [PyInstaller](https://pyinstaller.org/) - Python应用打包工具
-
----
-
-<div align="center">
-
-**如果这个项目对您有帮助，请给它一个 ⭐ Star！**
-
-Made with ❤️ by [GDDI-wanqing Team]
-
-</div>
+MIT License. See [LICENSE](LICENSE).
