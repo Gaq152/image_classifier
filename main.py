@@ -12,8 +12,17 @@ import sys
 import os
 import logging
 import traceback
+import glob
+import time
 from pathlib import Path
+from logging.handlers import TimedRotatingFileHandler
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import Qt, QLocale
+from PyQt6.QtGui import QIcon
 from _version_ import __version__, get_full_version_string, print_version_info
+from utils.paths import get_logs_dir
+from utils.app_config import get_app_config
+from .ui.main_window import ImageClassifier
 
 # 配置环境变量以减少调试输出
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.*=false"
@@ -24,54 +33,29 @@ os.environ["PIL_DEBUG"] = "0"
 
 
 def get_log_directory():
-    """获取日志目录，兼容开发环境和打包环境"""
+    """获取日志目录 - 使用统一路径管理"""
     try:
-        # 方案1: 优先使用exe文件同目录（打包环境）
-        if hasattr(sys, '_MEIPASS'):
-            # 获取exe文件的实际位置
-            exe_dir = Path(sys.executable).parent
-            log_dir = exe_dir / 'logs'
-            # 尝试创建测试，检查是否有权限
-            try:
-                log_dir.mkdir(exist_ok=True)
-                test_file = log_dir / 'test.tmp'
-                test_file.touch()
-                test_file.unlink()
-                return log_dir
-            except (PermissionError, OSError):
-                pass
-        
-        # 方案2: 开发环境使用项目根目录
-        if not hasattr(sys, '_MEIPASS'):
-            project_dir = Path(__file__).parent
-            log_dir = project_dir / 'logs'
-            try:
-                log_dir.mkdir(exist_ok=True)
-                return log_dir
-            except (PermissionError, OSError):
-                pass
-          
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return log_dir
-        
+        return get_logs_dir()
     except Exception as e:
-        # 最后的备用方案 - 当前目录
-        print(f"日志目录创建失败，使用当前目录: {e}")
-        return Path.cwd() / 'logs'
+        # 备用方案 - 当前目录
+        print(f"获取日志目录失败，使用当前目录: {e}")
+        fallback_dir = Path.cwd() / 'logs'
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        return fallback_dir
 
 
 def setup_logging():
-    """设置日志系统"""
+    """设置日志系统 - 支持日志轮转和自动清理"""
     try:
         # 清除现有handlers，避免冲突
         root_logger = logging.getLogger()
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
-        
+
         # 创建日志目录 - 智能选择位置
         log_dir = get_log_directory()
         log_dir.mkdir(exist_ok=True)
-        
+
         # 禁用第三方库的调试输出
         logging.getLogger('PIL').setLevel(logging.WARNING)
         logging.getLogger('PIL.Image').setLevel(logging.WARNING)
@@ -80,84 +64,95 @@ def setup_logging():
         logging.getLogger('PIL.TiffTags').setLevel(logging.WARNING)
         logging.getLogger('cv2').setLevel(logging.WARNING)
         logging.getLogger('numpy').setLevel(logging.WARNING)
-        
-        # 创建文件处理器
-        file_handler = logging.FileHandler(
-            log_dir / 'image_classifier.log', 
-            encoding='utf-8',
-            mode='a'
+
+        # 清理旧日志文件（保留7天）
+        try:
+            current_time = time.time()
+            retention_days = 7
+            retention_seconds = retention_days * 24 * 60 * 60
+
+            # 查找所有日志文件（包括轮转的日志）
+            log_files = glob.glob(str(log_dir / 'image_classifier*.log*'))
+            deleted_count = 0
+
+            for log_file in log_files:
+                try:
+                    file_path = Path(log_file)
+                    # 检查文件修改时间
+                    file_mtime = file_path.stat().st_mtime
+                    if current_time - file_mtime > retention_seconds:
+                        file_path.unlink()
+                        deleted_count += 1
+                except Exception:
+                    continue
+
+            if deleted_count > 0:
+                print(f"已清理 {deleted_count} 个超过 {retention_days} 天的旧日志文件")
+        except Exception as e:
+            print(f"清理旧日志文件时出错: {e}")
+
+        # 创建支持日志轮转的文件处理器
+        # when='midnight' - 每天午夜轮转
+        # interval=1 - 每1天轮转一次
+        # backupCount=6 - 保留6个备份文件（加上当前文件=7天日志）
+        # encoding='utf-8' - 使用UTF-8编码
+        file_handler = TimedRotatingFileHandler(
+            log_dir / 'image_classifier.log',
+            when='midnight',
+            interval=1,
+            backupCount=6,
+            encoding='utf-8'
         )
-        file_handler.setLevel(logging.DEBUG)
-        
+        # 从配置文件读取日志级别
+        from utils.app_config import get_app_config
+        try:
+            app_config = get_app_config()
+            log_level_str = app_config.log_level
+            log_level = getattr(logging, log_level_str, logging.INFO)
+        except Exception:
+            log_level = logging.INFO
+
+        file_handler.setLevel(log_level)
+
+        # 设置日志文件后缀格式（日期格式）
+        file_handler.suffix = '%Y-%m-%d'
+
         # 创建控制台处理器（用于重要信息）
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        
+        console_handler.setLevel(logging.INFO)  # 控制台始终显示INFO及以上
+
         # 设置格式 - 添加毫秒精度用于性能分析
         file_formatter = logging.Formatter(
-            '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s', 
+            '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         console_formatter = logging.Formatter(
             '%(asctime)s - %(levelname)s - %(message)s',
             datefmt='%H:%M:%S'
         )
-        
+
         file_handler.setFormatter(file_formatter)
         console_handler.setFormatter(console_formatter)
-        
+
         # 添加处理器到根日志器
         root_logger.addHandler(file_handler)
         root_logger.addHandler(console_handler)
         root_logger.setLevel(logging.DEBUG)
-        
+
         logger = logging.getLogger(__name__)
         logger.info("=" * 60)
         logger.info("图像分类工具启动")
+        logger.info(f"日志目录: {log_dir}")
+        logger.info(f"日志保留天数: 7天")
         logger.info("=" * 60)
-        
+
         return True
-        
+
     except Exception as e:
         print(f"日志设置失败: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-
-
-def check_dependencies():
-    """检查必要的依赖"""
-    missing_deps = []
-    
-    try:
-        from PyQt6.QtWidgets import QApplication, QMessageBox
-        from PyQt6.QtCore import Qt
-        from PyQt6.QtGui import QIcon
-    except ImportError:
-        missing_deps.append("PyQt6")
-    
-    try:
-        import cv2
-    except ImportError:
-        missing_deps.append("opencv-python")
-    
-    try:
-        from PIL import Image
-    except ImportError:
-        missing_deps.append("Pillow")
-    
-    try:
-        import psutil
-    except ImportError:
-        missing_deps.append("psutil")
-    
-    if missing_deps:
-        error_msg = f"缺少以下依赖包：\n" + "\n".join(f"• {dep}" for dep in missing_deps)
-        error_msg += "\n\n请使用以下命令安装：\n"
-        error_msg += f"pip install {' '.join(missing_deps)}"
-        
-        print(error_msg)
-        return False
-    
-    return True
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
@@ -175,7 +170,6 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     
     # 显示错误对话框
     try:
-        from PyQt6.QtWidgets import QMessageBox
         error_msg = f"程序遇到未预期的错误：\n{exc_value}\n\n请查看日志文件获取详细信息。"
         QMessageBox.critical(None, "程序错误", error_msg)
     except:
@@ -185,22 +179,13 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 def main():
     """主函数"""
     try:
-        # 检查依赖
-        if not check_dependencies():
-            sys.exit(1)
-        
         # 设置日志
         if not setup_logging():
             print("警告: 日志设置失败，程序将继续运行")
         
         # 设置全局异常处理器
         sys.excepthook = handle_exception
-        
-        # 导入PyQt6
-        from PyQt6.QtWidgets import QApplication
-        from PyQt6.QtCore import Qt, QLocale
-        from PyQt6.QtGui import QIcon
-        
+
         # 创建应用程序实例
         app = QApplication(sys.argv)
         app.setApplicationName("图像分类工具")
@@ -212,11 +197,7 @@ def main():
         
         # 设置中文本地化
         QLocale.setDefault(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
-        
-        # 导入主窗口类 - 支持两种启动方式
-        # 使用相对导入
-        from .ui.main_window import ImageClassifier
-        
+
         # 创建主窗口
         window = ImageClassifier()
         window.show()

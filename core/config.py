@@ -7,8 +7,10 @@
 import json
 import logging
 import threading
+import time
 from pathlib import Path
-from ..utils.exceptions import ConfigError
+from utils.exceptions import ConfigError
+from utils.app_config import get_app_config
 
 
 class Config:
@@ -19,7 +21,11 @@ class Config:
         self.config_file = Path(base_dir) / 'config.json' if base_dir else None
         self.category_order = []
         self.category_shortcuts = {}
+        self.ignored_categories = []  # 被忽略的类别目录列表
+        self.category_sort_mode = "name"  # 类别排序模式: "name", "shortcut" 或 "count"
+        self.sort_ascending = True  # 排序方向: True=升序, False=降序
         self._lock = threading.Lock()
+        self._save_lock = threading.Lock()  # 文件写入锁，防止并发保存
         
         # 系统保留的快捷键和类别
         self.reserved_shortcuts = {
@@ -117,36 +123,91 @@ class Config:
         """加载配置"""
         if not self.config_file:
             return
-            
+
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
                 with self._lock:
                     self.category_order = config_data.get('category_order', [])
                     self.category_shortcuts = config_data.get('category_shortcuts', {})
+                    self.ignored_categories = config_data.get('ignored_categories', [])  # 忽略列表
+                    self.category_sort_mode = config_data.get('category_sort_mode', 'name')  # 类别排序模式
+                    self.sort_ascending = config_data.get('sort_ascending', True)  # 排序方向
+
+                    # 迁移逻辑：如果旧配置中有更新相关字段，迁移到全局配置
+                    self._migrate_update_config(config_data)
         except FileNotFoundError:
+            # 配置文件不存在，初始化默认值并尝试保存
             with self._lock:
                 self.category_shortcuts = {}
-            self.save_config()
+            # 尝试保存配置文件，如果失败则向上抛出异常（通常是权限问题）
+            try:
+                self.save_config()
+            except (OSError, IOError, ConfigError) as e:
+                # 如果是权限错误，向上抛出让调用者处理
+                # ConfigError 可能是由 save_config() 包装后的异常
+                raise ConfigError(f"无法创建配置文件（权限不足）: {e}")
         except (json.JSONDecodeError, OSError) as e:
             raise ConfigError(f"加载配置文件失败: {e}")
             
     def save_config(self):
-        """保存配置"""
+        """保存配置（简化版：只加锁，失败抛出异常）"""
         if not self.config_file:
             return
-            
-        try:
-            config = {
-                'category_order': self.category_order,
-                'category_shortcuts': self.category_shortcuts
-            }
-            # 确保配置文件目录存在
-            self.config_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=4)
-        except (OSError, IOError) as e:
-            raise ConfigError(f"保存配置文件失败: {e}")
+
+        # 文件写入锁：确保同一时间只有一个线程在写入
+        with self._save_lock:
+            try:
+                config = {
+                    'category_order': self.category_order,
+                    'category_shortcuts': self.category_shortcuts,
+                    'ignored_categories': getattr(self, 'ignored_categories', []),
+                    'category_sort_mode': getattr(self, 'category_sort_mode', 'name'),
+                    'sort_ascending': getattr(self, 'sort_ascending', True),
+                }
+                # 确保配置文件目录存在
+                self.config_file.parent.mkdir(parents=True, exist_ok=True)
+
+                # 写入文件
+                with open(self.config_file, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, ensure_ascii=False, indent=4)
+
+            except (OSError, IOError) as e:
+                raise ConfigError(f"保存配置文件失败: {e}")
+
+    def _migrate_update_config(self, config_data):
+        """迁移更新相关配置到全局配置
+
+        Args:
+            config_data: 从 config.json 加载的配置数据
+        """
+        # 检查是否有需要迁移的字段
+        update_fields = ['auto_update_enabled', 'last_update_check_ts', 'update_endpoint', 'update_token', 'pending_update']
+        has_update_config = any(field in config_data for field in update_fields)
+
+        if has_update_config:
+            try:
+                # 获取全局配置实例
+                app_config = get_app_config()
+
+                # 迁移数据到全局配置
+                if 'auto_update_enabled' in config_data:
+                    app_config.auto_update_enabled = bool(config_data['auto_update_enabled'])
+                if 'last_update_check_ts' in config_data:
+                    app_config.last_update_check_ts = int(config_data['last_update_check_ts'])
+                if 'update_endpoint' in config_data:
+                    app_config.update_endpoint = config_data['update_endpoint']
+                if 'update_token' in config_data:
+                    app_config.update_token = config_data['update_token']
+                if 'pending_update' in config_data:
+                    app_config.pending_update = config_data['pending_update']
+
+                # 保存本地配置（不再包含更新相关字段）
+                self.save_config()
+
+                logging.getLogger(__name__).info(f"已将更新配置从 {self.config_file} 迁移到全局配置")
+            except Exception as e:
+                logging.getLogger(__name__).error(f"迁移更新配置失败: {e}")
             
     def set_base_dir(self, base_dir):
         """设置基础目录并重新加载配置"""
@@ -171,8 +232,65 @@ class Config:
             if len(shortcut) == 1 and shortcut.isalpha():
                 return (1, shortcut, category)  # 字母快捷键次之
             return (2, shortcut, category)  # 组合键放最后
-            
+
         return sorted(categories, key=get_shortcut_weight)
+
+    def get_sorted_categories(self, categories, sort_mode=None, category_counts=None, ascending=None):
+        """根据排序模式返回排序后的类别列表
+
+        Args:
+            categories: 类别集合或列表
+            sort_mode: 排序模式 ("name", "shortcut" 或 "count")，默认使用配置的模式
+            category_counts: 类别分类数量字典 {category_name: count}，仅 count 模式需要
+            ascending: 是否升序，默认使用配置的 sort_ascending
+
+        Returns:
+            排序后的类别列表
+        """
+        if sort_mode is None:
+            sort_mode = self.category_sort_mode
+        if ascending is None:
+            ascending = self.sort_ascending
+
+        if sort_mode == "shortcut":
+            # 按快捷键排序
+            result = self.sort_categories(categories)
+        elif sort_mode == "count":
+            # 按分类数量排序
+            if category_counts is None:
+                category_counts = {}
+            # 升序时数量少的在前，降序时数量多的在前
+            result = sorted(list(categories), key=lambda c: (category_counts.get(c, 0), c))
+        else:  # sort_mode == "name" (默认)
+            # 按名称排序
+            result = sorted(list(categories))
+
+        # 如果是降序，反转结果
+        if not ascending:
+            result = list(reversed(result))
+
+        return result
+
+    def add_ignored_category(self, category_name):
+        """添加类别到忽略列表"""
+        with self._lock:
+            if category_name not in self.ignored_categories:
+                self.ignored_categories.append(category_name)
+                return True
+            return False
+
+    def remove_ignored_category(self, category_name):
+        """从忽略列表移除类别"""
+        with self._lock:
+            if category_name in self.ignored_categories:
+                self.ignored_categories.remove(category_name)
+                return True
+            return False
+
+    def is_category_ignored(self, category_name):
+        """检查类别是否被忽略"""
+        with self._lock:
+            return category_name in self.ignored_categories
 
 
 class ConfigurationManager:

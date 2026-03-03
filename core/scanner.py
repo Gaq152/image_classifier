@@ -9,8 +9,8 @@ import logging
 import time
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
-from ..utils.exceptions import DirectoryScanError
-from ..utils.performance import performance_monitor
+from utils.exceptions import DirectoryScanError
+from utils.performance import performance_monitor
 
 
 class FileScannerThread(QThread):
@@ -30,6 +30,15 @@ class FileScannerThread(QThread):
     def scan_directory(self, directory):
         """开始扫描目录"""
         try:
+            # 修复：如果线程已在运行，先等待完成
+            if self.isRunning():
+                self.logger.warning("扫描线程已在运行，取消当前扫描并等待完成")
+                self.cancel_scan()
+                self.wait(2000)  # 等待最多2秒
+                if self.isRunning():
+                    self.logger.error("无法终止正在运行的扫描线程")
+                    raise DirectoryScanError("扫描线程已在运行，无法启动新扫描")
+
             self.current_dir = Path(directory)
             self.cancelled = False
             self.start()

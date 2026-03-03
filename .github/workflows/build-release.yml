@@ -1,0 +1,151 @@
+# Image Classifier - GitHub Actions Build & Release
+# Triggered on version tags (v*)
+
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt pyinstaller
+
+      - name: Update version from tag
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          (Get-Content _version_.py) -replace '__version__ = "[^"]*"', "__version__ = `"$version`"" | Set-Content _version_.py
+          Write-Output "VERSION=$version" >> $env:GITHUB_ENV
+          Write-Output "Updated version to $version"
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $version = $env:VERSION
+          $safe_name = "ImageClassifier_v${version}.exe"
+
+          # Find the built exe (could be Chinese name or English name)
+          $exe = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "No exe found in dist/"
+            exit 1
+          }
+
+          # Rename to safe ASCII filename for release asset
+          $dest = Join-Path "dist" $safe_name
+          if ($exe.Name -ne $safe_name) {
+            Copy-Item $exe.FullName $dest -Force
+          }
+
+          # Calculate SHA256
+          $hash = (Get-FileHash -Algorithm SHA256 $dest).Hash.ToLower()
+          Write-Output "SHA256=$hash" >> $env:GITHUB_ENV
+
+          # Get file size
+          $size = (Get-Item $dest).Length
+          Write-Output "SIZE_BYTES=$size" >> $env:GITHUB_ENV
+
+          Write-Output "EXE_PATH=$dest" >> $env:GITHUB_ENV
+          Write-Output "SAFE_NAME=$safe_name" >> $env:GITHUB_ENV
+
+          Write-Output "Built: $safe_name ($([math]::Round($size/1MB, 1)) MB)"
+          Write-Output "SHA256: $hash"
+
+      - name: Generate manifest.json
+        shell: pwsh
+        run: |
+          $version = $env:VERSION
+          $sha256 = $env:SHA256
+          $size = $env:SIZE_BYTES
+          $safe_name = $env:SAFE_NAME
+          $date = (Get-Date -Format "yyyy-MM-dd")
+          $download_url = "https://github.com/Gaq152/image_classifier/releases/download/v${version}/${safe_name}"
+
+          # Extract update notes from _version_.py
+          $notes = & python -c @"
+          import sys, json
+          sys.path.append('.')
+          from _version_ import VERSION_HISTORY
+          current_version = '${version}'
+          notes = 'CI auto-generated'
+          for v in VERSION_HISTORY:
+              if v['version'] == current_version:
+                  title = v.get('title', 'Version update')
+                  highlights = v.get('highlights', [])
+                  parts = [title]
+                  for h in highlights[:3]:
+                      import re
+                      clean = re.sub(r'^[\U0001f300-\U0001f9ff\u2600-\u26ff\u2700-\u27bf\U0001fa00-\U0001fa6f]+\s*', '', h)
+                      parts.append('* ' + clean)
+                  if len(highlights) > 3:
+                      parts.append('* and more...')
+                  notes = '; '.join(parts)
+                  break
+          print(json.dumps(notes, ensure_ascii=False)[1:-1])
+          "@
+
+          $manifest = @{
+            version = $version
+            date = $date
+            url = $download_url
+            display_name = "ImageClassifier_v${version}.exe"
+            sha256 = $sha256
+            size_bytes = [int]$size
+            notes = $notes
+          } | ConvertTo-Json -Depth 3
+
+          $manifest | Out-File -FilePath "dist/manifest.json" -Encoding utf8NoBOM
+          Write-Output "manifest.json generated"
+          Get-Content "dist/manifest.json"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Image Classifier ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          body: |
+            ## Image Classifier ${{ github.ref_name }}
+
+            ### Download
+            - **Windows**: ${{ env.SAFE_NAME }}
+
+            ### System Requirements
+            - **OS**: Windows 10+
+            - **RAM**: 4GB+
+            - **Disk**: 200MB free space
+
+            ### Verify Integrity
+            ```
+            SHA256: ${{ env.SHA256 }}
+            ```
+
+            ### Changelog
+            See [CHANGELOG.md](https://github.com/Gaq152/image_classifier/blob/${{ github.ref_name }}/CHANGELOG.md) for details.
+          files: |
+            dist/${{ env.SAFE_NAME }}
+            dist/manifest.json
