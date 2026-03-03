@@ -83,6 +83,9 @@ jobs:
 
       - name: Generate manifest.json
         shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
           $version = $env:VERSION
           $sha256 = $env:SHA256
@@ -111,7 +114,7 @@ jobs:
                       parts.append('* and more...')
                   notes = '; '.join(parts)
                   break
-          print(json.dumps(notes, ensure_ascii=False)[1:-1])
+          print(json.dumps(notes, ensure_ascii=True)[1:-1])
           "@
 
           $manifest = @{
