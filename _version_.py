@@ -12,11 +12,11 @@ from typing import Dict, List, Tuple
 # ================================
 
 # 主版本号 - 这是唯一需要手动修改的地方
-__version__ = "6.6.0"
+__version__ = "7.0.0"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
-RELEASE_DATE = "2025-12-02"
+RELEASE_DATE = "2026-03-03"
 RELEASE_NAME = "图像分类工具"
 
 # ================================
@@ -24,6 +24,46 @@ RELEASE_NAME = "图像分类工具"
 # ================================
 
 VERSION_HISTORY = [
+    {
+        "version": "7.0.0",
+        "date": "2026-03-03",
+        "title": "GitHub 迁移与 CI/CD 重构",
+        "highlights": [
+            "🚀 GitHub Actions 自动构建：新增完整的 CI/CD 流水线，推送 v* 标签自动构建发布",
+            "🔄 更新源迁移：自动更新从 GitLab Package Registry 迁移到 GitHub Releases",
+            "📖 双语 README：英文主文档 + 中文文档，顶部语言切换",
+            "🔧 更新日志增强：更新检查失败时记录 endpoint URL，便于诊断",
+            "🛡️ 设置持久化修复：恢复默认设置后端点地址正确持久化保存"
+        ],
+        "details": [
+            "【CI/CD 迁移 - 重大变更】",
+            "新增：.github/workflows/build-release.yml 自动构建发布流水线",
+            "新增：推送 v* 标签自动触发 Windows 构建、SHA256 校验、manifest 生成",
+            "新增：自动创建 GitHub Release 并上传 exe + manifest.json",
+            "删除：.gitlab-ci.yml（GitLab CI/CD 配置）",
+            "",
+            "【更新源迁移 - 重大变更】",
+            "迁移：manifest 检查地址从 GitLab Package Registry 迁移到 GitHub Releases",
+            "迁移：exe 下载地址格式适配 GitHub Releases 资产链接",
+            "移除：内置 GitLab Deploy Token（Public 仓库无需鉴权）",
+            "优化：鉴权兜底策略从 PRIVATE-TOKEN 改为通用 Bearer",
+            "",
+            "【文档改造】",
+            "重构：README.md 重写为英文主文档",
+            "新增：README_CN.md 中文文档，与英文版互链",
+            "更新：所有文档中的 GitLab 链接替换为 GitHub 链接",
+            "",
+            "【设置与更新修复】",
+            "修复：恢复默认设置时端点地址未持久化保存的问题",
+            "修复：更新检查失败日志级别从 DEBUG 提升到 WARNING",
+            "新增：更新检查失败日志中包含 endpoint URL 信息",
+            "更新：帮助对话框 CHANGELOG 链接指向 GitHub",
+            "",
+            "【其他变更】",
+            "更新：版权信息 GDDI → GAQ",
+            "更新：反馈邮箱地址"
+        ]
+    },
     {
         "version": "6.6.0",
         "date": "2025-12-02",
