@@ -1944,7 +1944,9 @@ class SettingsDialog(QDialog):
 
     def _on_update_check_failed(self, error_message):
         """修复问题4：后台更新检查失败的回调"""
-        self.logger.debug(f"检查线上更新失败: {error_message}")
+        self.logger.warning(
+            f"检查线上更新失败: endpoint={self.app_config.update_endpoint}, error={error_message}"
+        )
         toast_warning(self, "无法获取更新信息")
 
     def clear_smb_cache(self):
@@ -2106,7 +2108,7 @@ class SettingsDialog(QDialog):
             self.theme_combo.setEnabled(True)  # 确保下拉列表可用
 
             self.auto_update_switch.setChecked(True)
-            self.endpoint_input.setText("https://gitlab.desauto.cn/api/v4/projects/820/packages/generic/image_classifier/latest/manifest.json")
+            self.endpoint_input.setText("https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json")
             self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
             self.token_input.setText("")
             self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
@@ -2123,6 +2125,8 @@ class SettingsDialog(QDialog):
 
             # 保存配置（实时保存）
             self.app_config.auto_update_enabled = True
+            self.app_config.update_endpoint = "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json"
+            self.app_config.update_token = ""
             self.app_config.log_level = "INFO"
             self.app_config.toast_level = "INFO"
 
