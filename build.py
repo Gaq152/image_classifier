@@ -145,6 +145,7 @@ def build_executable():
         '--hidden-import', 'psutil',
         '--hidden-import', 'ssl',  # HTTPS 请求必需
         '--hidden-import', '_ssl',  # ssl 底层 C 扩展
+        '--collect-all', 'ssl',  # 确保 ssl 的 DLL 也被收集（GitHub Actions 环境需要）
         
         # ========= 优化选项 =========
         '--optimize', '2',  # Python字节码优化

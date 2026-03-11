@@ -38,6 +38,13 @@ jobs:
           Write-Output "VERSION=$version" >> $env:GITHUB_ENV
           Write-Output "Updated version to $version"
 
+      - name: Verify SSL support
+        shell: pwsh
+        run: |
+          python -c "import ssl; print('SSL OK:', ssl.OPENSSL_VERSION)"
+          python -c "import _ssl; print('_ssl module path:', _ssl.__file__)"
+          python -c "import os, ssl; d=os.path.dirname(ssl.__file__); print('ssl dir:', d); [print(' ', f) for f in os.listdir(d) if 'ssl' in f.lower() or 'crypto' in f.lower() or f.endswith('.pyd')]"
+
       - name: Build executable
         shell: pwsh
         env:
