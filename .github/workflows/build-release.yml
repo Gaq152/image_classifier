@@ -131,6 +131,101 @@ jobs:
           Write-Output "manifest.json generated"
           Get-Content "dist/manifest.json"
 
+      - name: Extract release notes from VERSION_HISTORY
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          $version = $env:VERSION
+          $notes = & python -c @"
+          import sys, os
+          sys.stdout.reconfigure(encoding='utf-8')
+          sys.path.append('.')
+          from _version_ import VERSION_HISTORY
+
+          current_version = '${version}'
+          entry = None
+          for v in VERSION_HISTORY:
+              if v['version'] == current_version:
+                  entry = v
+                  break
+
+          if not entry:
+              print('> CI auto-generated release, no changelog entry found.')
+              sys.exit(0)
+
+          # 输出标题
+          title = entry.get('title', '')
+          date = entry.get('date', '')
+          print(f'**{title}** ({date})')
+          print()
+
+          # 输出亮点
+          highlights = entry.get('highlights', [])
+          if highlights:
+              print('### Highlights')
+              for h in highlights:
+                  print(f'- {h}')
+              print()
+
+          # 输出详细内容
+          details = entry.get('details', [])
+          if details:
+              print('### Details')
+              for d in details:
+                  if d == '':
+                      print()
+                  elif d.startswith('\u3010') or d.startswith('【'):
+                      print(f'#### {d}')
+                  else:
+                      print(f'- {d}')
+          "@
+
+          # 保存到文件供后续步骤使用
+          $notes | Out-File -FilePath "dist/release_notes.md" -Encoding utf8NoBOM
+          Write-Output "Release notes extracted"
+
+      - name: Compose release body
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          $version = $env:VERSION
+          $sha256 = $env:SHA256
+          $safe_name = $env:SAFE_NAME
+
+          $changelog = ""
+          if (Test-Path "dist/release_notes.md") {
+            $changelog = Get-Content "dist/release_notes.md" -Raw -Encoding utf8
+          }
+
+          $body = @"
+          ## Image Classifier v${version}
+
+          ${changelog}
+
+          ---
+
+          ### Download
+          - **Windows**: ${safe_name}
+
+          ### System Requirements
+          - **OS**: Windows 10+
+          - **RAM**: 4GB+
+          - **Disk**: 200MB free space
+
+          ### Verify Integrity
+          ```
+          SHA256: ${sha256}
+          ```
+
+          ### Full Changelog
+          See [CHANGELOG.md](https://github.com/Gaq152/image_classifier/blob/${{ github.ref_name }}/CHANGELOG.md) for complete details.
+          "@
+
+          $body | Out-File -FilePath "dist/release_body.md" -Encoding utf8NoBOM
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -138,24 +233,7 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: false
-          body: |
-            ## Image Classifier ${{ github.ref_name }}
-
-            ### Download
-            - **Windows**: ${{ env.SAFE_NAME }}
-
-            ### System Requirements
-            - **OS**: Windows 10+
-            - **RAM**: 4GB+
-            - **Disk**: 200MB free space
-
-            ### Verify Integrity
-            ```
-            SHA256: ${{ env.SHA256 }}
-            ```
-
-            ### Changelog
-            See [CHANGELOG.md](https://github.com/Gaq152/image_classifier/blob/${{ github.ref_name }}/CHANGELOG.md) for details.
+          body_path: dist/release_body.md
           files: |
             dist/${{ env.SAFE_NAME }}
             dist/manifest.json
