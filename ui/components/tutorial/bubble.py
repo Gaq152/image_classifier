@@ -5,7 +5,7 @@
 """
 
 import logging
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton
+from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QApplication
 from PyQt6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPainterPath, QFont
 from typing import Optional
@@ -426,11 +426,24 @@ class TutorialBubble(QWidget):
         # DEBUG：记录计算出来的气泡位置
         self.logger.debug(f"[Bubble] 计算出的气泡位置(修正前): x={x}, y={y}")
 
-        # 确保气泡不超出父窗口边界
+        # 确保气泡不超出可见区域（同时考虑父窗口和屏幕边界）
         if self.parent():
             parent_rect = self.parent().rect()
-            x = max(10, min(x, parent_rect.width() - bubble_width - 10))
-            y = max(10, min(y, parent_rect.height() - bubble_height - 10))
+            max_x = parent_rect.width() - bubble_width - 10
+            max_y = parent_rect.height() - bubble_height - 10
+
+            # 当窗口超出屏幕时，用屏幕边界进一步约束
+            screen = QApplication.primaryScreen()
+            if screen:
+                screen_geo = screen.availableGeometry()
+                parent_global = self.parent().mapToGlobal(QPoint(0, 0))
+                visible_max_x = screen_geo.right() - parent_global.x() - bubble_width - 10
+                visible_max_y = screen_geo.bottom() - parent_global.y() - bubble_height - 10
+                max_x = min(max_x, visible_max_x)
+                max_y = min(max_y, visible_max_y)
+
+            x = max(10, min(x, max_x))
+            y = max(10, min(y, max_y))
 
         self.logger.debug(f"[Bubble] 最终气泡位置(修正后): x={x}, y={y}")
 

@@ -136,8 +136,8 @@ class ButtonStyles:
                 background-color: {default_theme.colors.BACKGROUND_CARD};
                 color: {default_theme.colors.TEXT_SECONDARY};
                 border: none;
-                border-radius: 8px;
-                font-size: 18px;
+                border-radius: 6px;
+                font-size: 16px;
                 font-weight: normal;
                 text-align: center;
             }}
