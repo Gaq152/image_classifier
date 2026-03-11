@@ -7,6 +7,21 @@
 
 import sys
 import os
+
+# PyInstaller --onefile 模式下，确保 _MEIPASS 目录在 DLL 搜索路径中
+# 保留句柄引用，避免被 GC 回收后目录注册失效
+_dll_dir_handle = None
+if getattr(sys, 'frozen', False):
+    _meipass = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    if hasattr(os, 'add_dll_directory'):
+        try:
+            _dll_dir_handle = os.add_dll_directory(_meipass)
+        except OSError:
+            pass
+    _path = os.environ.get('PATH', '')
+    if _meipass not in _path:
+        os.environ['PATH'] = _meipass + os.pathsep + _path
+
 from pathlib import Path
 
 def main():

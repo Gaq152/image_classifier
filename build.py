@@ -148,7 +148,6 @@ def build_executable():
         
         # ========= 优化选项 =========
         '--optimize', '2',  # Python字节码优化
-        '--strip',  # 去除调试信息
         '--clean',  # 清理临时文件
         '--noconfirm',  # 不询问确认
         
