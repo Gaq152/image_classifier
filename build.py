@@ -143,6 +143,8 @@ def build_executable():
         '--hidden-import', 'cv2',
         '--hidden-import', 'PIL.Image',  # 只导入Image，不导入其他PIL子模块
         '--hidden-import', 'psutil',
+        '--hidden-import', 'ssl',  # HTTPS 请求必需
+        '--hidden-import', '_ssl',  # ssl 底层 C 扩展
         
         # ========= 优化选项 =========
         '--optimize', '2',  # Python字节码优化
