@@ -91,7 +91,10 @@ class AppConfig:
             "cache_warmup_count": 100,  # 预热图片数量（范围：10-500）
             # 循环翻页相关配置
             "local_loop_enabled": True,  # 本地路径循环翻页（默认开启）
-            "network_loop_enabled": False  # 网络路径循环翻页（默认关闭，开启后会预热末尾图片）
+            "network_loop_enabled": False,  # 网络路径循环翻页（默认关闭，开启后会预热末尾图片）
+            # 窗口位置与大小记忆
+            "remember_window_geometry": True,  # 记住窗口位置和大小
+            "window_geometry": None  # 上次关闭时的窗口几何信息 {x, y, width, height, screen_name}
         }
 
     def _load_config(self) -> Dict[str, Any]:
@@ -540,6 +543,31 @@ class AppConfig:
         self._config["network_loop_enabled"] = value
         self._save_config()
         self.logger.info(f"网络路径循环翻页已{'启用' if value else '禁用'}")
+
+    # ==================== 窗口几何信息配置 ====================
+
+    @property
+    def remember_window_geometry(self) -> bool:
+        """获取是否记住窗口位置和大小"""
+        return self._config.get("remember_window_geometry", True)
+
+    @remember_window_geometry.setter
+    def remember_window_geometry(self, value: bool):
+        """设置是否记住窗口位置和大小"""
+        self._config["remember_window_geometry"] = value
+        self._save_config()
+        self.logger.info(f"记住窗口位置已{'启用' if value else '禁用'}")
+
+    @property
+    def window_geometry(self) -> dict:
+        """获取上次保存的窗口几何信息"""
+        return self._config.get("window_geometry", None)
+
+    @window_geometry.setter
+    def window_geometry(self, value: dict):
+        """保存窗口几何信息（不打印日志，高频操作）"""
+        self._config["window_geometry"] = value
+        self._save_config()
 
     # ==================== 其他方法 ====================
 
