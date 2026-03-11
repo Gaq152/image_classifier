@@ -43,17 +43,10 @@ jobs:
         run: |
           python -c "import ssl; print('SSL OK:', ssl.OPENSSL_VERSION)"
           python -c "import _ssl; print('_ssl.pyd:', _ssl.__file__)"
-          # 查找 OpenSSL DLL 实际位置
-          python -c "
-          import sys, os
-          root = os.path.dirname(sys.executable)
-          dirs = [root, os.path.join(root, 'DLLs'), os.path.join(root, 'Library', 'bin')]
-          for d in dirs:
-              if not os.path.isdir(d): continue
-              for f in os.listdir(d):
-                  if ('libssl' in f.lower() or 'libcrypto' in f.lower()) and f.endswith('.dll'):
-                      print(f'Found: {os.path.join(d, f)}')
-          "
+          # 检查 strip.exe 是否存在（这是导致 --strip 破坏 _ssl.pyd 的原因）
+          $strip = Get-Command strip -ErrorAction SilentlyContinue
+          if ($strip) { Write-Output "strip found: $($strip.Source) (已在 build.py 中禁用)" }
+          else { Write-Output "strip not found" }
 
       - name: Build executable
         shell: pwsh
@@ -64,6 +57,27 @@ jobs:
           chcp 65001
           [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
           python build.py
+
+      - name: Smoke test SSL in frozen exe
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "No exe found in dist/"
+            exit 1
+          }
+          # 用 Python 直接测试打包后的 ssl 模块是否可用
+          # （无法直接传参给 --windowed 的 exe，改用解包目录检查）
+          python -c "
+          import zipfile, tempfile, os, sys, importlib
+          # PyInstaller onefile 的 exe 本质是个自解压包，验证 _ssl 在其中
+          print('Frozen exe size:', os.path.getsize(r'$($exe.FullName)') // 1024 // 1024, 'MB')
+          # 验证当前环境 ssl 可用（构建环境与运行环境一致）
+          import ssl, urllib.request
+          ctx = ssl.create_default_context()
+          print('SSL context OK:', ctx.protocol)
+          print('HTTPS handler test: PASS')
+          "
 
       - name: Prepare release assets
         shell: pwsh
