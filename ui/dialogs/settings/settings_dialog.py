@@ -254,6 +254,7 @@ class SettingsDialog(QDialog):
 
         # 添加各个设置组
         content_layout.addWidget(self.create_appearance_section())
+        content_layout.addWidget(self.create_window_section())
         content_layout.addWidget(self.create_preview_section())
         content_layout.addWidget(self.create_tutorial_section())
         content_layout.addWidget(self.create_basic_update_section())
@@ -1286,6 +1287,54 @@ class SettingsDialog(QDialog):
 
         layout.addStretch()
         return group
+
+    def create_window_section(self) -> QGroupBox:
+        """创建窗口行为设置区域"""
+        c = default_theme.colors
+
+        group = QGroupBox("🖥️ 窗口")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(12)
+
+        # 记住窗口位置开关
+        geo_widget = QWidget()
+        geo_layout = QHBoxLayout(geo_widget)
+        geo_layout.setContentsMargins(0, 0, 0, 0)
+        geo_layout.setSpacing(10)
+
+        geo_label = QLabel("📐 记住窗口位置和大小")
+        geo_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        geo_layout.addWidget(geo_label)
+
+        geo_layout.addStretch()
+
+        switch_label = QLabel("启用")
+        switch_label.setStyleSheet("font-size: 13px;")
+        geo_layout.addWidget(switch_label)
+
+        self.remember_geometry_switch = Switch()
+        self.remember_geometry_switch.setChecked(self.app_config.remember_window_geometry)
+        self.remember_geometry_switch.toggled.connect(self._on_remember_geometry_changed)
+        geo_layout.addWidget(self.remember_geometry_switch)
+
+        layout.addWidget(geo_widget)
+
+        # 说明
+        desc = QLabel("💡 关闭程序时保存窗口位置和大小，下次启动原位还原。多显示器场景下，若原位置对应的显示器不存在会自动回退到主屏幕居中。")
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 0 0 5px 0;")
+        layout.addWidget(desc)
+
+        return group
+
+    def _on_remember_geometry_changed(self, checked: bool):
+        """窗口记忆开关改变"""
+        self.app_config.remember_window_geometry = checked
+        if not checked:
+            # 关闭时清除已保存的几何信息
+            self.app_config.window_geometry = None
+        toast_success(self, f"记住窗口位置已{'启用' if checked else '禁用'}")
 
     def create_preview_section(self) -> QGroupBox:
         """创建图像预览设置区域"""

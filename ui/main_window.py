@@ -772,18 +772,18 @@ class ImageClassifier(QMainWindow):
             # 降低最小窗口尺寸，兼容小屏幕笔记本（如1366×768）
             self.setMinimumSize(960, 540)
 
-            # 根据屏幕分辨率自适应设置初始窗口大小
-            screen = QApplication.primaryScreen()
-            if screen:
-                available = screen.availableGeometry()
-                # 初始窗口大小为可用屏幕的 85%，但不超过 1400×900
-                init_width = min(int(available.width() * 0.85), 1400)
-                init_height = min(int(available.height() * 0.85), 900)
-                self.resize(init_width, init_height)
-                # 居中显示
-                x = available.x() + (available.width() - init_width) // 2
-                y = available.y() + (available.height() - init_height) // 2
-                self.move(x, y)
+            # 尝试恢复上次保存的窗口位置和大小
+            if not self._restore_window_geometry():
+                # 恢复失败或未启用，使用自适应默认值
+                screen = QApplication.primaryScreen()
+                if screen:
+                    available = screen.availableGeometry()
+                    init_width = min(int(available.width() * 0.85), 1400)
+                    init_height = min(int(available.height() * 0.85), 900)
+                    self.resize(init_width, init_height)
+                    x = available.x() + (available.width() - init_width) // 2
+                    y = available.y() + (available.height() - init_height) // 2
+                    self.move(x, y)
             
             # 设置应用程序图标
             try:
@@ -1513,6 +1513,95 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"系统信息输出失败: {e}")
     
+    # ===== 窗口几何信息保存与恢复 =====
+
+    def _save_window_geometry(self):
+        """保存当前窗口位置和大小到应用配置"""
+        try:
+            app_config = get_app_config()
+            if not app_config.remember_window_geometry:
+                return
+
+            geo = self.geometry()
+            screen = self.screen()
+            screen_name = screen.name() if screen else ""
+            app_config.window_geometry = {
+                "x": geo.x(),
+                "y": geo.y(),
+                "width": geo.width(),
+                "height": geo.height(),
+                "screen_name": screen_name
+            }
+            self.logger.debug(f"窗口几何信息已保存: {geo.width()}x{geo.height()} at ({geo.x()},{geo.y()}) screen={screen_name}")
+        except Exception as e:
+            self.logger.warning(f"保存窗口几何信息失败: {e}")
+
+    def _restore_window_geometry(self) -> bool:
+        """从应用配置恢复窗口位置和大小
+
+        Returns:
+            True 表示恢复成功，False 表示恢复失败或未启用
+        """
+        try:
+            app_config = get_app_config()
+            if not app_config.remember_window_geometry:
+                return False
+
+            geo = app_config.window_geometry
+            if not geo or not isinstance(geo, dict):
+                return False
+
+            saved_x = geo.get("x")
+            saved_y = geo.get("y")
+            saved_w = geo.get("width")
+            saved_h = geo.get("height")
+            if saved_w is None or saved_h is None:
+                return False
+
+            # 收集所有可用屏幕的联合区域
+            screens = QApplication.screens()
+            if not screens:
+                return False
+
+            # 计算目标位置所在的屏幕
+            target_screen = None
+            if saved_x is not None and saved_y is not None:
+                from PyQt6.QtCore import QPoint as QP
+                target_point = QP(saved_x + saved_w // 2, saved_y + saved_h // 2)
+                target_screen = QApplication.screenAt(target_point)
+
+            # 如果目标位置不在任何屏幕上，回退到主屏幕
+            if target_screen is None:
+                target_screen = QApplication.primaryScreen()
+
+            available = target_screen.availableGeometry()
+
+            # 如果保存的大小超过当前屏幕，使用默认大小
+            if saved_w > available.width() or saved_h > available.height():
+                self.logger.info(f"保存的窗口大小 {saved_w}x{saved_h} 超过当前屏幕 {available.width()}x{available.height()}，使用默认大小")
+                return False
+
+            self.resize(saved_w, saved_h)
+
+            # 恢复位置：确保窗口至少有一部分在可见区域内
+            if saved_x is not None and saved_y is not None:
+                # 窗口至少 100px 在屏幕可见区域内
+                clamped_x = max(available.x() - saved_w + 100, min(saved_x, available.right() - 100))
+                clamped_y = max(available.y(), min(saved_y, available.bottom() - 100))
+                self.move(clamped_x, clamped_y)
+            else:
+                # 没有保存位置信息，居中显示
+                x = available.x() + (available.width() - saved_w) // 2
+                y = available.y() + (available.height() - saved_h) // 2
+                self.move(x, y)
+
+            self.logger.info(f"窗口几何信息已恢复: {saved_w}x{saved_h} at ({self.x()},{self.y()})")
+            return True
+
+        except Exception as e:
+            self.logger.warning(f"恢复窗口几何信息失败: {e}")
+            return False
+
     # ===== 面板折叠控制 =====
 
     def _toggle_sidebar(self):
@@ -5606,6 +5695,9 @@ class ImageClassifier(QMainWindow):
         """程序关闭前的清理和保存（简化版）"""
         try:
             self.logger.info("程序正在关闭，开始清理...")
+
+            # 保存窗口位置和大小
+            self._save_window_geometry()
 
             # 停止定时器
             if hasattr(self, 'ui_update_timer'):
