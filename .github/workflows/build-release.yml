@@ -42,8 +42,18 @@ jobs:
         shell: pwsh
         run: |
           python -c "import ssl; print('SSL OK:', ssl.OPENSSL_VERSION)"
-          python -c "import _ssl; print('_ssl module path:', _ssl.__file__)"
-          python -c "import os, ssl; d=os.path.dirname(ssl.__file__); print('ssl dir:', d); [print(' ', f) for f in os.listdir(d) if 'ssl' in f.lower() or 'crypto' in f.lower() or f.endswith('.pyd')]"
+          python -c "import _ssl; print('_ssl.pyd:', _ssl.__file__)"
+          # 查找 OpenSSL DLL 实际位置
+          python -c "
+          import sys, os
+          root = os.path.dirname(sys.executable)
+          dirs = [root, os.path.join(root, 'DLLs'), os.path.join(root, 'Library', 'bin')]
+          for d in dirs:
+              if not os.path.isdir(d): continue
+              for f in os.listdir(d):
+                  if ('libssl' in f.lower() or 'libcrypto' in f.lower()) and f.endswith('.dll'):
+                      print(f'Found: {os.path.join(d, f)}')
+          "
 
       - name: Build executable
         shell: pwsh

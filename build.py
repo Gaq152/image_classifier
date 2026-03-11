@@ -145,7 +145,6 @@ def build_executable():
         '--hidden-import', 'psutil',
         '--hidden-import', 'ssl',  # HTTPS 请求必需
         '--hidden-import', '_ssl',  # ssl 底层 C 扩展
-        '--collect-all', 'ssl',  # 确保 ssl 的 DLL 也被收集（GitHub Actions 环境需要）
         
         # ========= 优化选项 =========
         '--optimize', '2',  # Python字节码优化
@@ -168,7 +167,30 @@ def build_executable():
         
         'run.py'  # 入口文件
     ]
-    
+
+    # ========= 自动查找 OpenSSL DLL（GitHub Actions 等非标准环境需要）=========
+    _ssl_dlls_found = []
+    _python_root = os.path.dirname(sys.executable)
+    _search_dirs = [
+        _python_root,
+        os.path.join(_python_root, 'DLLs'),
+        os.path.join(_python_root, 'Library', 'bin'),
+    ]
+    for _dir in _search_dirs:
+        if not os.path.isdir(_dir):
+            continue
+        for _f in os.listdir(_dir):
+            _fl = _f.lower()
+            if ('libssl' in _fl or 'libcrypto' in _fl) and _fl.endswith('.dll'):
+                _full = os.path.join(_dir, _f)
+                cmd.insert(-1, '--add-binary')
+                cmd.insert(-1, f'{_full};.')
+                _ssl_dlls_found.append(_f)
+    if _ssl_dlls_found:
+        print(f"✓ 发现 OpenSSL DLL: {', '.join(_ssl_dlls_found)}")
+    else:
+        print("⚠ 未找到 OpenSSL DLL，HTTPS 功能可能不可用")
+
     print(f"执行命令: {' '.join(cmd[:10])}... (命令过长，已截断)")
     print("注意: 使用精简依赖配置以减小文件体积")
     
