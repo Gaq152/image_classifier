@@ -77,7 +77,7 @@ class CategoryPanel(QWidget):
         self.category_scroll = QScrollArea()
         self.category_scroll.setObjectName("category_list")
         self.category_scroll.setWidgetResizable(True)
-        self.category_scroll.setMinimumHeight(150)
+        self.category_scroll.setMinimumHeight(80)
         self.category_scroll.setStyleSheet("""
             QScrollArea {
                 border: 1px solid #FFB74D;

@@ -769,8 +769,21 @@ class ImageClassifier(QMainWindow):
         """初始化美化的用户界面"""
         try:
             self.setWindowTitle(f"图像分类工具 v{self.version}")
-            # 设定更大的最小窗口大小，确保所有UI组件完整显示
-            self.setMinimumSize(1400, 900)
+            # 降低最小窗口尺寸，兼容小屏幕笔记本（如1366×768）
+            self.setMinimumSize(960, 540)
+
+            # 根据屏幕分辨率自适应设置初始窗口大小
+            screen = QApplication.primaryScreen()
+            if screen:
+                available = screen.availableGeometry()
+                # 初始窗口大小为可用屏幕的 85%，但不超过 1400×900
+                init_width = min(int(available.width() * 0.85), 1400)
+                init_height = min(int(available.height() * 0.85), 900)
+                self.resize(init_width, init_height)
+                # 居中显示
+                x = available.x() + (available.width() - init_width) // 2
+                y = available.y() + (available.height() - init_height) // 2
+                self.move(x, y)
             
             # 设置应用程序图标
             try:
@@ -794,18 +807,34 @@ class ImageClassifier(QMainWindow):
             central_widget.setObjectName("central_widget")  # 教程系统需要
             self.setCentralWidget(central_widget)
             
-            # 创建主要布局
-            main_layout = QHBoxLayout(central_widget)
-            main_layout.setContentsMargins(5, 5, 5, 5)
-            main_layout.setSpacing(5)
-            
+            # 创建外层垂直布局（用于工具栏展开条 + 主内容区）
+            outer_layout = QVBoxLayout(central_widget)
+            outer_layout.setContentsMargins(5, 5, 5, 5)
+            outer_layout.setSpacing(0)
+
+            # 工具栏展开条（初始隐藏，工具栏折叠后显示）
+            self._toolbar_expand_bar = QPushButton("⋯ 展开工具栏")
+            self._toolbar_expand_bar.setObjectName("toolbar_expand_bar")
+            self._toolbar_expand_bar.setFixedHeight(20)
+            self._toolbar_expand_bar.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._toolbar_expand_bar.setToolTip("点击展开工具栏 (Ctrl+T)")
+            self._toolbar_expand_bar.clicked.connect(self._toggle_toolbar)
+            self._toolbar_expand_bar.hide()
+            outer_layout.addWidget(self._toolbar_expand_bar)
+
+            # 主内容区
+            content_layout = QHBoxLayout()
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            content_layout.setSpacing(5)
+            outer_layout.addLayout(content_layout, 1)
+
             # 创建分割器
-            splitter = QSplitter(Qt.Orientation.Horizontal)
-            main_layout.addWidget(splitter)
-            
+            self.splitter = QSplitter(Qt.Orientation.Horizontal)
+            content_layout.addWidget(self.splitter)
+
             # 创建左侧面板（图片显示） - 使用ImageViewPanel
             self.image_view_panel = ImageViewPanel(self)
-            splitter.addWidget(self.image_view_panel)
+            self.splitter.addWidget(self.image_view_panel)
 
             # 连接ImageViewPanel信号
             self.image_view_panel.remove_requested.connect(self.move_to_remove)
@@ -813,12 +842,15 @@ class ImageClassifier(QMainWindow):
             # 获取image_label引用（保持向后兼容）
             self.image_label = self.image_view_panel.get_image_label()
             self.image_scroll_area = self.image_view_panel.image_scroll_area
-            
+
             # 创建右侧面板（控制区域）
-            self.create_right_panel(splitter)
-            
-            # 设置分割器比例
-            splitter.setSizes([800, 400])
+            self.create_right_panel(self.splitter)
+
+            # 设置分割器比例，允许右侧面板折叠
+            self.splitter.setSizes([800, 400])
+            self.splitter.setCollapsible(0, False)  # 左侧不可折叠
+            self.splitter.setCollapsible(1, True)    # 右侧可拖拽折叠
+            self._saved_splitter_sizes = None  # 记录折叠前的分割比例
             
             # 创建工具栏
             self.create_toolbar()
@@ -841,18 +873,18 @@ class ImageClassifier(QMainWindow):
 
     def create_right_panel(self, parent):
         """创建简洁的右侧控制面板"""
-        right_widget = QWidget()
-        right_widget.setObjectName("right_panel")  # 设置对象名用于精确样式选择
-        right_widget.setMaximumWidth(380)
-        right_widget.setMinimumWidth(300)
-        right_widget.setStyleSheet("""
+        self.right_widget = QWidget()
+        self.right_widget.setObjectName("right_panel")  # 设置对象名用于精确样式选择
+        self.right_widget.setMaximumWidth(380)
+        self.right_widget.setMinimumWidth(220)
+        self.right_widget.setStyleSheet("""
             QWidget#right_panel {
                 background-color: #FFFFFF;
                 border: 1px solid #DEE2E6;
                 border-radius: 6px;
             }
         """)
-        right_layout = QVBoxLayout(right_widget)
+        right_layout = QVBoxLayout(self.right_widget)
         right_layout.setContentsMargins(6, 6, 6, 6)
         right_layout.setSpacing(6)
         
@@ -877,7 +909,7 @@ class ImageClassifier(QMainWindow):
         # 保留statistics_panel引用（向后兼容）
         self.statistics_panel = self.info_panel.statistics_panel
 
-        parent.addWidget(right_widget)
+        parent.addWidget(self.right_widget)
     
     def create_image_list_area(self, layout):
         """创建简洁的图片列表区域"""
@@ -992,7 +1024,7 @@ class ImageClassifier(QMainWindow):
         # 使用 NoSearchListView 禁用键盘搜索，避免与分类快捷键冲突
         self.image_list = NoSearchListView()
         self.image_list.setObjectName("image_list")  # 设置对象名以便教程系统找到
-        self.image_list.setMinimumHeight(120)  # 设置最小高度
+        self.image_list.setMinimumHeight(60)  # 降低最小高度，兼容小窗口
 
         # Initialize empty Model and Delegate
         self.image_list_model = ImageListModel([], {}, set(), set(), self)
@@ -1081,7 +1113,7 @@ class ImageClassifier(QMainWindow):
         layout.addWidget(self.image_list, 1)  # 设置拉伸权重1
 
     def create_toolbar_button(self, text: str, object_name: str, tooltip: str,
-                             click_handler=None, size=(40, 40)) -> QPushButton:
+                             click_handler=None, size=(32, 32)) -> QPushButton:
         """创建标准化的工具栏按钮
 
         Args:
@@ -1089,7 +1121,7 @@ class ImageClassifier(QMainWindow):
             object_name: 按钮对象名称（用于样式）
             tooltip: 提示文本
             click_handler: 点击事件处理函数（可选）
-            size: 按钮尺寸，默认(40, 40)
+            size: 按钮尺寸，默认(32, 32)
 
         Returns:
             QPushButton: 配置好的按钮实例
@@ -1111,21 +1143,21 @@ class ImageClassifier(QMainWindow):
 
     def create_toolbar(self):
         """创建工具栏"""
-        toolbar = QToolBar()
-        toolbar.setObjectName("toolbar")  # 设置对象名以便教程系统找到
-        toolbar.setMovable(False)
-        toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)  # 禁用右键菜单
+        self.toolbar = QToolBar()
+        self.toolbar.setObjectName("toolbar")  # 设置对象名以便教程系统找到
+        self.toolbar.setMovable(False)
+        self.toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)  # 禁用右键菜单
         # 应用工具栏样式
-        toolbar.setStyleSheet(ToolbarStyles.get_main_toolbar_style())
-        self.addToolBar(toolbar)
+        self.toolbar.setStyleSheet(ToolbarStyles.get_main_toolbar_style())
+        self.addToolBar(self.toolbar)
         
         # 打开目录
         open_action = QAction('📁 打开目录', self)
         open_action.triggered.connect(self.open_directory)
         open_action.setToolTip('选择包含图片的目录')
-        toolbar.addAction(open_action)
+        self.toolbar.addAction(open_action)
         # 获取toolbar中对应的widget并设置objectName
-        self.open_directory_toolbar_button = toolbar.widgetForAction(open_action)
+        self.open_directory_toolbar_button = self.toolbar.widgetForAction(open_action)
         if self.open_directory_toolbar_button:
             self.open_directory_toolbar_button.setObjectName('open_directory_toolbar_button')
 
@@ -1133,30 +1165,30 @@ class ImageClassifier(QMainWindow):
         add_category_action = QAction('➕ 添加类别', self)
         add_category_action.triggered.connect(self.add_category)
         add_category_action.setToolTip('批量添加分类类别')
-        toolbar.addAction(add_category_action)
+        self.toolbar.addAction(add_category_action)
         # 获取toolbar中对应的widget并设置objectName
-        self.add_category_toolbar_button = toolbar.widgetForAction(add_category_action)
+        self.add_category_toolbar_button = self.toolbar.widgetForAction(add_category_action)
         if self.add_category_toolbar_button:
             self.add_category_toolbar_button.setObjectName('add_category_toolbar_button')
 
         # 添加弹性空间 - 推送右侧按钮到最右边
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(spacer)
+        self.toolbar.addWidget(spacer)
 
         # 模式选择
-        self.create_mode_button(toolbar)
+        self.create_mode_button(self.toolbar)
 
         # 分类模式按钮（单分类/多分类）
-        self.create_category_mode_button(toolbar)
+        self.create_category_mode_button(self.toolbar)
 
-        toolbar.addSeparator()
+        self.toolbar.addSeparator()
 
         # 刷新按钮 - 使用统一样式
         self.refresh_button = self.create_toolbar_button('↻', 'refresh_button',
                                                    '刷新类别目录，同步外部变化 (F5)',
                                                    self.refresh_categories)
-        toolbar.addWidget(self.refresh_button)
+        self.toolbar.addWidget(self.refresh_button)
 
         # 从应用配置中读取主题设置
         current_theme = "light"
@@ -1174,7 +1206,7 @@ class ImageClassifier(QMainWindow):
         self.theme_button = self.create_toolbar_button(theme_icon, 'theme_button',
                                                       theme_tooltip,
                                                       self.toggle_theme)
-        toolbar.addWidget(self.theme_button)
+        self.toolbar.addWidget(self.theme_button)
 
         # 安装事件过滤器，使禁用的按钮也能响应点击
         self.theme_button_filter = DisabledButtonEventFilter(self)
@@ -1194,13 +1226,27 @@ class ImageClassifier(QMainWindow):
         self.settings_button = self.create_toolbar_button('⚙', 'settings_button',
                                                      '打开设置',
                                                      self.show_settings_dialog)
-        toolbar.addWidget(self.settings_button)
+        self.toolbar.addWidget(self.settings_button)
 
         # 帮助按钮 - 使用统一样式
         self.help_button = self.create_toolbar_button('?', 'help_button',
                                                 '查看使用指南和快捷键',
                                                 self.show_help_dialog)
-        toolbar.addWidget(self.help_button)
+        self.toolbar.addWidget(self.help_button)
+
+        self.toolbar.addSeparator()
+
+        # 侧栏折叠按钮
+        self._sidebar_toggle_btn = self.create_toolbar_button('»', 'sidebar_toggle_button',
+                                                              '收起侧栏 (Ctrl+B)',
+                                                              self._toggle_sidebar)
+        self.toolbar.addWidget(self._sidebar_toggle_btn)
+
+        # 工具栏折叠按钮
+        self._toolbar_collapse_btn = self.create_toolbar_button('△', 'toolbar_collapse_button',
+                                                                '收起工具栏 (Ctrl+T)',
+                                                                self._toggle_toolbar)
+        self.toolbar.addWidget(self._toolbar_collapse_btn)
     
     def create_mode_button(self, toolbar):
         """创建图标化的模式选择按钮 - 直接点击切换"""
@@ -1264,6 +1310,8 @@ class ImageClassifier(QMainWindow):
                 'Ctrl+=': lambda: self.image_label.zoom_in() if hasattr(self, 'image_label') else None,
                 'Ctrl+-': lambda: self.image_label.zoom_out() if hasattr(self, 'image_label') else None,
                 'Ctrl+0': lambda: self.image_label.reset_zoom() if hasattr(self, 'image_label') else None,
+                'Ctrl+B': self._toggle_sidebar,
+                'Ctrl+T': self._toggle_toolbar,
             }
 
             # 创建基本快捷键
@@ -1465,6 +1513,33 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"系统信息输出失败: {e}")
     
+    # ===== 面板折叠控制 =====
+
+    def _toggle_sidebar(self):
+        """切换右侧面板的显示/隐藏"""
+        if self.right_widget.isVisible():
+            # 记录当前分割比例，然后隐藏
+            self._saved_splitter_sizes = self.splitter.sizes()
+            self.right_widget.hide()
+            self._sidebar_toggle_btn.setText('«')
+            self._sidebar_toggle_btn.setToolTip('展开侧栏 (Ctrl+B)')
+        else:
+            # 恢复显示和分割比例
+            self.right_widget.show()
+            if self._saved_splitter_sizes:
+                self.splitter.setSizes(self._saved_splitter_sizes)
+            self._sidebar_toggle_btn.setText('»')
+            self._sidebar_toggle_btn.setToolTip('收起侧栏 (Ctrl+B)')
+
+    def _toggle_toolbar(self):
+        """切换工具栏的显示/隐藏"""
+        if self.toolbar.isVisible():
+            self.toolbar.hide()
+            self._toolbar_expand_bar.show()
+        else:
+            self.toolbar.show()
+            self._toolbar_expand_bar.hide()
+
     # ===== 响应式布局处理方法 =====
     
     def resizeEvent(self, event):
@@ -4754,6 +4829,23 @@ class ImageClassifier(QMainWindow):
             # 更新CategoryPanel主题
             if hasattr(self, 'category_panel'):
                 self.category_panel.apply_theme()
+
+            # 更新工具栏展开条样式
+            if hasattr(self, '_toolbar_expand_bar'):
+                self._toolbar_expand_bar.setStyleSheet(f"""
+                    QPushButton#toolbar_expand_bar {{
+                        background-color: {c.BACKGROUND_SECONDARY};
+                        color: {c.TEXT_SECONDARY};
+                        border: 1px solid {c.BORDER_LIGHT};
+                        border-radius: 3px;
+                        font-size: 11px;
+                        padding: 0px;
+                    }}
+                    QPushButton#toolbar_expand_bar:hover {{
+                        background-color: {c.BACKGROUND_HOVER};
+                        color: {c.PRIMARY};
+                    }}
+                """)
 
             # 更新ImageViewPanel主题
             if hasattr(self, 'image_view_panel'):

@@ -19,8 +19,8 @@ class ToolbarStyles:
                 background-color: {default_theme.colors.BACKGROUND_PRIMARY};
                 border: {default_theme.sizes.BORDER_THIN} solid {default_theme.colors.BORDER_LIGHT};
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
-                spacing: {default_theme.sizes.SPACING_SM};
-                padding: {default_theme.sizes.SPACING_SM};
+                spacing: {default_theme.sizes.SPACING_XS};
+                padding: 3px;
                 margin: 2px;
             }}
             /* QAction 按钮样式 - 现代化蓝色主题 */
@@ -30,13 +30,13 @@ class ToolbarStyles:
                 color: {default_theme.colors.TEXT_ON_PRIMARY};
                 border: none;
                 border-radius: {default_theme.sizes.RADIUS_LARGE};
-                padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_LG};
-                margin: {default_theme.sizes.SPACING_XS} 2px;
+                padding: 2px 10px;
+                margin: 2px 2px;
                 font-size: {default_theme.sizes.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-width: 90px;
-                min-height: 30px;
-                max-height: 30px;
+                min-width: 80px;
+                min-height: 24px;
+                max-height: 24px;
             }}
             QToolBar QToolButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -47,25 +47,25 @@ class ToolbarStyles:
                            stop:0 #1565C0, stop:1 #0D47A1);
             }}
             /* 普通QPushButton样式 - 不影响模式按钮，与QToolButton保持一致 */
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]) {{
+            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):not([objectName="sidebar_toggle_button"]):not([objectName="toolbar_collapse_button"]) {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                            stop:0 #42A5F5, stop:1 #2196F3);
                 color: {default_theme.colors.TEXT_ON_PRIMARY};
                 border: none;
                 border-radius: {default_theme.sizes.RADIUS_LARGE};
-                padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_LG};
-                margin: {default_theme.sizes.SPACING_XS} 2px;
+                padding: 2px 10px;
+                margin: 2px 2px;
                 font-size: {default_theme.sizes.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-width: 90px;
-                min-height: 30px;
-                max-height: 30px;
+                min-width: 80px;
+                min-height: 24px;
+                max-height: 24px;
             }}
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):hover {{
+            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):not([objectName="sidebar_toggle_button"]):not([objectName="toolbar_collapse_button"]):hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                            stop:0 #1E88E5, stop:1 #1976D2);
             }}
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):pressed {{
+            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):not([objectName="sidebar_toggle_button"]):not([objectName="toolbar_collapse_button"]):pressed {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                            stop:0 #1565C0, stop:1 #0D47A1);
             }}
