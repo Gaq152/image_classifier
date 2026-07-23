@@ -50,6 +50,7 @@ class DownloadControllerStub(QObject):
 
     progress_changed = pyqtSignal(int, int)
     state_changed = pyqtSignal(str, str)
+    download_completed = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -64,7 +65,17 @@ class DownloadControllerStub(QObject):
 
     @property
     def is_active(self):
-        return self.state in {"downloading", "verifying", "cancelling"}
+        return self.state in {
+            "downloading",
+            "retrying",
+            "verifying",
+            "pausing",
+            "cancelling",
+        }
+
+    @property
+    def has_download_task(self):
+        return self.is_active or self.state == "paused"
 
     def show_progress_dialog(self, _parent):
         self.show_progress_dialog_calls += 1
@@ -150,6 +161,28 @@ def test_status_bar_exposes_background_update_progress(qapp):
         assert window.update_download_button.isVisibleTo(window)
         assert window.update_download_button.text() == "更新 25%"
 
+        window.update_download_button.click()
+        assert controller.show_progress_dialog_calls == 1
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_status_bar_exposes_paused_download_and_progress(qapp):
+    """暂停下载后右下角应显示断点进度，并可重新打开进度窗口。"""
+    window = ToolbarHarness()
+    controller = DownloadControllerStub()
+    controller.state = "paused"
+    controller.message = "更新下载已暂停"
+    controller.downloaded = 25
+    controller.total = 100
+    window.update_download_controller = controller
+    try:
+        window.create_status_bar()
+        window._connect_update_download_controller()
+
+        assert window._main_update_state == "paused"
+        assert window.update_download_button.text() == "继续更新 25%"
         window.update_download_button.click()
         assert controller.show_progress_dialog_calls == 1
     finally:
@@ -266,8 +299,8 @@ def test_manual_check_without_update_restores_idle_and_keeps_toast(qapp):
         window.deleteLater()
 
 
-def test_ready_update_is_restored_and_clicks_restart_confirmation(qapp):
-    """应用启动时控制器已有完整包，应直接显示重启更新入口。"""
+def test_ready_update_reopens_themed_progress_dialog(qapp):
+    """完整包入口应复用程序主题进度窗，不能打开原生消息框。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     controller.state = "ready"
@@ -279,9 +312,31 @@ def test_ready_update_is_restored_and_clicks_restart_confirmation(qapp):
 
         assert window._main_update_state == "ready"
         assert window.update_download_button.text() == "重启更新"
-        with patch.object(window, "_show_restart_update_confirmation") as show:
-            window.update_download_button.click()
-        show.assert_called_once_with()
+        window.update_download_button.click()
+        assert controller.show_progress_dialog_calls == 1
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_download_completion_uses_status_entry_and_toast(qapp):
+    """完成下载后提示右下角入口，入口继续复用主题进度窗。"""
+    window = ToolbarHarness()
+    controller = DownloadControllerStub()
+    window.update_download_controller = controller
+    try:
+        window.create_status_bar()
+        window._connect_update_download_controller()
+        with patch("ui.main_window.toast_success") as toast:
+            controller.state = "ready"
+            controller.state_changed.emit("ready", "更新 v9.9.9 已下载")
+            controller.download_completed.emit({"version": "9.9.9"})
+
+        assert window.update_download_button.text() == "重启更新"
+        toast.assert_called_once_with(
+            window,
+            "更新 v9.9.9 已下载，可点击右下角“重启更新”完成安装",
+        )
     finally:
         window.close()
         window.deleteLater()

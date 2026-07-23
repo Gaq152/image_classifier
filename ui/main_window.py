@@ -5185,6 +5185,7 @@ class ImageClassifier(QMainWindow):
         controller = self.update_download_controller
         controller.progress_changed.connect(self._on_update_download_progress)
         controller.state_changed.connect(self._on_update_download_state)
+        controller.download_completed.connect(self._on_update_download_completed)
         self._on_update_download_state(controller.state, controller.message)
         if controller.downloaded or controller.total:
             self._on_update_download_progress(
@@ -5192,20 +5193,47 @@ class ImageClassifier(QMainWindow):
                 controller.total,
             )
 
+    def _on_update_download_completed(self, metadata: dict):
+        """下载完成后提示用户通过统一入口决定何时重启。"""
+        version = str(metadata.get("version", "")).strip()
+        message = (
+            f"更新 v{version} 已下载，可点击右下角“重启更新”完成安装"
+            if version
+            else "更新包已下载，可点击右下角“重启更新”完成安装"
+        )
+        toast_success(
+            self,
+            message,
+        )
+
     def _on_update_download_progress(self, done: int, total: int):
         """更新状态栏中的后台下载进度入口。"""
         if not hasattr(self, 'update_download_button'):
             return
-        self._main_update_state = "verifying" if (
-            self.update_download_controller.state == "verifying"
-        ) else "downloading"
+        state = self.update_download_controller.state
+        if state == "ready":
+            self._set_main_update_state(
+                "ready",
+                tooltip=self.update_download_controller.message,
+            )
+            return
+        self._main_update_state = state
         if total > 0:
             percentage = min(100, int(done * 100 / total))
-            prefix = "校验" if self.update_download_controller.state == "verifying" else "更新"
+            if state == "verifying":
+                prefix = "校验"
+            elif state == "paused":
+                prefix = "继续更新"
+            elif state == "retrying":
+                prefix = "重试更新"
+            else:
+                prefix = "更新"
             self.update_download_button.setText(f"{prefix} {percentage}%")
         else:
-            self.update_download_button.setText("更新下载中")
-        self._apply_update_button_style("downloading")
+            self.update_download_button.setText(
+                "更新已暂停" if state == "paused" else "更新下载中"
+            )
+        self._apply_update_button_style(state)
 
     def _on_update_download_state(self, state: str, message: str):
         """把下载控制器状态映射到右下角统一更新入口。"""
@@ -5214,16 +5242,33 @@ class ImageClassifier(QMainWindow):
         if state == "ready":
             self._clear_pending_update()
             self._set_main_update_state("ready", tooltip=message)
-        elif state in {"downloading", "verifying", "cancelling"}:
+        elif state in {
+            "downloading",
+            "retrying",
+            "verifying",
+            "pausing",
+            "cancelling",
+        }:
             self._main_update_state = state
             self.update_download_button.setToolTip(message or "点击查看下载进度")
             if state == "verifying":
                 self.update_download_button.setText("正在校验更新")
+            elif state == "retrying":
+                self.update_download_button.setText("正在重试更新")
+            elif state == "pausing":
+                self.update_download_button.setText("正在暂停更新")
             elif state == "cancelling":
                 self.update_download_button.setText("正在取消下载")
             else:
                 self.update_download_button.setText("更新下载中")
-            self._apply_update_button_style("downloading")
+            self._apply_update_button_style(state)
+        elif state == "paused":
+            self._main_update_state = "paused"
+            self.update_download_button.setText("继续更新")
+            self.update_download_button.setToolTip(
+                message or "更新已暂停，点击查看并继续下载"
+            )
+            self._apply_update_button_style("paused")
         elif state == "failed":
             self._set_main_update_state("failed", tooltip=message)
         elif state == "cancelled" and self._pending_update_manifest:
@@ -5276,7 +5321,11 @@ class ImageClassifier(QMainWindow):
             "checking": ("#0D6EFD", "#0B5ED7"),
             "available": ("#F59E0B", "#D97706"),
             "downloading": ("#0D6EFD", "#0B5ED7"),
+            "retrying": ("#0D6EFD", "#0B5ED7"),
             "verifying": ("#0D6EFD", "#0B5ED7"),
+            "pausing": ("#6F42C1", "#59359A"),
+            "paused": ("#6F42C1", "#59359A"),
+            "cancelling": ("#6C757D", "#5C636A"),
             "ready": ("#198754", "#157347"),
             "failed": ("#DC3545", "#BB2D3B"),
         }
@@ -5310,10 +5359,14 @@ class ImageClassifier(QMainWindow):
         if self.update_download_controller.is_active:
             self.update_download_controller.show_progress_dialog(self)
             return
+        if self.update_download_controller.state == "paused":
+            self.update_download_controller.show_progress_dialog(self)
+            return
         if self._main_update_state == "available":
             self._show_pending_update_dialog()
         elif self._main_update_state == "ready":
-            self._show_restart_update_confirmation()
+            # 下载完成时和后续从状态栏进入时复用同一个主题进度窗口。
+            self.update_download_controller.show_progress_dialog(self)
         elif self._main_update_state == "failed":
             self.update_download_controller.show_progress_dialog(self)
         elif self._main_update_state == "checking":
@@ -5338,19 +5391,6 @@ class ImageClassifier(QMainWindow):
             parent=self,
         )
         update_dialog.exec()
-
-    def _show_restart_update_confirmation(self):
-        """用户点击重启更新提醒后进行二次确认。"""
-        box = QMessageBox(self)
-        box.setWindowTitle("更新已下载")
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setText("更新包已下载并校验完成，是否现在重启进行更新？")
-        restart_btn = box.addButton("重启更新", QMessageBox.ButtonRole.YesRole)
-        later_btn = box.addButton("稍后", QMessageBox.ButtonRole.NoRole)
-        box.setDefaultButton(later_btn)
-        box.exec()
-        if box.clickedButton() == restart_btn:
-            self.update_download_controller.install_ready_update()
 
     def _schedule_auto_update_check(self):
         """根据配置调度一次自动检查更新（应用启动后几秒执行）"""
@@ -5445,6 +5485,14 @@ class ImageClassifier(QMainWindow):
 
         if self.update_download_controller.is_active:
             self.logger.debug("更新包正在下载，跳过重复检查")
+            if manual:
+                self.update_download_controller.show_progress_dialog(self)
+            return
+        if self.update_download_controller.state == "paused":
+            self._on_update_download_state(
+                "paused",
+                self.update_download_controller.message,
+            )
             if manual:
                 self.update_download_controller.show_progress_dialog(self)
             return

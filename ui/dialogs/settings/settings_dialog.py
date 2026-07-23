@@ -1830,7 +1830,7 @@ class SettingsDialog(QDialog):
         """检查更新"""
         try:
 
-            if self.update_download_controller.is_active:
+            if self.update_download_controller.has_download_task:
                 self.update_download_controller.show_progress_dialog(self.window())
                 return
 

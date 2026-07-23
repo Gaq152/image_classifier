@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import time
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 from urllib.error import HTTPError, URLError
@@ -30,10 +31,15 @@ from utils.paths import get_update_dir
 # Public GitHub Releases 默认无需令牌，保留可选令牌能力用于私有源
 BUILTIN_UPDATE_TOKEN = ""
 READY_UPDATE_METADATA = "update_ready.json"
+PENDING_UPDATE_METADATA = "update_pending.json"
 
 
 class DownloadCancelled(RuntimeError):
     """用户主动取消更新下载。"""
+
+
+class DownloadRetryExhausted(RuntimeError):
+    """网络异常重试耗尽，但已下载内容仍可用于后续续传。"""
 
 
 def resolve_token(preferred: Optional[str] = None) -> Optional[str]:
@@ -148,42 +154,250 @@ def fetch_manifest(url: str, token: Optional[str] = None, timeout: int = 8, retr
     raise RuntimeError(f"拉取manifest失败: {last_error}")
 
 
-def download_with_progress(url: str, dest: Path, token: Optional[str] = None,
-                           progress_cb: Optional[Callable[[int, Optional[int]], None]] = None,
-                           timeout: int = 20, chunk_size: int = 1024 * 256,
-                           cancel_cb: Optional[Callable[[], bool]] = None,
-                           response_cb: Optional[Callable[[Any], None]] = None) -> None:
-    """下载到指定路径，支持协作式取消及由调用方关闭网络响应。"""
+def _wait_for_download_retry(
+    seconds: float,
+    cancel_cb: Optional[Callable[[], bool]],
+) -> None:
+    """可被暂停或取消打断的退避等待。"""
+    deadline = time.monotonic() + max(0.0, seconds)
+    while time.monotonic() < deadline:
+        if cancel_cb and cancel_cb():
+            raise DownloadCancelled("更新下载已停止")
+        time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+
+
+def _parse_content_range_total(value: Optional[str]) -> Optional[int]:
+    """从 Content-Range 中提取完整文件大小。"""
+    if not value or "/" not in value:
+        return None
+    total_text = value.rsplit("/", 1)[-1].strip()
+    if not total_text.isdigit():
+        return None
+    return int(total_text)
+
+
+def download_with_progress(
+    url: str,
+    dest: Path,
+    token: Optional[str] = None,
+    progress_cb: Optional[Callable[[int, Optional[int]], None]] = None,
+    timeout: int = 20,
+    chunk_size: int = 1024 * 256,
+    cancel_cb: Optional[Callable[[], bool]] = None,
+    response_cb: Optional[Callable[[Any], None]] = None,
+    expected_size: int = 0,
+    retries: int = 3,
+    retry_delay: float = 0.5,
+    retry_cb: Optional[Callable[[int, int, str], None]] = None,
+) -> None:
+    """支持 Range 续传和网络异常自动重试地下载到临时文件。"""
     token = resolve_token(token)
-    req = _build_request(url, token)
-    response = None
-    try:
-        response = urlopen(req, timeout=timeout)
-        if response_cb:
-            response_cb(response)
-        with response, open(dest, 'wb') as f:
-            total_header = response.headers.get('Content-Length')
-            total = int(total_header) if total_header else None
-            downloaded = 0
-            while True:
-                if cancel_cb and cancel_cb():
-                    raise DownloadCancelled("更新下载已取消")
-                chunk = response.read(chunk_size)
-                if not chunk:
-                    break
-                if cancel_cb and cancel_cb():
-                    raise DownloadCancelled("更新下载已取消")
-                f.write(chunk)
-                downloaded += len(chunk)
+    dest = Path(dest)
+    last_error = ""
+
+    for attempt in range(retries + 1):
+        if cancel_cb and cancel_cb():
+            raise DownloadCancelled("更新下载已停止")
+
+        existing_size = dest.stat().st_size if dest.is_file() else 0
+        if expected_size > 0 and existing_size == expected_size:
+            if progress_cb:
+                progress_cb(existing_size, expected_size)
+            return
+        if expected_size > 0 and existing_size > expected_size:
+            dest.unlink(missing_ok=True)
+            existing_size = 0
+
+        req = _build_request(url, token)
+        if existing_size > 0:
+            req.add_header("Range", f"bytes={existing_size}-")
+
+        response = None
+        try:
+            response = urlopen(req, timeout=timeout)
+            if response_cb:
+                response_cb(response)
+
+            status = getattr(response, "status", None)
+            if status is None:
+                try:
+                    status = response.getcode()
+                except Exception:
+                    status = 200
+            is_partial_response = existing_size > 0 and status == 206
+            mode = "ab" if is_partial_response else "wb"
+            downloaded = existing_size if is_partial_response else 0
+
+            content_length = response.headers.get("Content-Length")
+            response_size = int(content_length) if content_length else None
+            range_total = _parse_content_range_total(
+                response.headers.get("Content-Range")
+            )
+            total = expected_size or range_total
+            if not total and response_size is not None:
+                total = downloaded + response_size
+
+            with response, open(dest, mode) as file_obj:
                 if progress_cb:
                     progress_cb(downloaded, total)
-    finally:
-        if response_cb:
-            response_cb(None)
+                while True:
+                    if cancel_cb and cancel_cb():
+                        raise DownloadCancelled("更新下载已停止")
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    if cancel_cb and cancel_cb():
+                        raise DownloadCancelled("更新下载已停止")
+                    file_obj.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_cb:
+                        progress_cb(downloaded, total)
+
+            final_size = dest.stat().st_size if dest.is_file() else 0
+            required_size = expected_size or total or 0
+            if required_size > 0 and final_size != required_size:
+                raise DownloadRetryExhausted(
+                    f"连接提前结束：期望 {required_size} 字节，"
+                    f"实际 {final_size} 字节"
+                )
+            return
+        except DownloadCancelled:
+            raise
+        except HTTPError as exc:
+            if exc.code == 416 and existing_size > 0:
+                remote_size = _parse_content_range_total(
+                    exc.headers.get("Content-Range") if exc.headers else None
+                )
+                if (
+                    (expected_size > 0 and existing_size == expected_size)
+                    or (remote_size is not None and existing_size == remote_size)
+                ):
+                    if progress_cb:
+                        progress_cb(existing_size, expected_size or remote_size)
+                    return
+                dest.unlink(missing_ok=True)
+                last_error = "服务器拒绝续传，准备重新下载"
+            elif exc.code not in {408, 429, 500, 502, 503, 504}:
+                raise RuntimeError(f"下载失败: HTTP {exc.code}") from exc
+            else:
+                last_error = f"HTTP {exc.code}"
+        except (
+            URLError,
+            TimeoutError,
+            OSError,
+            HTTPException,
+            DownloadRetryExhausted,
+        ) as exc:
+            last_error = str(exc)
+        finally:
+            if response_cb:
+                response_cb(None)
+
+        if attempt >= retries:
+            raise DownloadRetryExhausted(last_error or "网络连接中断")
+        if retry_cb:
+            retry_cb(attempt + 1, retries, last_error or "网络连接中断")
+        _wait_for_download_retry(
+            retry_delay * (2 ** attempt),
+            cancel_cb,
+        )
 
 
 def _ready_metadata_path(update_dir: Optional[Path] = None) -> Path:
     return (update_dir or get_update_dir()) / READY_UPDATE_METADATA
+
+
+def _pending_metadata_path(update_dir: Optional[Path] = None) -> Path:
+    return (update_dir or get_update_dir()) / PENDING_UPDATE_METADATA
+
+
+def save_pending_update(
+    package_path: Path,
+    version: str,
+    manifest: Dict[str, Any],
+) -> Dict[str, Any]:
+    """原子记录未完成任务，使暂停或退出后的下载可以继续。"""
+    package_path = package_path.resolve()
+    update_dir = package_path.parent
+    update_dir.mkdir(parents=True, exist_ok=True)
+    safe_manifest = {
+        key: manifest.get(key)
+        for key in ("version", "url", "size_bytes", "sha256", "notes")
+        if key in manifest
+    }
+    metadata = {
+        "version": str(version),
+        "filename": package_path.name,
+        "manifest": safe_manifest,
+        "updated_at": int(time.time()),
+    }
+    metadata_path = _pending_metadata_path(update_dir)
+    temp_path = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
+    temp_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(temp_path, metadata_path)
+    return metadata
+
+
+def load_pending_update(
+    update_dir: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """读取可续传任务，并严格限制临时文件位于 update 目录。"""
+    update_dir = (update_dir or get_update_dir()).resolve()
+    metadata_path = _pending_metadata_path(update_dir)
+    if not metadata_path.is_file():
+        return None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        filename = str(metadata.get("filename", ""))
+        version = str(metadata.get("version", ""))
+        manifest = metadata.get("manifest")
+        if (
+            not filename
+            or Path(filename).name != filename
+            or not filename.lower().endswith(".exe")
+            or not version
+            or not isinstance(manifest, dict)
+            or not str(manifest.get("url", "")).strip()
+        ):
+            return None
+        package_path = (update_dir / filename).resolve()
+        partial_path = package_path.with_suffix(package_path.suffix + ".part")
+        if package_path.parent != update_dir or partial_path.parent != update_dir:
+            return None
+        expected_size = int(manifest.get("size_bytes", 0) or 0)
+        downloaded = partial_path.stat().st_size if partial_path.is_file() else 0
+        if expected_size > 0 and downloaded > expected_size:
+            return None
+        result = dict(metadata)
+        result["manifest"] = dict(manifest)
+        result["path"] = package_path
+        result["partial_path"] = partial_path
+        result["downloaded_bytes"] = downloaded
+        return result
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def discard_pending_update(
+    update_dir: Optional[Path] = None,
+    remove_partial: bool = True,
+) -> None:
+    """删除续传任务标记，并按需删除未完成下载。"""
+    update_dir = (update_dir or get_update_dir()).resolve()
+    pending = load_pending_update(update_dir)
+    if remove_partial and pending:
+        try:
+            pending["partial_path"].unlink(missing_ok=True)
+        except OSError:
+            pass
+    metadata_path = _pending_metadata_path(update_dir)
+    metadata_path.unlink(missing_ok=True)
+    metadata_path.with_suffix(metadata_path.suffix + ".tmp").unlink(
+        missing_ok=True
+    )
 
 
 def save_ready_update(
@@ -212,6 +426,7 @@ def save_ready_update(
         encoding="utf-8",
     )
     os.replace(temp_path, metadata_path)
+    discard_pending_update(update_dir)
     return metadata
 
 
@@ -266,17 +481,30 @@ def discard_ready_update(
 
 
 def cleanup_incomplete_updates(update_dir: Optional[Path] = None) -> None:
-    """清理中断下载和没有完成标记的安装包。"""
+    """清理孤立文件，但保留带任务标记的可续传临时包。"""
     update_dir = (update_dir or get_update_dir()).resolve()
     if not update_dir.exists():
         return
+    pending = load_pending_update(update_dir)
+    pending_path = pending.get("partial_path") if pending else None
     for partial in update_dir.glob("*.part"):
+        if pending_path is not None and partial.resolve() == pending_path:
+            continue
         try:
             partial.unlink(missing_ok=True)
         except OSError:
             pass
 
+    if pending is None:
+        metadata_path = _pending_metadata_path(update_dir)
+        metadata_path.unlink(missing_ok=True)
+        metadata_path.with_suffix(metadata_path.suffix + ".tmp").unlink(
+            missing_ok=True
+        )
+
     ready = load_ready_update(update_dir)
+    if ready is not None and pending is not None:
+        discard_pending_update(update_dir)
     ready_path = ready.get("path") if ready else None
     for package in update_dir.glob("ImageClassifier_v*.exe"):
         if ready_path is None or package.resolve() != ready_path:

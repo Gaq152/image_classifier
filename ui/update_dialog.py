@@ -274,6 +274,9 @@ class DownloadProgressDialog(QDialog):
         self.background_btn = QPushButton("后台下载")
         self.background_btn.clicked.connect(self.hide)
         button_layout.addWidget(self.background_btn)
+        self.pause_btn = QPushButton("暂停下载")
+        self.pause_btn.clicked.connect(self._handle_pause_action)
+        button_layout.addWidget(self.pause_btn)
         self.action_btn = QPushButton("取消下载")
         self.action_btn.clicked.connect(self._handle_action)
         button_layout.addWidget(self.action_btn)
@@ -333,6 +336,18 @@ class DownloadProgressDialog(QDialog):
             }}
             QPushButton:hover {{ background-color: {c.GRAY_600}; }}
         """)
+        self.pause_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.PRIMARY};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                min-width: 90px;
+            }}
+            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+            QPushButton:disabled {{ background-color: {c.GRAY_500}; }}
+        """)
         self.action_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {c.PRIMARY};
@@ -358,6 +373,14 @@ class DownloadProgressDialog(QDialog):
                 self.label.setText(
                     f"正在校验: {done_mb:.1f} MB / {total_mb:.1f} MB"
                 )
+            elif self.controller.state == "paused":
+                self.label.setText(
+                    f"下载已暂停: {done_mb:.1f} MB / {total_mb:.1f} MB"
+                )
+            elif self.controller.state == "retrying":
+                self.label.setText(
+                    f"网络波动，等待重试: {done_mb:.1f} MB / {total_mb:.1f} MB"
+                )
             else:
                 self.label.setText(
                     f"正在下载: {done_mb:.1f} MB / {total_mb:.1f} MB"
@@ -374,7 +397,7 @@ class DownloadProgressDialog(QDialog):
     def sync_from_controller(self):
         """根据应用级控制器恢复当前显示状态。"""
         self._on_state_changed(self.controller.state, self.controller.message)
-        if self.controller.is_active and (
+        if (self.controller.is_active or self.controller.state == "paused") and (
             self.controller.downloaded or self.controller.total
         ):
             self.update_progress(
@@ -388,25 +411,59 @@ class DownloadProgressDialog(QDialog):
             self.label.setText(message or "正在下载更新包...")
             self.background_btn.setText("后台下载")
             self.background_btn.show()
+            self.pause_btn.setText("暂停下载")
+            self.pause_btn.setEnabled(True)
+            self.pause_btn.show()
+            self.action_btn.setText("取消下载")
+            self.action_btn.setEnabled(True)
+        elif state == "retrying":
+            self.label.setText(message or "网络波动，正在重试下载...")
+            self.background_btn.setText("后台下载")
+            self.background_btn.show()
+            self.pause_btn.setText("暂停下载")
+            self.pause_btn.setEnabled(True)
+            self.pause_btn.show()
             self.action_btn.setText("取消下载")
             self.action_btn.setEnabled(True)
         elif state == "verifying":
             self.label.setText(message or "正在校验更新包...")
             self.background_btn.setText("后台运行")
             self.background_btn.show()
+            self.pause_btn.setText("暂停处理")
+            self.pause_btn.setEnabled(True)
+            self.pause_btn.show()
             self.action_btn.setText("取消下载")
             self.action_btn.setEnabled(True)
+        elif state == "pausing":
+            self.label.setText(message or "正在暂停下载...")
+            self.background_btn.hide()
+            self.pause_btn.setText("正在暂停...")
+            self.pause_btn.setEnabled(False)
+            self.pause_btn.show()
+            self.action_btn.setText("取消下载")
+            self.action_btn.setEnabled(False)
         elif state == "cancelling":
             self.label.setText(message or "正在取消下载...")
             self.background_btn.hide()
+            self.pause_btn.hide()
             self.action_btn.setText("正在取消...")
             self.action_btn.setEnabled(False)
+        elif state == "paused":
+            self.label.setText(message or "更新下载已暂停")
+            self.background_btn.setText("关闭")
+            self.background_btn.show()
+            self.pause_btn.setText("继续下载")
+            self.pause_btn.setEnabled(True)
+            self.pause_btn.show()
+            self.action_btn.setText("取消下载")
+            self.action_btn.setEnabled(True)
         elif state == "ready":
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
             self.label.setText(message or "更新包已下载并校验完成")
             self.background_btn.setText("稍后安装")
             self.background_btn.show()
+            self.pause_btn.hide()
             self.action_btn.setText("立即重启")
             self.action_btn.setEnabled(True)
         elif state == "failed":
@@ -414,6 +471,7 @@ class DownloadProgressDialog(QDialog):
             self.progress_bar.setValue(0)
             self.label.setText(f"下载失败：{message}")
             self.background_btn.hide()
+            self.pause_btn.hide()
             self.action_btn.setText("关闭")
             self.action_btn.setEnabled(True)
         elif state == "cancelled":
@@ -421,16 +479,24 @@ class DownloadProgressDialog(QDialog):
             self.progress_bar.setValue(0)
             self.label.setText(message or "更新下载已取消")
             self.background_btn.hide()
+            self.pause_btn.hide()
             self.action_btn.setText("关闭")
             self.action_btn.setEnabled(True)
         else:
             self.label.setText(message or "暂无更新下载任务")
             self.background_btn.hide()
+            self.pause_btn.hide()
             self.action_btn.setText("关闭")
             self.action_btn.setEnabled(True)
 
+    def _handle_pause_action(self):
+        if self.controller.state == "paused":
+            self.controller.resume()
+        elif self.controller.is_active:
+            self.controller.pause()
+
     def _handle_action(self):
-        if self.controller.is_active:
+        if self.controller.is_active or self.controller.state == "paused":
             if self._confirm_cancel_download():
                 self.controller.cancel()
         elif self.controller.state == "ready":

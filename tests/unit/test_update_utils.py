@@ -5,7 +5,9 @@ import hashlib
 from core.update_utils import (
     cleanup_incomplete_updates,
     ensure_persistent_updater,
+    load_pending_update,
     load_ready_update,
+    save_pending_update,
     save_ready_update,
 )
 
@@ -52,6 +54,30 @@ def test_cleanup_removes_partial_and_unmarked_packages_but_keeps_ready(tmp_path)
     assert not stale.exists()
     assert ready_package.exists()
     assert load_ready_update(tmp_path) is not None
+
+
+def test_cleanup_keeps_partial_with_persisted_resume_task(tmp_path):
+    """启动清理必须保留带任务标记的断点，并删除其他孤立临时文件。"""
+    package = tmp_path / "ImageClassifier_v9.9.9.exe"
+    partial = package.with_suffix(".exe.part")
+    orphan = tmp_path / "ImageClassifier_v9.9.8.exe.part"
+    partial.write_bytes(b"downloaded-prefix")
+    orphan.write_bytes(b"orphan")
+    manifest = {
+        "version": "9.9.9",
+        "url": "https://example.invalid/ImageClassifier.exe",
+        "size_bytes": 100,
+        "sha256": "abc",
+    }
+    save_pending_update(package, "9.9.9", manifest)
+
+    cleanup_incomplete_updates(tmp_path)
+
+    pending = load_pending_update(tmp_path)
+    assert pending is not None
+    assert pending["downloaded_bytes"] == len(b"downloaded-prefix")
+    assert partial.exists()
+    assert not orphan.exists()
 
 
 def test_persistent_updater_never_installs_arbitrary_partial_exe(tmp_path, monkeypatch):
