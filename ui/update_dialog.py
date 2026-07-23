@@ -5,20 +5,13 @@
 """
 
 import logging
-import os
-import subprocess
-import sys
-from pathlib import Path
-from typing import Optional
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                            QPushButton, QProgressBar, QApplication, QTextEdit, QMessageBox)
+                            QPushButton, QProgressBar, QTextEdit)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QPixmap
-from core.update_utils import download_with_progress, sha256_file, launch_self_update
-from utils.paths import get_update_dir
 from .components.toast import toast_error
 from .components.styles.theme import default_theme
 from utils.app_config import get_app_config
+from .update_download import get_update_download_controller
 
 
 class UpdateInfoDialog(QDialog):
@@ -238,185 +231,29 @@ class UpdateInfoDialog(QDialog):
         """开始下载更新"""
         try:
             url = str(self.manifest.get('url', '')).strip()
-            sha256 = str(self.manifest.get('sha256', '')).strip()
-
             if not url:
                 toast_error(self, "下载链接无效")
                 return
-
-            # 使用update目录
-            update_dir = get_update_dir()
-            update_dir.mkdir(parents=True, exist_ok=True)
-            dest = update_dir / f"ImageClassifier_v{self.new_version}.exe"
-
-            # 创建下载进度对话框
-            progress_dialog = DownloadProgressDialog(self)
-            progress_dialog.show()
-            QApplication.processEvents()
-
-            def on_progress(done: int, total: Optional[int]):
-                if total and total > 0:
-                    progress_dialog.update_progress(done, total)
-                QApplication.processEvents()
-
-            try:
-                # 下载文件
-                download_with_progress(url, dest, self.token or None, on_progress)
-            finally:
-                progress_dialog.close()
-
-            # 校验SHA256（在下载对话框中显示进度）
-            if sha256:
-                self.logger.info(f"开始校验SHA256: {sha256}")
-
-                # 重新创建校验进度对话框
-                verify_dialog = DownloadProgressDialog(self)
-                verify_dialog.set_verifying_mode()
-                verify_dialog.show()
-                QApplication.processEvents()
-
-                try:
-                    actual = sha256_file(dest)
-                    verify_dialog.close()
-
-                    if actual.lower() != sha256.lower():
-                        toast_error(self, f"文件校验失败")
-                        self.logger.error(f"SHA256校验失败: 期望{sha256}, 实际{actual}")
-                        try:
-                            dest.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-                        return
-                    else:
-                        self.logger.info("SHA256校验成功")
-                except Exception as e:
-                    verify_dialog.close()
-                    self.logger.error(f"校验过程中出错: {e}")
-                    toast_error(self, f"校验失败: {str(e)}")
-                    return
-
-            # 询问用户是否立即重启
-            exe_path = Path(sys.executable)
-            batch_path = launch_self_update(exe_path, dest)
-
-            # 创建自定义中文按钮的消息框
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle('更新完成')
-            msg_box.setText('文件下载和校验完成，是否现在重启应用以完成更新？')
-            msg_box.setIcon(QMessageBox.Icon.Question)
-
-            # 应用主题适配样式
-            config = get_app_config()
-            default_theme.set_theme(config.theme)
-            c = default_theme.colors
-            msg_box.setStyleSheet(f"""
-                QMessageBox {{
-                    background-color: {c.BACKGROUND_PRIMARY};
-                    color: {c.TEXT_PRIMARY};
-                    border: 1px solid {c.BORDER_MEDIUM};
-                    border-radius: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                }}
-                QMessageBox QLabel {{
-                    color: {c.TEXT_PRIMARY};
-                    font-size: 14px;
-                    padding: 10px;
-                }}
-                QPushButton {{
-                    background-color: {c.PRIMARY};
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 10px 24px;
-                    font-size: 14px;
-                    font-weight: bold;
-                    min-width: 100px;
-                    min-height: 36px;
-                }}
-                QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-                QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
-            """)
-
-            # 创建中文按钮
-            yes_button = msg_box.addButton('是', QMessageBox.ButtonRole.YesRole)
-            no_button = msg_box.addButton('否', QMessageBox.ButtonRole.NoRole)
-            msg_box.setDefaultButton(yes_button)
-
-            msg_box.exec()
-            clicked_button = msg_box.clickedButton()
-
-            if clicked_button == yes_button:
-                # 用户选择立即重启
-                self.logger.info(f"启动批处理脚本: {batch_path}")
-                subprocess.Popen(["cmd", "/c", "start", "", str(batch_path), str(dest)], shell=False)
-                self.logger.info("用户选择立即重启安装更新")
-                # 关闭对话框
-                self.accept()
-                QApplication.quit()
-            else:
-                # 用户选择稍后重启
-                self.logger.info("用户选择稍后安装更新包")
-
-                info_box = QMessageBox(self)
-                info_box.setWindowTitle('稍后安装')
-                info_box.setText('更新包已下载完成，您可以在稍后方便的时候手动安装。\n'
-                                 '更新文件已保存到更新目录，下次启动时会提示您安装。')
-                info_box.setIcon(QMessageBox.Icon.Information)
-
-                # 应用主题适配样式
-                config = get_app_config()
-                default_theme.set_theme(config.theme)
-                c = default_theme.colors
-                info_box.setStyleSheet(f"""
-                    QMessageBox {{
-                        background-color: {c.BACKGROUND_PRIMARY};
-                        color: {c.TEXT_PRIMARY};
-                        border: 1px solid {c.BORDER_MEDIUM};
-                        border-radius: 8px;
-                        font-size: 14px;
-                        min-width: 400px;
-                    }}
-                    QMessageBox QLabel {{
-                        color: {c.TEXT_PRIMARY};
-                        font-size: 14px;
-                        padding: 10px;
-                    }}
-                    QPushButton {{
-                        background-color: {c.PRIMARY};
-                        color: white;
-                        border: none;
-                        border-radius: 6px;
-                        padding: 10px 24px;
-                        font-size: 14px;
-                        font-weight: bold;
-                        min-width: 100px;
-                        min-height: 36px;
-                    }}
-                    QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-                    QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
-                """)
-
-                info_box.addButton('确定', QMessageBox.ButtonRole.AcceptRole)
-                info_box.exec()
-
-                # 关闭对话框
-                self.accept()
-
+            controller = get_update_download_controller()
+            controller.start(self.manifest, self.new_version, self.token)
+            host = self.parentWidget()
+            while host is not None and host.parentWidget() is not None:
+                host = host.parentWidget()
+            controller.show_progress_dialog(host)
+            self.accept()
         except Exception as e:
             self.logger.error(f"下载更新失败: {e}")
             toast_error(self, f"下载失败: {str(e)}")
-            # 关闭对话框（即使出错也关闭）
-            self.reject()
 
 
 class DownloadProgressDialog(QDialog):
-    """下载进度对话框"""
+    """可切换后台、可真正取消并可重新打开的下载进度对话框。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, controller, parent=None):
         super().__init__(parent)
+        self.controller = controller
         self.setWindowTitle("下载更新")
-        self.setModal(True)
+        self.setModal(False)
         self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
@@ -434,8 +271,22 @@ class DownloadProgressDialog(QDialog):
         self.progress_bar.setTextVisible(True)
         layout.addWidget(self.progress_bar)
 
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        self.background_btn = QPushButton("后台下载")
+        self.background_btn.clicked.connect(self.hide)
+        button_layout.addWidget(self.background_btn)
+        self.action_btn = QPushButton("取消下载")
+        self.action_btn.clicked.connect(self._handle_action)
+        button_layout.addWidget(self.action_btn)
+        layout.addLayout(button_layout)
+
+        self.controller.progress_changed.connect(self.update_progress)
+        self.controller.state_changed.connect(self._on_state_changed)
+
         # 应用主题
         self._apply_theme()
+        self.sync_from_controller()
 
     def _apply_theme(self):
         """应用主题样式"""
@@ -473,17 +324,123 @@ class DownloadProgressDialog(QDialog):
             }}
         """)
 
+        self.background_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.GRAY_500};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                min-width: 90px;
+            }}
+            QPushButton:hover {{ background-color: {c.GRAY_600}; }}
+        """)
+        self.action_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.PRIMARY};
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                min-width: 90px;
+            }}
+            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+            QPushButton:disabled {{ background-color: {c.GRAY_500}; }}
+        """)
+
     def update_progress(self, done: int, total: int):
         """更新进度"""
         if total > 0:
+            self.progress_bar.setRange(0, 100)
             percentage = int((done / total) * 100)
             self.progress_bar.setValue(percentage)
             done_mb = done / 1024 / 1024
             total_mb = total / 1024 / 1024
-            self.label.setText(f"正在下载: {done_mb:.1f} MB / {total_mb:.1f} MB")
+            if self.controller.state == "verifying":
+                self.label.setText(
+                    f"正在校验: {done_mb:.1f} MB / {total_mb:.1f} MB"
+                )
+            else:
+                self.label.setText(
+                    f"正在下载: {done_mb:.1f} MB / {total_mb:.1f} MB"
+                )
+        else:
+            self.progress_bar.setRange(0, 0)
 
     def set_verifying_mode(self):
         """设置为校验模式，显示不确定进度"""
         self.progress_bar.setRange(0, 0)  # 不确定进度模式
         self.label.setText("正在校验文件完整性...")
         self.setWindowTitle("校验文件")
+
+    def sync_from_controller(self):
+        """根据应用级控制器恢复当前显示状态。"""
+        self._on_state_changed(self.controller.state, self.controller.message)
+        if self.controller.is_active and (
+            self.controller.downloaded or self.controller.total
+        ):
+            self.update_progress(
+                self.controller.downloaded,
+                self.controller.total,
+            )
+
+    def _on_state_changed(self, state: str, message: str):
+        self.setWindowTitle("下载更新")
+        if state == "downloading":
+            self.label.setText(message or "正在下载更新包...")
+            self.background_btn.setText("后台下载")
+            self.background_btn.show()
+            self.action_btn.setText("取消下载")
+            self.action_btn.setEnabled(True)
+        elif state == "verifying":
+            self.label.setText(message or "正在校验更新包...")
+            self.background_btn.setText("后台运行")
+            self.background_btn.show()
+            self.action_btn.setText("取消下载")
+            self.action_btn.setEnabled(True)
+        elif state == "cancelling":
+            self.label.setText(message or "正在取消下载...")
+            self.background_btn.hide()
+            self.action_btn.setText("正在取消...")
+            self.action_btn.setEnabled(False)
+        elif state == "ready":
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(100)
+            self.label.setText(message or "更新包已下载并校验完成")
+            self.background_btn.setText("稍后安装")
+            self.background_btn.show()
+            self.action_btn.setText("立即重启")
+            self.action_btn.setEnabled(True)
+        elif state == "failed":
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.label.setText(f"下载失败：{message}")
+            self.background_btn.hide()
+            self.action_btn.setText("关闭")
+            self.action_btn.setEnabled(True)
+        elif state == "cancelled":
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.label.setText(message or "更新下载已取消")
+            self.background_btn.hide()
+            self.action_btn.setText("关闭")
+            self.action_btn.setEnabled(True)
+        else:
+            self.label.setText(message or "暂无更新下载任务")
+            self.background_btn.hide()
+            self.action_btn.setText("关闭")
+            self.action_btn.setEnabled(True)
+
+    def _handle_action(self):
+        if self.controller.is_active:
+            self.controller.cancel()
+        elif self.controller.state == "ready":
+            self.controller.install_ready_update()
+        else:
+            self.close()
+
+    def closeEvent(self, event):
+        """点击窗口关闭按钮视为取消；后台下载必须显式选择。"""
+        if self.controller.is_active:
+            self.controller.cancel()
+        event.accept()

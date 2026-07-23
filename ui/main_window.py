@@ -9,13 +9,11 @@ import time
 import psutil
 import sys
 import json
-import re
 import threading
 import functools
 import shutil
 import hashlib
 import traceback
-import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Set, Union
 import numpy as np
@@ -51,6 +49,7 @@ from ._main_window.state.interfaces import (
     ImageNavigator
 )
 from .update_dialog import UpdateInfoDialog
+from .update_download import get_update_download_controller
 from core.config import Config
 from utils.app_config import get_app_config
 from core.scanner import FileScannerThread
@@ -58,7 +57,10 @@ from core.image_loader import HighPerformanceImageLoader
 from utils.exceptions import ImageClassifierError, FileOperationError, ConfigError
 from utils.file_operations import normalize_folder_name, retry_file_operation, is_network_path, remove_readonly
 from core.file_manager import FileOperationManager
-from core.update_utils import fetch_manifest, launch_self_update
+from core.update_utils import (
+    launch_self_update,
+    load_ready_update,
+)
 from utils.performance import performance_monitor
 from utils.paths import get_update_dir
 from _version_ import __version__, get_manifest_url, compare_version
@@ -138,6 +140,9 @@ class ImageClassifier(QMainWindow):
         # 初始化状态变量
         self.init_state_variables()
 
+        # 应用级更新下载控制器，允许进度窗口隐藏后继续在后台下载。
+        self.update_download_controller = get_update_download_controller()
+
         # 初始化Manager（在状态变量之后）
         self._init_managers()
 
@@ -147,6 +152,8 @@ class ImageClassifier(QMainWindow):
         # UI初始化后，更新Manager的UI组件引用
         if self._nav_manager and hasattr(self, 'image_list') and hasattr(self, 'image_list_model'):
             self._nav_manager.set_ui_components(self.image_list, self.image_list_model)
+
+        self._connect_update_download_controller()
 
         # 设置快捷键
         self.setup_shortcuts()
@@ -1264,6 +1271,27 @@ class ImageClassifier(QMainWindow):
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("准备就绪")
+
+        # 后台下载进度入口，仅在有下载任务或完整更新包时显示。
+        self.update_download_button = QPushButton("更新下载")
+        self.update_download_button.setObjectName("update_download_button")
+        self.update_download_button.setToolTip("查看更新下载进度")
+        self.update_download_button.clicked.connect(
+            self._show_update_download_progress
+        )
+        self.update_download_button.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 4px;
+                padding: 2px 8px;
+                color: white;
+                background-color: #0D6EFD;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #0B5ED7; }
+        """)
+        self.update_download_button.hide()
+        self.statusBar.addPermanentWidget(self.update_download_button)
 
         # 在状态栏右侧添加版本信息
         self.version_label = QLabel(f"版本 {__version__}")
@@ -5142,6 +5170,52 @@ class ImageClassifier(QMainWindow):
             return False
 
     # ===== 更新相关 =====
+    def _connect_update_download_controller(self):
+        """连接应用级下载状态，并恢复状态栏入口。"""
+        controller = self.update_download_controller
+        controller.progress_changed.connect(self._on_update_download_progress)
+        controller.state_changed.connect(self._on_update_download_state)
+        self._on_update_download_state(controller.state, controller.message)
+        if controller.downloaded or controller.total:
+            self._on_update_download_progress(
+                controller.downloaded,
+                controller.total,
+            )
+
+    def _on_update_download_progress(self, done: int, total: int):
+        """更新状态栏中的后台下载进度入口。"""
+        if not hasattr(self, 'update_download_button'):
+            return
+        if total > 0:
+            percentage = min(100, int(done * 100 / total))
+            prefix = "校验" if self.update_download_controller.state == "verifying" else "更新"
+            self.update_download_button.setText(f"{prefix} {percentage}%")
+        else:
+            self.update_download_button.setText("更新下载中")
+        self.update_download_button.show()
+
+    def _on_update_download_state(self, state: str, message: str):
+        """根据下载状态显示、隐藏或更新进度入口。"""
+        if not hasattr(self, 'update_download_button'):
+            return
+        if state == "ready":
+            self.update_download_button.setText("更新已下载")
+            self.update_download_button.setToolTip(message or "点击安装更新")
+            self.update_download_button.show()
+        elif state in {"downloading", "verifying", "cancelling"}:
+            self.update_download_button.setToolTip(message or "点击查看下载进度")
+            self.update_download_button.show()
+        elif state == "failed":
+            self.update_download_button.setText("更新失败")
+            self.update_download_button.setToolTip(message or "点击查看失败原因")
+            self.update_download_button.show()
+        else:
+            self.update_download_button.hide()
+
+    def _show_update_download_progress(self):
+        """重新打开后台下载进度或已下载更新入口。"""
+        self.update_download_controller.show_progress_dialog(self)
+
     def _schedule_auto_update_check(self):
         """根据配置调度一次自动检查更新（应用启动后几秒执行）"""
         try:
@@ -5201,6 +5275,10 @@ class ImageClassifier(QMainWindow):
     def _auto_check_update_once(self):
         """执行一次静默检查，有更新则弹窗提示"""
 
+        if self.update_download_controller.is_active:
+            self.logger.debug("更新包正在下载，跳过重复检查")
+            return
+
         # 检查 update 目录下是否有更新包
         local_pending_version = None
         local_download_path = None
@@ -5212,25 +5290,16 @@ class ImageClassifier(QMainWindow):
 
             self.logger.debug(f"检查本地更新目录: {update_dir}")
 
-            if update_dir.exists():
-                # 查找 update 目录下的 exe 文件
-                exe_files = list(update_dir.glob('*.exe'))
-                if exe_files:
-                    # 按修改时间排序，取最新的
-                    exe_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                    local_download_path = exe_files[0]
-
-                    # 从文件名提取版本号（例如：图像分类工具_v6.3.2.exe）
-                    match = re.search(r'v(\d+\.\d+\.\d+)', local_download_path.name)
-                    if match:
-                        local_pending_version = match.group(1)
-
-                    # 检查是否有对应的 batch 文件
-                    batch_files = list(update_dir.glob('update.bat'))
-                    if batch_files:
-                        local_batch_path = batch_files[0]
-
-                    self.logger.info(f"检测到本地待安装更新: version={local_pending_version}, exe={local_download_path.name}, batch={local_batch_path}")
+            ready_update = load_ready_update(update_dir)
+            if ready_update:
+                local_pending_version = str(ready_update['version'])
+                local_download_path = ready_update['path']
+                batch_path = update_dir / 'update.bat'
+                local_batch_path = batch_path if batch_path.exists() else None
+                self.logger.info(
+                    f"检测到已校验更新: version={local_pending_version}, "
+                    f"exe={local_download_path.name}, batch={local_batch_path}"
+                )
         except Exception as e:
             self.logger.debug(f"检查本地更新目录失败: {e}")
 
@@ -5285,10 +5354,8 @@ class ImageClassifier(QMainWindow):
                 # 线上版本更新，清理旧更新包，提示下载新版本
                 self.logger.info(f"线上版本v{online_version}比本地v{local_pending_version}更新，清理旧包并提示下载新版本")
                 try:
-                    # 删除旧更新包
-                    if local_download_path.exists():
-                        local_download_path.unlink()
-                        self.logger.info(f"已删除旧更新包: {local_download_path}")
+                    self.update_download_controller.discard_ready_update()
+                    self.logger.info(f"已删除旧更新包: {local_download_path}")
                     if local_batch_path and local_batch_path.exists():
                         local_batch_path.unlink()
                         self.logger.info(f"已删除旧批处理脚本: {local_batch_path}")
@@ -5322,9 +5389,8 @@ class ImageClassifier(QMainWindow):
                 if local_pending_version == __version__:
                     self.logger.info(f"本地更新包v{local_pending_version}与当前版本相同，清理更新包")
                     try:
-                        if local_download_path.exists():
-                            local_download_path.unlink()
-                            self.logger.info(f"已删除同版本更新包: {local_download_path}")
+                        self.update_download_controller.discard_ready_update()
+                        self.logger.info(f"已删除同版本更新包: {local_download_path}")
                         if local_batch_path and local_batch_path.exists():
                             local_batch_path.unlink()
                             self.logger.info(f"已删除批处理脚本: {local_batch_path}")
@@ -5407,10 +5473,8 @@ class ImageClassifier(QMainWindow):
                     if clicked_button == yes_btn:
                         # 立即重启安装
                         try:
-                            self.logger.info(f"启动批处理脚本: {local_batch_path}")
-                            subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
-                            self.logger.info("用户选择立即重启安装更新")
-                            QApplication.quit()
+                            if self.update_download_controller.install_ready_update():
+                                self.logger.info("用户选择立即重启安装更新")
                         except Exception as e:
                             self.logger.error(f"启动批处理失败: {e}")
                     else:
@@ -5706,6 +5770,13 @@ class ImageClassifier(QMainWindow):
         try:
             self.logger.info("程序正在关闭，开始清理...")
 
+            # 先停止更新下载并等待网络、文件句柄释放，避免窗口关闭后仍写文件。
+            controller = getattr(self, 'update_download_controller', None)
+            if controller and not controller.shutdown(timeout_ms=10000):
+                self.logger.warning("更新下载尚未安全停止，暂缓关闭程序")
+                event.ignore()
+                return
+
             # 保存窗口位置和大小
             self._save_window_geometry()
 
@@ -5735,8 +5806,7 @@ class ImageClassifier(QMainWindow):
 
         except Exception as e:
             self.logger.error(f"closeEvent 处理失败: {e}")
-        finally:
-            event.accept()
+        event.accept()
 
     def _check_wechat_directory(self, path: Path) -> bool:
         """检测是否为微信目录"""

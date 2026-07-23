@@ -3,6 +3,7 @@
 import logging
 
 import pytest
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from PyQt6.QtWidgets import QMainWindow
 
@@ -27,6 +28,29 @@ class ToolbarHarness(ImageClassifier):
 
     def create_category_mode_button(self, toolbar):
         """跳过与当前测试无关的分类模式按钮。"""
+
+
+class DownloadControllerStub(QObject):
+    """状态栏下载入口测试替身。"""
+
+    progress_changed = pyqtSignal(int, int)
+    state_changed = pyqtSignal(str, str)
+
+    def __init__(self):
+        super().__init__()
+        self.state = "idle"
+        self.message = ""
+        self.downloaded = 0
+        self.total = 0
+        self.show_progress_dialog_calls = 0
+        self.shutdown_calls = 0
+
+    def show_progress_dialog(self, _parent):
+        self.show_progress_dialog_calls += 1
+
+    def shutdown(self, timeout_ms=10000):
+        self.shutdown_calls += 1
+        return True
 
 
 def test_toolbar_add_category_action_opens_dialog(qapp):
@@ -74,6 +98,29 @@ def test_image_filter_active_detection(
         window._image_search_text = search_text
 
         assert window.is_image_filter_active() is expected
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_status_bar_exposes_background_update_progress(qapp):
+    """后台下载隐藏进度窗后，状态栏仍应提供可重新打开的进度入口。"""
+    window = ToolbarHarness()
+    controller = DownloadControllerStub()
+    window.update_download_controller = controller
+    try:
+        window.create_status_bar()
+        window._connect_update_download_controller()
+
+        controller.state = "downloading"
+        controller.state_changed.emit("downloading", "正在下载更新包...")
+        controller.progress_changed.emit(25, 100)
+
+        assert window.update_download_button.isVisibleTo(window)
+        assert window.update_download_button.text() == "更新 25%"
+
+        window.update_download_button.click()
+        assert controller.show_progress_dialog_calls == 1
     finally:
         window.close()
         window.deleteLater()

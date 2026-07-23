@@ -2,7 +2,6 @@
 
 import logging
 import re
-import subprocess
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -17,12 +16,13 @@ from PyQt6.QtGui import QKeySequence
 from utils.app_config import get_app_config
 from utils.paths import get_cache_dir, get_update_dir
 from _version_ import compare_version, __version__, get_manifest_url
-from core.update_utils import fetch_manifest
+from core.update_utils import load_ready_update
 from ...components.toast import toast_info, toast_success, toast_warning, toast_error
 from ...components.styles.theme import default_theme
 from ...components.styles import ButtonStyles, DialogStyles
 from ...components.widgets.switch import Switch
 from ...update_dialog import UpdateInfoDialog
+from ...update_download import get_update_download_controller
 from ..utils.update_checker import UpdateCheckerThread
 
 class SettingsDialog(QDialog):
@@ -44,6 +44,7 @@ class SettingsDialog(QDialog):
 
         # 修复问题4：后台更新检查线程
         self.update_checker_thread = None
+        self.update_download_controller = get_update_download_controller()
 
         self.initUI()
 
@@ -1829,6 +1830,10 @@ class SettingsDialog(QDialog):
         """检查更新"""
         try:
 
+            if self.update_download_controller.is_active:
+                self.update_download_controller.show_progress_dialog(self.window())
+                return
+
             # 1. 首先检查本地是否有待安装的更新包
             local_pending_version = None
             local_download_path = None
@@ -1838,96 +1843,80 @@ class SettingsDialog(QDialog):
                 update_dir = get_update_dir()
                 self.logger.debug(f"检查本地更新目录: {update_dir}")
 
-                if update_dir.exists():
-                    # 查找 update 目录下的 exe 文件
-                    exe_files = list(update_dir.glob('*.exe'))
-                    if exe_files:
-                        # 按修改时间排序，取最新的
-                        exe_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                        local_download_path = exe_files[0]
+                ready_update = load_ready_update(update_dir)
+                if ready_update:
+                    local_pending_version = str(ready_update['version'])
+                    local_download_path = ready_update['path']
+                    batch_path = update_dir / 'update.bat'
+                    local_batch_path = batch_path if batch_path.exists() else None
 
-                        # 从文件名提取版本号
-                        match = re.search(r'v(\d+\.\d+\.\d+)', local_download_path.name)
-                        if match:
-                            local_pending_version = match.group(1)
+                    self.logger.info(
+                        f"检测到已校验更新: version={local_pending_version}, "
+                        f"exe={local_download_path.name}"
+                    )
 
-                        # 检查是否有对应的 batch 文件
-                        batch_files = list(update_dir.glob('update.bat'))
-                        if batch_files:
-                            local_batch_path = batch_files[0]
+                    # 检查本地更新包版本是否与当前版本相同
+                    if local_pending_version == __version__:
+                        self.logger.info(f"本地更新包v{local_pending_version}与当前版本相同，清理更新包")
+                        try:
+                            self.update_download_controller.discard_ready_update()
+                            self.logger.info(f"已删除同版本更新包: {local_download_path}")
+                            if local_batch_path and local_batch_path.exists():
+                                local_batch_path.unlink()
+                                self.logger.info(f"已删除批处理脚本: {local_batch_path}")
+                        except Exception as e:
+                            self.logger.warning(f"清理同版本更新包失败: {e}")
+                        # 跳过提示，继续检查线上更新
+                    else:
+                        # 本地更新包版本不同于当前版本，询问用户是否安装
+                        msg_box = QMessageBox(self)
+                        msg_box.setWindowTitle("发现已下载更新")
+                        msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
+                        msg_box.setIcon(QMessageBox.Icon.Question)
 
-                        self.logger.info(f"检测到本地待安装更新: version={local_pending_version}, exe={local_download_path.name}")
+                        # 应用主题适配样式
+                        c = default_theme.colors
+                        msg_box.setStyleSheet(f"""
+                            QMessageBox {{
+                                background-color: {c.BACKGROUND_PRIMARY};
+                                color: {c.TEXT_PRIMARY};
+                                border: 1px solid {c.BORDER_MEDIUM};
+                                border-radius: 8px;
+                                font-size: 14px;
+                                min-width: 400px;
+                            }}
+                            QMessageBox QLabel {{
+                                color: {c.TEXT_PRIMARY};
+                                font-size: 14px;
+                                padding: 10px;
+                            }}
+                            QPushButton {{
+                                background-color: {c.PRIMARY};
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                padding: 10px 24px;
+                                font-size: 14px;
+                                font-weight: bold;
+                                min-width: 100px;
+                                min-height: 36px;
+                            }}
+                            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+                            QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
+                        """)
 
-                        # 检查本地更新包版本是否与当前版本相同
-                        if local_pending_version == __version__:
-                            self.logger.info(f"本地更新包v{local_pending_version}与当前版本相同，清理更新包")
-                            try:
-                                if local_download_path.exists():
-                                    local_download_path.unlink()
-                                    self.logger.info(f"已删除同版本更新包: {local_download_path}")
-                                if local_batch_path and local_batch_path.exists():
-                                    local_batch_path.unlink()
-                                    self.logger.info(f"已删除批处理脚本: {local_batch_path}")
-                            except Exception as e:
-                                self.logger.warning(f"清理同版本更新包失败: {e}")
-                            # 跳过提示，继续检查线上更新
-                        else:
-                            # 本地更新包版本不同于当前版本，询问用户是否安装
-                            # 询问用户是否安装本地更新包（使用主题适配样式）
-                            msg_box = QMessageBox(self)
-                            msg_box.setWindowTitle("发现已下载更新")
-                            msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
-                            msg_box.setIcon(QMessageBox.Icon.Question)
+                        yes_btn = msg_box.addButton("是", QMessageBox.ButtonRole.YesRole)
+                        no_btn = msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
+                        msg_box.setDefaultButton(yes_btn)
 
-                            # 应用主题适配样式
-                            c = default_theme.colors
-                            msg_box.setStyleSheet(f"""
-                                QMessageBox {{
-                                    background-color: {c.BACKGROUND_PRIMARY};
-                                    color: {c.TEXT_PRIMARY};
-                                    border: 1px solid {c.BORDER_MEDIUM};
-                                    border-radius: 8px;
-                                    font-size: 14px;
-                                    min-width: 400px;
-                                }}
-                                QMessageBox QLabel {{
-                                    color: {c.TEXT_PRIMARY};
-                                    font-size: 14px;
-                                    padding: 10px;
-                                }}
-                                QPushButton {{
-                                    background-color: {c.PRIMARY};
-                                    color: white;
-                                    border: none;
-                                    border-radius: 6px;
-                                    padding: 10px 24px;
-                                    font-size: 14px;
-                                    font-weight: bold;
-                                    min-width: 100px;
-                                    min-height: 36px;
-                                }}
-                                QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-                                QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
-                            """)
+                        msg_box.exec()
 
-                            yes_btn = msg_box.addButton("是", QMessageBox.ButtonRole.YesRole)
-                            no_btn = msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
-                            msg_box.setDefaultButton(yes_btn)
-
-                            msg_box.exec()
-
-                            if msg_box.clickedButton() == yes_btn:
-                                # 用户选择立即重启
-                                self.logger.info(f"启动批处理脚本: {local_batch_path}")
-                                subprocess.Popen(["cmd", "/c", "start", "", str(local_batch_path), str(local_download_path)], shell=False)
+                        if msg_box.clickedButton() == yes_btn:
+                            if self.update_download_controller.install_ready_update():
                                 self.logger.info("用户选择立即重启安装更新")
-                                QApplication.quit()
-                                return  # 退出程序
-                            else:
-                                # 用户选择稍后安装
-                                self.logger.info("用户选择稍后安装本地更新包")
-                                # 不继续检查线上更新，直接返回
-                                return
+                            return
+                        self.logger.info("用户选择稍后安装本地更新包")
+                        return
             except Exception as e:
                 self.logger.debug(f"检查本地更新目录失败: {e}")
 
