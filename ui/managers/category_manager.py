@@ -492,14 +492,13 @@ class CategoryManager(QObject):
 
             if state_changed:
                 # 分类记录变动后落盘
-                try:
-                    self._ui.save_state()
-                except Exception as e:
-                    # 保存失败只记录日志，不中断流程
-                    self._logger.error(f"保存状态失败: {e}")
+                self._save_state_with_retry()
 
             # 分配默认快捷键并排序
+            shortcuts_before = dict(self._state.config.category_shortcuts)
             self._state.config.assign_default_shortcuts(categories)
+            if self._state.config.category_shortcuts != shortcuts_before:
+                config_needs_save = True
             counts = self.get_category_counts(categories_only=categories) if self._state.config.category_sort_mode == "count" else None
             ordered = self._state.config.get_sorted_categories(categories, category_counts=counts)
 
@@ -531,6 +530,23 @@ class CategoryManager(QObject):
         counts = self.get_category_counts() if self._state.config.category_sort_mode == "count" else None
         ordered = self._state.config.get_sorted_categories(self._state.categories, category_counts=counts)
         self._mutator.set_ordered_categories(ordered)
+
+    def _save_state_with_retry(self) -> None:
+        """保存状态；文件暂时被占用时延迟重试一次。"""
+        try:
+            self._ui.save_state()
+        except PermissionError as e:
+            self._logger.warning(f"保存状态时文件被占用，将重试: {e}")
+            QTimer.singleShot(100, self._retry_save_state_once)
+        except Exception as e:
+            self._logger.error(f"保存状态失败: {e}")
+
+    def _retry_save_state_once(self) -> None:
+        """执行一次状态保存重试，失败时仅记录日志。"""
+        try:
+            self._ui.save_state()
+        except Exception as e:
+            self._logger.error(f"重试保存状态失败: {e}")
 
     def _rebuild_category_buttons(self) -> None:
         """根据当前 ordered_categories 重建按钮并绑定事件
