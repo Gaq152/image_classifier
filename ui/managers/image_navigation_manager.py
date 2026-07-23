@@ -119,6 +119,13 @@ class ImageNavigationManager(QObject):
         self._background_loading = False
         self._current_requested_image: Optional[str] = None  # 当前请求加载的图片路径（用于异步加载验证）
 
+        # 列表选择立即同步，单一定时器在 Batched 布局完成后再校准一次。
+        # 重复 start() 会重启计时，避免快速翻页时堆积大量 singleShot 回调。
+        self._selection_sync_timer = QTimer(self)
+        self._selection_sync_timer.setSingleShot(True)
+        self._selection_sync_timer.setInterval(50)
+        self._selection_sync_timer.timeout.connect(self.sync_image_list_selection)
+
         # 连接文件扫描器信号（Manager统一管理scanner）
         self._scanner.initial_batch_ready.connect(self.on_initial_batch_ready)
         self._scanner.files_found.connect(self.on_files_found)
@@ -381,8 +388,10 @@ class ImageNavigationManager(QObject):
 
             QTimer.singleShot(delay_time, self.preload_adjacent_images)
 
-            # 延迟更新图片列表高亮选中状态，避免阻塞当前图片显示
-            QTimer.singleShot(50, self.sync_image_list_selection)
+            # 立即同步业务索引与列表当前项，防止快捷键连续翻页时状态分叉。
+            # 50ms 后使用可合并的单次定时器校准 Batched 布局滚动位置。
+            self.sync_image_list_selection()
+            self._selection_sync_timer.start()
 
             # 调度UI状态更新
             self._ui.schedule_ui_update('ui_state')
