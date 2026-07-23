@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from core.update_utils import (
@@ -226,6 +226,10 @@ class UpdateDownloadController(QObject):
         if self._progress_dialog is None:
             self._progress_dialog = DownloadProgressDialog(self, parent)
             self._progress_dialog.destroyed.connect(self._clear_progress_dialog)
+        elif parent is not None and self._progress_dialog.parentWidget() is not parent:
+            # 从设置页启动时挂到设置页上方；从状态栏重开时再挂回主窗口。
+            self._progress_dialog.setParent(parent, Qt.WindowType.Dialog)
+            self._progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         self._progress_dialog.sync_from_controller()
         self._progress_dialog.show()
         self._progress_dialog.raise_()

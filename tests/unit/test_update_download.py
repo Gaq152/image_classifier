@@ -5,10 +5,11 @@ import threading
 import time
 from unittest.mock import Mock, patch
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtWidgets import QDialog
 
 from core.update_utils import load_ready_update
-from ui.update_dialog import DownloadProgressDialog
+from ui.update_dialog import DownloadProgressDialog, UpdateInfoDialog
 from ui.update_download import UpdateDownloadController, UpdateDownloadWorker
 
 
@@ -195,3 +196,45 @@ def test_window_close_keeps_downloading_when_confirmation_is_rejected(qtbot):
     controller.cancel.assert_not_called()
     controller.state = "cancelled"
     dialog.close()
+
+
+def test_update_info_keeps_progress_above_settings_dialog(qtbot):
+    """从设置页启动下载时，进度窗口必须以设置页为父窗口。"""
+    settings_dialog = QDialog()
+    qtbot.addWidget(settings_dialog)
+    controller = Mock()
+    controller.start.return_value = True
+    manifest = {
+        "url": "https://example.invalid/ImageClassifier.exe",
+        "sha256": "abc",
+        "size_bytes": 100,
+    }
+    update_dialog = UpdateInfoDialog(
+        "9.9.9",
+        "9.9.8",
+        100,
+        "测试更新",
+        manifest,
+        parent=settings_dialog,
+    )
+    qtbot.addWidget(update_dialog)
+
+    with patch(
+        "ui.update_dialog.get_update_download_controller",
+        return_value=controller,
+    ):
+        update_dialog.start_download()
+
+    controller.show_progress_dialog.assert_called_once_with(settings_dialog)
+
+
+def test_progress_dialog_is_window_modal_to_its_parent(qtbot):
+    """窗口级模态确保进度窗不会落到设置窗口后面。"""
+    settings_dialog = QDialog()
+    qtbot.addWidget(settings_dialog)
+    controller = FakeDownloadController()
+    dialog = DownloadProgressDialog(controller, settings_dialog)
+    qtbot.addWidget(dialog)
+
+    assert dialog.parentWidget() is settings_dialog
+    assert dialog.windowModality() == Qt.WindowModality.WindowModal

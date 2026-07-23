@@ -237,8 +237,6 @@ class UpdateInfoDialog(QDialog):
             controller = get_update_download_controller()
             controller.start(self.manifest, self.new_version, self.token)
             host = self.parentWidget()
-            while host is not None and host.parentWidget() is not None:
-                host = host.parentWidget()
             controller.show_progress_dialog(host)
             self.accept()
         except Exception as e:
@@ -253,7 +251,7 @@ class DownloadProgressDialog(QDialog):
         super().__init__(parent)
         self.controller = controller
         self.setWindowTitle("下载更新")
-        self.setModal(False)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
