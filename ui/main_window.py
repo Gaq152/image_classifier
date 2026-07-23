@@ -58,7 +58,6 @@ from utils.exceptions import ImageClassifierError, FileOperationError, ConfigErr
 from utils.file_operations import normalize_folder_name, retry_file_operation, is_network_path, remove_readonly
 from core.file_manager import FileOperationManager
 from core.update_utils import (
-    launch_self_update,
     load_ready_update,
 )
 from utils.performance import performance_monitor
@@ -436,6 +435,17 @@ class ImageClassifier(QMainWindow):
 
         # 修复问题4：后台更新检查线程
         self.update_checker_thread = None
+        self._main_update_state = "idle"
+        self._pending_update_version = None
+        self._pending_update_manifest = None
+        self._pending_update_token = ""
+        self._update_check_manual = False
+        self._update_check_animation_step = 0
+        self._update_check_animation_timer = QTimer(self)
+        self._update_check_animation_timer.setInterval(300)
+        self._update_check_animation_timer.timeout.connect(
+            self._advance_update_check_animation
+        )
 
         # 快捷键管理器
         self.shortcut_manager = None
@@ -1272,12 +1282,12 @@ class ImageClassifier(QMainWindow):
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("准备就绪")
 
-        # 后台下载进度入口，仅在有下载任务或完整更新包时显示。
-        self.update_download_button = QPushButton("更新下载")
+        # 更新流程统一入口：检查、新版本、下载进度和重启更新。
+        self.update_download_button = QPushButton("检查更新")
         self.update_download_button.setObjectName("update_download_button")
         self.update_download_button.setToolTip("查看更新下载进度")
         self.update_download_button.clicked.connect(
-            self._show_update_download_progress
+            self._handle_update_button_clicked
         )
         self.update_download_button.setStyleSheet("""
             QPushButton {
@@ -1285,12 +1295,12 @@ class ImageClassifier(QMainWindow):
                 border-radius: 4px;
                 padding: 2px 8px;
                 color: white;
-                background-color: #0D6EFD;
+                background-color: #6C757D;
                 font-size: 11px;
             }
-            QPushButton:hover { background-color: #0B5ED7; }
+            QPushButton:hover { background-color: #5C636A; }
         """)
-        self.update_download_button.hide()
+        self.update_download_button.show()
         self.statusBar.addPermanentWidget(self.update_download_button)
 
         # 在状态栏右侧添加版本信息
@@ -5186,35 +5196,161 @@ class ImageClassifier(QMainWindow):
         """更新状态栏中的后台下载进度入口。"""
         if not hasattr(self, 'update_download_button'):
             return
+        self._main_update_state = "verifying" if (
+            self.update_download_controller.state == "verifying"
+        ) else "downloading"
         if total > 0:
             percentage = min(100, int(done * 100 / total))
             prefix = "校验" if self.update_download_controller.state == "verifying" else "更新"
             self.update_download_button.setText(f"{prefix} {percentage}%")
         else:
             self.update_download_button.setText("更新下载中")
-        self.update_download_button.show()
+        self._apply_update_button_style("downloading")
 
     def _on_update_download_state(self, state: str, message: str):
-        """根据下载状态显示、隐藏或更新进度入口。"""
+        """把下载控制器状态映射到右下角统一更新入口。"""
         if not hasattr(self, 'update_download_button'):
             return
         if state == "ready":
-            self.update_download_button.setText("更新已下载")
-            self.update_download_button.setToolTip(message or "点击安装更新")
-            self.update_download_button.show()
+            self._clear_pending_update()
+            self._set_main_update_state("ready", tooltip=message)
         elif state in {"downloading", "verifying", "cancelling"}:
+            self._main_update_state = state
             self.update_download_button.setToolTip(message or "点击查看下载进度")
-            self.update_download_button.show()
+            if state == "verifying":
+                self.update_download_button.setText("正在校验更新")
+            elif state == "cancelling":
+                self.update_download_button.setText("正在取消下载")
+            else:
+                self.update_download_button.setText("更新下载中")
+            self._apply_update_button_style("downloading")
+        elif state == "failed":
+            self._set_main_update_state("failed", tooltip=message)
+        elif state == "cancelled" and self._pending_update_manifest:
+            self._set_main_update_state(
+                "available",
+                self._pending_update_version,
+                "下载已取消，点击可重新下载",
+            )
+        else:
+            self._set_main_update_state("idle")
+
+    def _set_main_update_state(
+        self,
+        state: str,
+        version: Optional[str] = None,
+        tooltip: str = "",
+    ):
+        """设置右下角更新按钮的状态、文字和样式。"""
+        self._main_update_state = state
+        if not hasattr(self, 'update_download_button'):
+            return
+        if state == "checking":
+            self.update_download_button.setText("检查更新·")
+            self.update_download_button.setToolTip("正在检查更新...")
+        elif state == "available":
+            label = f"发现新版本 {version}" if version else "发现新版本"
+            self.update_download_button.setText(label)
+            self.update_download_button.setToolTip(
+                tooltip or "点击查看更新内容"
+            )
+        elif state == "ready":
+            self.update_download_button.setText("重启更新")
+            self.update_download_button.setToolTip(
+                tooltip or "更新已下载，点击重启安装"
+            )
         elif state == "failed":
             self.update_download_button.setText("更新失败")
-            self.update_download_button.setToolTip(message or "点击查看失败原因")
-            self.update_download_button.show()
+            self.update_download_button.setToolTip(
+                tooltip or "点击查看失败原因"
+            )
         else:
-            self.update_download_button.hide()
+            self.update_download_button.setText("检查更新")
+            self.update_download_button.setToolTip("点击检查更新")
+        self._apply_update_button_style(state)
 
-    def _show_update_download_progress(self):
-        """重新打开后台下载进度或已下载更新入口。"""
-        self.update_download_controller.show_progress_dialog(self)
+    def _apply_update_button_style(self, state: str):
+        """应用统一入口在不同更新状态下的颜色。"""
+        colors = {
+            "idle": ("#6C757D", "#5C636A"),
+            "checking": ("#0D6EFD", "#0B5ED7"),
+            "available": ("#F59E0B", "#D97706"),
+            "downloading": ("#0D6EFD", "#0B5ED7"),
+            "verifying": ("#0D6EFD", "#0B5ED7"),
+            "ready": ("#198754", "#157347"),
+            "failed": ("#DC3545", "#BB2D3B"),
+        }
+        normal, hover = colors.get(state, colors["idle"])
+        self.update_download_button.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                border-radius: 4px;
+                padding: 2px 8px;
+                color: white;
+                background-color: {normal};
+                font-size: 11px;
+            }}
+            QPushButton:hover {{ background-color: {hover}; }}
+        """)
+        self.update_download_button.show()
+
+    def _advance_update_check_animation(self):
+        """更新检查期间循环显示点状动画。"""
+        if self._main_update_state != "checking":
+            self._update_check_animation_timer.stop()
+            return
+        self._update_check_animation_step = (
+            self._update_check_animation_step + 1
+        ) % 3
+        dots = "·" * (self._update_check_animation_step + 1)
+        self.update_download_button.setText(f"检查更新{dots}")
+
+    def _handle_update_button_clicked(self):
+        """按当前状态执行检查、查看、进度或重启操作。"""
+        if self.update_download_controller.is_active:
+            self.update_download_controller.show_progress_dialog(self)
+            return
+        if self._main_update_state == "available":
+            self._show_pending_update_dialog()
+        elif self._main_update_state == "ready":
+            self._show_restart_update_confirmation()
+        elif self._main_update_state == "failed":
+            self.update_download_controller.show_progress_dialog(self)
+        elif self._main_update_state == "checking":
+            toast_info(self, "正在检查更新...")
+        else:
+            self._start_main_update_check(manual=True)
+
+    def _show_pending_update_dialog(self):
+        """用户主动点击新版本提醒后展示更新内容。"""
+        manifest = self._pending_update_manifest
+        version = self._pending_update_version
+        if not manifest or not version:
+            self._set_main_update_state("idle")
+            return
+        update_dialog = UpdateInfoDialog(
+            new_version=version,
+            current_version=__version__,
+            size_bytes=int(manifest.get('size_bytes', 0) or 0),
+            notes=str(manifest.get('notes', '')).strip(),
+            manifest=manifest,
+            token=self._pending_update_token,
+            parent=self,
+        )
+        update_dialog.exec()
+
+    def _show_restart_update_confirmation(self):
+        """用户点击重启更新提醒后进行二次确认。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("更新已下载")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText("更新包已下载并校验完成，是否现在重启进行更新？")
+        restart_btn = box.addButton("重启更新", QMessageBox.ButtonRole.YesRole)
+        later_btn = box.addButton("稍后", QMessageBox.ButtonRole.NoRole)
+        box.setDefaultButton(later_btn)
+        box.exec()
+        if box.clickedButton() == restart_btn:
+            self.update_download_controller.install_ready_update()
 
     def _schedule_auto_update_check(self):
         """根据配置调度一次自动检查更新（应用启动后几秒执行）"""
@@ -5257,39 +5393,81 @@ class ImageClassifier(QMainWindow):
             self.logger.debug(f"定期检查更新失败: {e}")
 
     def _on_update_check_success(self, manifest, endpoint, token):
-        """修复问题4：后台更新检查成功的回调"""
+        """后台更新检查成功后更新状态栏，不主动弹出更新窗口。"""
+        manual = self._update_check_manual
+        self._finish_main_update_check()
         try:
             online_version = str(manifest.get('version', '')).strip()
+            if not online_version:
+                self._process_update_result(
+                    None,
+                    None,
+                    endpoint,
+                    token,
+                    manual=manual,
+                    error_message="更新信息格式错误",
+                )
+                return
             self.logger.info(f"检查线上更新：发现版本 v{online_version}")
-            # 调用原有逻辑，传递线上版本信息
-            self._process_update_result(online_version, manifest, endpoint, token)
+            self._process_update_result(
+                online_version,
+                manifest,
+                endpoint,
+                token,
+                manual=manual,
+            )
         except Exception as e:
             self.logger.error(f"处理更新检查结果失败: {e}")
+            self._set_main_update_state("idle")
+            if manual:
+                toast_error(self, f"处理更新失败: {e}")
 
     def _on_update_check_failed(self, error_message):
-        """修复问题4：后台更新检查失败的回调"""
+        """后台更新失败时仍优先恢复已下载更新包的状态。"""
+        manual = self._update_check_manual
+        self._finish_main_update_check()
         self.logger.debug(f"检查线上更新失败: {error_message}")
-        # 检查失败时，继续处理本地更新包（如果有的话）
-        self._process_update_result(None, None, None, None)
+        self._process_update_result(
+            None,
+            None,
+            None,
+            None,
+            manual=manual,
+            error_message=error_message,
+        )
 
     def _auto_check_update_once(self):
-        """执行一次静默检查，有更新则弹窗提示"""
+        """执行一次静默检查；结果只进入右下角统一入口。"""
+        self._start_main_update_check(manual=False)
+
+    def _start_main_update_check(self, manual: bool = False):
+        """启动主窗口更新检查，并记录本地完整更新包。"""
 
         if self.update_download_controller.is_active:
             self.logger.debug("更新包正在下载，跳过重复检查")
+            if manual:
+                self.update_download_controller.show_progress_dialog(self)
             return
 
-        # 检查 update 目录下是否有更新包
+        if self.update_checker_thread and self.update_checker_thread.isRunning():
+            if manual:
+                toast_info(self, "正在检查更新...")
+            return
+
+        self._update_check_manual = manual
+        self._set_main_update_state("checking")
+        self._update_check_animation_step = 0
+        self._update_check_animation_timer.start()
+        if manual:
+            toast_info(self, "正在检查更新...")
+
         local_pending_version = None
         local_download_path = None
         local_batch_path = None
 
         try:
-            # 获取用户目录下的 update 文件夹
             update_dir = get_update_dir()
-
             self.logger.debug(f"检查本地更新目录: {update_dir}")
-
             ready_update = load_ready_update(update_dir)
             if ready_update:
                 local_pending_version = str(ready_update['version'])
@@ -5303,7 +5481,12 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.debug(f"检查本地更新目录失败: {e}")
 
-        # 修复问题4：使用后台线程检查线上最新版本，避免阻塞UI
+        self._local_update_info = {
+            'version': local_pending_version,
+            'path': local_download_path,
+            'batch_path': local_batch_path,
+        }
+
         try:
             self.logger.debug("检查线上更新：开始（后台线程）")
             endpoint = None
@@ -5314,208 +5497,146 @@ class ImageClassifier(QMainWindow):
             if not endpoint:
                 endpoint = get_manifest_url(latest=True)
 
-            # 停止旧的检查线程（如果存在）
-            if self.update_checker_thread and self.update_checker_thread.isRunning():
-                self.logger.debug("停止旧的更新检查线程")
-                self.update_checker_thread.quit()
-                self.update_checker_thread.wait()
-
-            # 创建新的后台检查线程
             self.update_checker_thread = UpdateCheckerThread(endpoint, token)
             self.update_checker_thread.check_success.connect(self._on_update_check_success)
             self.update_checker_thread.check_failed.connect(self._on_update_check_failed)
-
-            # 保存本地更新包信息，供回调使用
-            self._local_update_info = {
-                'version': local_pending_version,
-                'path': local_download_path,
-                'batch_path': local_batch_path
-            }
-
             self.update_checker_thread.start()
             self.logger.debug("后台更新检查线程已启动")
         except Exception as e:
             self.logger.debug(f"启动后台更新检查失败: {e}")
-            # 失败时调用回调处理
             self._on_update_check_failed(str(e))
 
-    def _process_update_result(self, online_version, manifest, endpoint, token):
-        """处理更新检查结果"""
-        # 从保存的信息中恢复本地更新包数据
+    def _finish_main_update_check(self):
+        """结束按钮检查动画并清理本次检查标记。"""
+        self._update_check_animation_timer.stop()
+        self._update_check_animation_step = 0
+        self._update_check_manual = False
+
+    def _clear_pending_update(self):
+        """清理供右下角入口展示的线上更新信息。"""
+        self._pending_update_version = None
+        self._pending_update_manifest = None
+        self._pending_update_token = ""
+
+    def _remember_pending_update(self, version, manifest, token):
+        """保存线上更新信息，等待用户点击状态栏入口。"""
+        self._pending_update_version = str(version)
+        self._pending_update_manifest = manifest
+        self._pending_update_token = token or ""
+
+    def _discard_local_ready_update(self, local_batch_path=None):
+        """删除不再适用的完整更新包及遗留安装脚本。"""
+        self.update_download_controller.discard_ready_update()
+        if local_batch_path and local_batch_path.exists():
+            local_batch_path.unlink()
+
+    def _process_update_result(
+        self,
+        online_version,
+        manifest,
+        endpoint,
+        token,
+        manual: Optional[bool] = None,
+        error_message: str = "",
+    ):
+        """合并本地完整包和线上版本，更新右下角入口。"""
+        if manual is None:
+            manual = self._update_check_manual
+
         local_info = getattr(self, '_local_update_info', {})
         local_pending_version = local_info.get('version')
         local_download_path = local_info.get('path')
         local_batch_path = local_info.get('batch_path')
 
-        # 判断是使用本地更新包还是下载新版本
         if local_pending_version and local_download_path:
-            # 有本地更新包，比较版本
-            if online_version and compare_version(online_version, local_pending_version) > 0:
-                # 线上版本更新，清理旧更新包，提示下载新版本
-                self.logger.info(f"线上版本v{online_version}比本地v{local_pending_version}更新，清理旧包并提示下载新版本")
+            try:
+                local_vs_current = compare_version(
+                    local_pending_version,
+                    __version__,
+                )
+            except Exception as e:
+                self.logger.warning(f"本地更新版本无效，清理更新包: {e}")
+                local_vs_current = 0
+
+            if local_vs_current <= 0:
+                self.logger.info(
+                    f"本地更新包v{local_pending_version}不高于当前版本"
+                    f"v{__version__}，清理更新包"
+                )
                 try:
-                    self.update_download_controller.discard_ready_update()
-                    self.logger.info(f"已删除旧更新包: {local_download_path}")
-                    if local_batch_path and local_batch_path.exists():
-                        local_batch_path.unlink()
-                        self.logger.info(f"已删除旧批处理脚本: {local_batch_path}")
+                    self._discard_local_ready_update(local_batch_path)
+                except Exception as e:
+                    self.logger.warning(f"清理本地更新包失败: {e}")
+                local_pending_version = None
+                local_download_path = None
+            elif (
+                online_version
+                and compare_version(online_version, local_pending_version) > 0
+            ):
+                self.logger.info(
+                    f"线上版本v{online_version}比本地v{local_pending_version}更新，"
+                    "清理旧包并等待用户查看新版本"
+                )
+                try:
+                    self._discard_local_ready_update(local_batch_path)
                 except Exception as e:
                     self.logger.warning(f"清理旧更新包失败: {e}")
+                local_pending_version = None
+                local_download_path = None
+            else:
+                self._clear_pending_update()
+                self._set_main_update_state(
+                    "ready",
+                    local_pending_version,
+                    f"更新 v{local_pending_version} 已下载，点击重启安装",
+                )
+                if manual:
+                    toast_info(
+                        self,
+                        f"更新 v{local_pending_version} 已下载，可重启更新",
+                    )
+                return
 
-                # 修复问题5：直接使用已传入的manifest参数，避免重复同步调用
-                try:
-                    if manifest:
-                        size_bytes = int(manifest.get('size_bytes', 0) or 0)
-                        notes = str(manifest.get('notes', '')).strip()
-
-                        # 显示更新对话框
-                        update_dialog = UpdateInfoDialog(
-                            new_version=online_version,
-                            current_version=__version__,
-                            size_bytes=size_bytes,
-                            notes=notes,
-                            manifest=manifest,
-                            token=token,
-                            parent=self
+        if online_version:
+            try:
+                cmp_result = compare_version(online_version, __version__)
+                if cmp_result > 0 and manifest:
+                    already_pending = (
+                        self._pending_update_version == str(online_version)
+                        and self._pending_update_manifest is not None
+                    )
+                    self._remember_pending_update(
+                        online_version,
+                        manifest,
+                        token,
+                    )
+                    self._set_main_update_state(
+                        "available",
+                        online_version,
+                        "点击查看更新内容并选择是否下载",
+                    )
+                    if manual or not already_pending:
+                        toast_info(self, f"发现新版本 v{online_version}")
+                    return
+                self.logger.debug(f"当前版本已是最新: v{__version__}")
+                self._clear_pending_update()
+                self._set_main_update_state("idle")
+                if manual:
+                    if cmp_result == 0:
+                        toast_success(self, f"当前已是最新版本 v{__version__}")
+                    else:
+                        toast_info(
+                            self,
+                            f"当前版本 v{__version__} 高于线上版本 v{online_version}",
                         )
-                        update_dialog.exec()
-                    else:
-                        self.logger.warning("无法获取线上更新详情（manifest为空）")
-                except Exception as e:
-                    self.logger.error(f"处理线上更新失败: {e}")
-            else:
-                # 本地更新包是最新的或线上检查失败，检查是否需要安装
-                # 如果本地更新包版本等于当前版本，删除更新包（已经是这个版本了）
-                if local_pending_version == __version__:
-                    self.logger.info(f"本地更新包v{local_pending_version}与当前版本相同，清理更新包")
-                    try:
-                        self.update_download_controller.discard_ready_update()
-                        self.logger.info(f"已删除同版本更新包: {local_download_path}")
-                        if local_batch_path and local_batch_path.exists():
-                            local_batch_path.unlink()
-                            self.logger.info(f"已删除批处理脚本: {local_batch_path}")
-                    except Exception as e:
-                        self.logger.warning(f"清理同版本更新包失败: {e}")
-                    return  # 不提示安装
+                return
+            except Exception as e:
+                error_message = str(e)
+                self.logger.error(f"处理线上更新失败: {e}")
 
-                # 本地更新包版本高于当前版本，提示安装
-                self.logger.info(f"本地更新包v{local_pending_version}比当前版本v{__version__}更新，提示安装")
-                try:
-                    # 如果批处理脚本不存在，需要重新生成
-                    if not local_batch_path or not local_batch_path.exists():
-                        self.logger.warning(f"批处理脚本不存在，重新生成")
-                        # 获取正确的exe路径（开发环境 vs 打包环境）
-                        if getattr(sys, 'frozen', False):
-                            # 打包环境：使用exe所在目录
-                            exe_path = Path(sys.executable)
-                        else:
-                            # 开发环境：使用当前工作目录下的模拟exe路径
-                            exe_path = Path.cwd() / "ImageClassifier.exe"
-                        local_batch_path = launch_self_update(exe_path, local_download_path)
-                        self.logger.info(f"已生成批处理脚本: {local_batch_path}")
-
-                    # 创建主题适配的消息框
-                    box = QMessageBox(self)
-                    box.setWindowTitle('发现已下载更新')
-                    box.setText(f'检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？')
-                    box.setIcon(QMessageBox.Icon.Question)
-
-                    # 设置程序图标
-                    try:
-                        icon_path = self._get_resource_path('assets/icon.ico')
-                        if icon_path and icon_path.exists():
-                            box.setWindowIcon(QIcon(str(icon_path)))
-                    except Exception:
-                        pass
-
-                    # 应用主题适配样式
-                    config = get_app_config()
-                    default_theme.set_theme(config.theme)
-                    c = default_theme.colors
-
-                    box.setStyleSheet(f"""
-                        QMessageBox {{
-                            background-color: {c.BACKGROUND_PRIMARY};
-                            color: {c.TEXT_PRIMARY};
-                            border: 1px solid {c.BORDER_MEDIUM};
-                            border-radius: 8px;
-                            font-size: 14px;
-                            min-width: 400px;
-                        }}
-                        QMessageBox QLabel {{
-                            color: {c.TEXT_PRIMARY};
-                            font-size: 14px;
-                            padding: 10px;
-                        }}
-                        QPushButton {{
-                            background-color: {c.PRIMARY};
-                            color: white;
-                            border: none;
-                            border-radius: 6px;
-                            padding: 10px 24px;
-                            font-size: 14px;
-                            font-weight: bold;
-                            min-width: 100px;
-                            min-height: 36px;
-                        }}
-                        QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-                        QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
-                    """)
-
-                    # 使用自定义按钮
-                    yes_btn = box.addButton("是", QMessageBox.ButtonRole.YesRole)
-                    no_btn = box.addButton("否", QMessageBox.ButtonRole.NoRole)
-                    box.setDefaultButton(yes_btn)
-
-                    box.exec()
-                    clicked_button = box.clickedButton()
-
-                    if clicked_button == yes_btn:
-                        # 立即重启安装
-                        try:
-                            if self.update_download_controller.install_ready_update():
-                                self.logger.info("用户选择立即重启安装更新")
-                        except Exception as e:
-                            self.logger.error(f"启动批处理失败: {e}")
-                    else:
-                        # 用户选择稍后安装，保留红点标记
-                        self.logger.info("用户选择稍后安装待更新版本")
-                except Exception as e:
-                    self.logger.debug(f"提示安装本地更新失败: {e}")
-        else:
-            # 没有本地更新包，检查线上更新
-            if online_version:
-                try:
-                    # 比较版本
-                    cmp_result = compare_version(online_version, __version__)
-                    if cmp_result > 0:
-                        # 有新版本，弹窗提示
-                        self.logger.info(f"检测到新版本 v{online_version}，当前版本 v{__version__}")
-
-                        # 修复问题5：直接使用已传入的manifest参数，避免重复同步调用
-                        if manifest:
-                            size_bytes = int(manifest.get('size_bytes', 0) or 0)
-                            notes = str(manifest.get('notes', '')).strip()
-
-                            # 显示更新对话框
-                            update_dialog = UpdateInfoDialog(
-                                new_version=online_version,
-                                current_version=__version__,
-                                size_bytes=size_bytes,
-                                notes=notes,
-                                manifest=manifest,
-                                token=token,
-                                parent=self
-                            )
-                            update_dialog.exec()
-                        else:
-                            self.logger.warning("无法获取更新详情（manifest为空）")
-                    else:
-                        self.logger.debug(f"当前版本已是最新: v{__version__}")
-                except Exception as e:
-                    self.logger.error(f"处理线上更新失败: {e}")
-            else:
-                self.logger.debug("未获取到线上版本信息")
+        self._set_main_update_state("idle")
+        if manual:
+            toast_warning(self, error_message or "无法获取更新信息")
     
     def keyPressEvent(self, event):
         """处理键盘事件 - 优化按键处理和日志记录"""

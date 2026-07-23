@@ -99,7 +99,7 @@ class UpdateInfoDialog(QDialog):
         button_layout.addStretch()
 
         # 确定按钮
-        self.confirm_btn = QPushButton("确定")
+        self.confirm_btn = QPushButton("下载")
         self.confirm_btn.setMinimumWidth(100)
         self.confirm_btn.setMinimumHeight(36)
         self.confirm_btn.clicked.connect(self.start_download)
@@ -479,11 +479,57 @@ class DownloadProgressDialog(QDialog):
         msg_box.exec()
         return msg_box.clickedButton() == cancel_btn
 
+    def _confirm_close_download(self) -> str:
+        """关闭进度窗时让用户选择转入后台或取消下载。"""
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("下载仍在进行")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setText("更新仍在下载，关闭窗口后如何处理？")
+        msg_box.setInformativeText(
+            "选择后台下载后，可通过右下角的更新进度入口再次打开。"
+        )
+
+        background_btn = msg_box.addButton(
+            "后台下载",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        cancel_btn = msg_box.addButton(
+            "取消下载",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        msg_box.setDefaultButton(background_btn)
+
+        config = get_app_config()
+        default_theme.set_theme(config.theme)
+        c = default_theme.colors
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QMessageBox QLabel {{ color: {c.TEXT_PRIMARY}; }}
+            QPushButton {{
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                min-width: 90px;
+                background-color: {c.PRIMARY};
+                color: white;
+            }}
+            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+        """)
+
+        msg_box.exec()
+        return (
+            "cancel"
+            if msg_box.clickedButton() == cancel_btn
+            else "background"
+        )
+
     def closeEvent(self, event):
-        """点击窗口关闭按钮视为取消；后台下载必须显式选择。"""
+        """关闭下载窗口时二次选择后台运行或真正取消。"""
         if self.controller.is_active:
-            if not self._confirm_cancel_download():
-                event.ignore()
-                return
-            self.controller.cancel()
+            choice = self._confirm_close_download()
+            if choice == "cancel":
+                self.controller.cancel()
         event.accept()
