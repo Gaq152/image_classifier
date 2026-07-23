@@ -6,7 +6,7 @@
 
 import logging
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                            QPushButton, QProgressBar, QTextEdit)
+                            QPushButton, QProgressBar, QTextEdit, QMessageBox)
 from PyQt6.QtCore import Qt
 from .components.toast import toast_error
 from .components.styles.theme import default_theme
@@ -433,14 +433,59 @@ class DownloadProgressDialog(QDialog):
 
     def _handle_action(self):
         if self.controller.is_active:
-            self.controller.cancel()
+            if self._confirm_cancel_download():
+                self.controller.cancel()
         elif self.controller.state == "ready":
             self.controller.install_ready_update()
         else:
             self.close()
 
+    def _confirm_cancel_download(self) -> bool:
+        """二次确认是否取消并删除未完成的更新下载。"""
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("确认取消下载")
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setText("确定要取消更新下载吗？")
+        msg_box.setInformativeText("未完成的下载内容将被删除。")
+
+        cancel_btn = msg_box.addButton(
+            "取消下载",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        continue_btn = msg_box.addButton(
+            "继续下载",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        msg_box.setDefaultButton(continue_btn)
+
+        config = get_app_config()
+        default_theme.set_theme(config.theme)
+        c = default_theme.colors
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QMessageBox QLabel {{ color: {c.TEXT_PRIMARY}; }}
+            QPushButton {{
+                border: none;
+                border-radius: 6px;
+                padding: 8px 18px;
+                min-width: 90px;
+                background-color: {c.PRIMARY};
+                color: white;
+            }}
+            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
+        """)
+
+        msg_box.exec()
+        return msg_box.clickedButton() == cancel_btn
+
     def closeEvent(self, event):
         """点击窗口关闭按钮视为取消；后台下载必须显式选择。"""
         if self.controller.is_active:
+            if not self._confirm_cancel_download():
+                event.ignore()
+                return
             self.controller.cancel()
         event.accept()

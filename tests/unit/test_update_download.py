@@ -145,7 +145,7 @@ def test_controller_shutdown_waits_for_cancel_and_releases_file(
 
 
 def test_progress_dialog_background_and_close_have_distinct_behavior(qtbot):
-    """显式后台下载继续任务，窗口关闭按钮则真正取消。"""
+    """显式后台下载继续任务，窗口关闭确认后才真正取消。"""
     controller = FakeDownloadController()
     dialog = DownloadProgressDialog(controller)
     qtbot.addWidget(dialog)
@@ -156,5 +156,42 @@ def test_progress_dialog_background_and_close_have_distinct_behavior(qtbot):
     controller.cancel.assert_not_called()
 
     dialog.show()
-    dialog.close()
+    with patch.object(dialog, "_confirm_cancel_download", return_value=True) as confirm:
+        dialog.close()
+    confirm.assert_called_once_with()
     controller.cancel.assert_called_once_with()
+
+
+def test_cancel_button_requires_confirmation(qtbot):
+    """点击取消下载时，拒绝确认应继续下载，确认后才调用取消。"""
+    controller = FakeDownloadController()
+    dialog = DownloadProgressDialog(controller)
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    with patch.object(dialog, "_confirm_cancel_download", return_value=False):
+        dialog.action_btn.click()
+    controller.cancel.assert_not_called()
+
+    with patch.object(dialog, "_confirm_cancel_download", return_value=True) as confirm:
+        dialog.action_btn.click()
+    confirm.assert_called_once_with()
+    controller.cancel.assert_called_once_with()
+    controller.state = "cancelled"
+    dialog.close()
+
+
+def test_window_close_keeps_downloading_when_confirmation_is_rejected(qtbot):
+    """关闭窗口时选择继续下载，应忽略关闭事件并保留进度窗口。"""
+    controller = FakeDownloadController()
+    dialog = DownloadProgressDialog(controller)
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    with patch.object(dialog, "_confirm_cancel_download", return_value=False):
+        dialog.close()
+
+    assert dialog.isVisible()
+    controller.cancel.assert_not_called()
+    controller.state = "cancelled"
+    dialog.close()
