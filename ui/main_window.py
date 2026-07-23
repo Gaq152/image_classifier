@@ -1163,7 +1163,7 @@ class ImageClassifier(QMainWindow):
 
         # 添加类别
         add_category_action = QAction('➕ 添加类别', self)
-        add_category_action.triggered.connect(self.add_category)
+        add_category_action.triggered.connect(self.show_add_category_dialog)
         add_category_action.setToolTip('批量添加分类类别')
         self.toolbar.addAction(add_category_action)
         # 获取toolbar中对应的widget并设置objectName
