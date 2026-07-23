@@ -1,0 +1,4 @@
+-r requirements.txt
+
+pytest>=7.4,<9
+pytest-qt>=4.2,<5

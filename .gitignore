@@ -23,7 +23,6 @@ parts/
 dist/
 var/
 wheels/
-tests/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -43,6 +42,7 @@ ENV/
 # 日志文件
 *.log
 *.txt
+!requirements-dev.txt
 
 # 系统文件
 .DS_Store

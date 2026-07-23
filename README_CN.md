@@ -190,11 +190,25 @@ python -m venv venv
 venv\Scripts\activate  # Windows
 
 # 3. 安装开发依赖
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # 4. 运行开发版本
 python run.py
 ```
+
+### 运行测试
+
+不要直接裸跑全量 `pytest`，统一通过带资源保护的测试入口：
+
+```bash
+# 全量测试：默认 2GB 内存上限、10 分钟总超时
+python scripts/safe_pytest.py
+
+# 定向测试，并自定义资源限制
+python scripts/safe_pytest.py --max-memory-mb 1024 --timeout-seconds 120 -- tests/unit/test_main_window.py -q
+```
+
+Windows 下运行器使用 Job Object 设置进程树硬内存上限，同时监控工作集并在超时、超限或中断时清理全部测试进程。开发测试依赖统一维护在 `requirements-dev.txt`。
 
 ### 代码规范
 

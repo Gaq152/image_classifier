@@ -91,6 +91,17 @@ image_classifier/
 └── _version_.py         # single source of version metadata
 ```
 
+## Tests
+
+Install the development dependencies and use the resource-limited test runner instead of invoking the full pytest suite directly:
+
+```bash
+pip install -r requirements-dev.txt
+python scripts/safe_pytest.py
+```
+
+The default limits are 2 GB for the pytest process tree and 10 minutes total runtime. On Windows, the runner applies a Job Object hard memory limit and also cleans up the complete process tree on timeout, memory exhaustion, or interruption.
+
 ## Build & Release
 
 ### GitHub Actions release pipeline
