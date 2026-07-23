@@ -6,8 +6,10 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 from PyQt6.QtCore import QObject
+from PyQt6.QtWidgets import QListView
 
 from ui.managers.image_navigation_manager import ImageNavigationManager
+from ui.models.image_list_model import ImageListModel
 
 
 class MockState:
@@ -58,6 +60,18 @@ class MockMutator:
 
     def set_removed_images(self, images: set):
         self.updates.append(('set_removed_images', images))
+
+
+class StateUpdatingMutator(MockMutator):
+    """模拟主窗口真实行为：修改索引时立即写回共享状态。"""
+
+    def __init__(self, state: MockState):
+        super().__init__()
+        self.state = state
+
+    def set_current_index(self, index: int):
+        self.state.current_index = index
+        super().set_current_index(index)
 
 
 class MockUIHooks:
@@ -145,6 +159,134 @@ class TestImageNavigationManager:
     """ImageNavigationManager 单元测试"""
 
     # ========== 原有测试 ==========
+
+    def test_keyboard_navigation_immediately_syncs_real_list_current_index(
+        self,
+        manager,
+        mock_state,
+        qapp,
+    ):
+        """快捷键翻页返回前，真实列表当前项应与业务索引保持一致。"""
+        image_files = [Path(f"test_{index}.jpg") for index in range(100)]
+        mock_state.image_files = image_files
+        mock_state.current_index = 20
+        manager._mutator = StateUpdatingMutator(mock_state)
+
+        image_list = QListView()
+        image_list.resize(320, 240)
+        image_list_model = ImageListModel(
+            [str(path) for path in image_files],
+            {},
+            set(),
+            set(),
+            image_list,
+        )
+        image_list.setModel(image_list_model)
+        manager.set_ui_components(image_list, image_list_model)
+
+        old_index = image_list_model.index(mock_state.current_index, 0)
+        image_list.setCurrentIndex(old_index)
+        image_list.show()
+        qapp.processEvents()
+
+        try:
+            # 模拟快速前进后退：业务索引连续变化，但不等待 50ms 的同步定时器。
+            for _ in range(10):
+                manager.next_image()
+            for _ in range(5):
+                manager.prev_image()
+
+            assert mock_state.current_index == 25
+            assert (
+                image_list.currentIndex().data(ImageListModel.ROLE_IMAGE_INDEX)
+                == mock_state.current_index
+            )
+        finally:
+            image_list.close()
+            image_list.deleteLater()
+
+    def test_immediate_sync_after_model_reset_restores_keyboard_target(
+        self,
+        manager,
+        mock_state,
+        qapp,
+    ):
+        """模型重置后立即同步，应恢复快捷键目标行并滚动到可见区域。"""
+        image_files = [Path(f"test_{index}.jpg") for index in range(100)]
+        mock_state.image_files = image_files
+        mock_state.current_index = 20
+        manager._mutator = StateUpdatingMutator(mock_state)
+
+        image_list = QListView()
+        image_list.resize(320, 120)
+        image_list_model = ImageListModel(
+            [str(path) for path in image_files],
+            {},
+            set(),
+            set(),
+            image_list,
+        )
+        image_list.setModel(image_list_model)
+        manager.set_ui_components(image_list, image_list_model)
+
+        old_index = image_list_model.index(mock_state.current_index, 0)
+        image_list.setCurrentIndex(old_index)
+        image_list.show()
+        qapp.processEvents()
+
+        try:
+            for _ in range(10):
+                manager.next_image()
+            for _ in range(5):
+                manager.prev_image()
+
+            # 模拟分类时 apply_image_filter() 对列表模型的整体重置。
+            image_list_model.update_data(
+                [str(path) for path in image_files],
+                {},
+                set(),
+                set(),
+                list(range(len(image_files))),
+            )
+
+            # 修复路径：显示当前图片时立即以业务索引同步列表。
+            manager.show_current_image()
+
+            assert (
+                image_list.currentIndex().data(ImageListModel.ROLE_IMAGE_INDEX)
+                == mock_state.current_index
+            )
+
+            qapp.processEvents()
+            target_rect = image_list.visualRect(image_list.currentIndex())
+            assert image_list.viewport().rect().intersects(target_rect)
+        finally:
+            image_list.close()
+            image_list.deleteLater()
+
+    def test_rapid_navigation_coalesces_delayed_selection_sync(
+        self,
+        manager,
+        mock_state,
+        qtbot,
+    ):
+        """连续快捷键翻页应只保留最后一次 50ms 延迟校准。"""
+        mock_state.image_files = [Path(f"test_{index}.jpg") for index in range(100)]
+        mock_state.current_index = 20
+        manager._mutator = StateUpdatingMutator(mock_state)
+        timeout_observer = Mock()
+        manager._selection_sync_timer.timeout.connect(timeout_observer)
+
+        for _ in range(10):
+            manager.next_image()
+
+        assert manager._selection_sync_timer.isActive()
+        assert timeout_observer.call_count == 0
+
+        qtbot.wait(80)
+
+        assert manager._selection_sync_timer.isActive() is False
+        assert timeout_observer.call_count == 1
 
     def test_scanner_signals_connected(self, manager, mock_scanner):
         """测试 scanner 信号是否正确连接"""
