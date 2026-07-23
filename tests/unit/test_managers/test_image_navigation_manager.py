@@ -288,6 +288,72 @@ class TestImageNavigationManager:
         assert manager._selection_sync_timer.isActive() is False
         assert timeout_observer.call_count == 1
 
+    @pytest.mark.parametrize(
+        "row_count",
+        [4000, 10000],
+        ids=["4000_rows", "10000_rows"],
+    )
+    def test_batched_large_model_reset_schedules_final_viewport_sync(
+        self,
+        manager,
+        mock_state,
+        qapp,
+        qtbot,
+        row_count,
+    ):
+        """大列表模型重置后，应在 Batched 布局稳定时恢复目标视窗。"""
+        image_files = [Path(f"test_{index:05d}.jpg") for index in range(row_count)]
+        mock_state.image_files = image_files
+        mock_state.current_index = row_count // 2
+        manager._mutator = StateUpdatingMutator(mock_state)
+
+        image_list = QListView()
+        image_list.resize(360, 140)
+        image_list.setUniformItemSizes(True)
+        image_list.setLayoutMode(QListView.LayoutMode.Batched)
+        image_list.setBatchSize(256)
+        image_list_model = ImageListModel(
+            [str(path) for path in image_files],
+            {},
+            set(),
+            set(),
+            image_list,
+        )
+        image_list.setModel(image_list_model)
+        manager.set_ui_components(image_list, image_list_model)
+        image_list.show()
+        qapp.processEvents()
+
+        try:
+            image_list.setCurrentIndex(image_list_model.index(0, 0))
+            image_list_model.update_data(
+                [str(path) for path in image_files],
+                {},
+                set(),
+                set(),
+                list(range(row_count)),
+            )
+
+            assert manager._selection_sync_timer.isActive()
+
+            def current_target_is_visible():
+                current = image_list.currentIndex()
+                if not current.isValid():
+                    return False
+                if (
+                    current.data(ImageListModel.ROLE_IMAGE_INDEX)
+                    != mock_state.current_index
+                ):
+                    return False
+                return image_list.viewport().rect().intersects(
+                    image_list.visualRect(current)
+                )
+
+            qtbot.waitUntil(current_target_is_visible, timeout=3000)
+        finally:
+            image_list.close()
+            image_list.deleteLater()
+
     def test_scanner_signals_connected(self, manager, mock_scanner):
         """测试 scanner 信号是否正确连接"""
         # 验证4个信号都被连接

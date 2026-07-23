@@ -2,6 +2,8 @@
 
 import logging
 
+import pytest
+
 from PyQt6.QtWidgets import QMainWindow
 
 from ui.main_window import ImageClassifier
@@ -41,6 +43,37 @@ def test_toolbar_add_category_action_opens_dialog(qapp):
 
         assert window.dialog_open_count == 1
         assert window.categories == set()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+@pytest.mark.parametrize(
+    ("status_filters", "search_text", "expected"),
+    [
+        ((True, True, True), "", False),
+        ((False, True, True), "", True),
+        ((True, False, True), "", True),
+        ((True, True, True), "sample", True),
+    ],
+)
+def test_image_filter_active_detection(
+    qapp,
+    status_filters,
+    search_text,
+    expected,
+):
+    """只有筛选条件或搜索会改变列表内容时才视为过滤已启用。"""
+    window = ToolbarHarness()
+    try:
+        (
+            window.filter_unclassified,
+            window.filter_classified,
+            window.filter_removed,
+        ) = status_filters
+        window._image_search_text = search_text
+
+        assert window.is_image_filter_active() is expected
     finally:
         window.close()
         window.deleteLater()

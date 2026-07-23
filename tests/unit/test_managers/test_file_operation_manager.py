@@ -47,6 +47,7 @@ def mock_ui():
     ui.schedule_ui_update = Mock()
     ui.refresh_category_buttons_style = Mock()
     ui.apply_image_filter = Mock()
+    ui.is_image_filter_active = Mock(return_value=False)
     ui.show_progress_dialog = Mock()
     ui.show_question = Mock(return_value=False)
     ui.show_toast = Mock()
@@ -138,6 +139,54 @@ class TestFileOperationManager:
         mock_mutator.set_classified_image.assert_called_once()
         mock_ui.save_state.assert_called_once()
         mock_ui.schedule_ui_update.assert_called()
+
+    def test_move_to_category_skips_model_reset_without_filter(
+        self,
+        manager,
+        mock_state,
+        mock_ui,
+    ):
+        """默认全部显示且无搜索时，分类不应重建图片列表模型。"""
+        mock_state.is_multi_category = False
+        mock_ui.is_image_filter_active.return_value = False
+
+        with patch.object(manager, '_execute_file_operation_with_check'):
+            manager.move_to_category("/test/images/test.jpg", "category1")
+
+        mock_ui.apply_image_filter.assert_not_called()
+
+    def test_move_to_category_rebuilds_model_when_filter_is_active(
+        self,
+        manager,
+        mock_state,
+        mock_ui,
+    ):
+        """筛选或搜索启用时，分类后仍需重新计算可见列表。"""
+        mock_state.is_multi_category = False
+        mock_ui.is_image_filter_active.return_value = True
+
+        with patch.object(manager, '_execute_file_operation_with_check'):
+            manager.move_to_category("/test/images/test.jpg", "category1")
+
+        mock_ui.apply_image_filter.assert_called_once_with(suppress_show=True)
+
+    def test_move_to_category_emits_logical_path_when_restoring_removed_image(
+        self,
+        manager,
+        mock_state,
+        qtbot,
+    ):
+        """从 remove 恢复时，列表状态更新应使用模型保存的原始路径。"""
+        logical_path = "/test/images/test.jpg"
+        mock_state.is_multi_category = False
+        mock_state.removed_images = {logical_path}
+        mock_state.get_real_file_path.return_value = Path("/test/remove/test.jpg")
+
+        with patch.object(manager, '_move_from_remove_to_category'):
+            with qtbot.waitSignal(manager.file_moved, timeout=1000) as blocker:
+                manager.move_to_category(logical_path, "category1")
+
+        assert blocker.args[0] == logical_path
 
     def test_move_to_category_single_mode_same_category_undo(self, manager, mock_state, mock_mutator):
         """测试单分类模式点击相同类别触发撤销"""

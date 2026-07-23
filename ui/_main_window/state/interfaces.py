@@ -543,8 +543,13 @@ class UIHooks(Protocol):
     # ========== 过滤相关 ==========
 
 
-    def apply_image_filter(self) -> None:
+    def apply_image_filter(self, suppress_show: bool = False) -> None:
         """应用图片过滤"""
+        pass
+
+
+    def is_image_filter_active(self) -> bool:
+        """是否启用了会改变列表内容的状态筛选或图片搜索"""
         pass
 
     # ========== 通知提示 ==========

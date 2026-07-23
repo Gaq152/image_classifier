@@ -163,13 +163,18 @@ class FileOperationManager(QObject):
             self._ui.schedule_ui_update('category_buttons', 'category_counts', 'statistics', 'ui_state')
             self._ui.refresh_category_buttons_style()
 
-            # 分类后：单分类自动翻页，多分类保持当前图片（便于同图多标签）
-            self._ui.apply_image_filter(suppress_show=True)
+            # 默认全部显示且未搜索时，分类只改变单行状态，无需重置整个模型。
+            # 仅在筛选或搜索会改变列表内容时重新应用过滤。
+            is_filter_active = getattr(self._ui, 'is_image_filter_active', None)
+            if is_filter_active is None or is_filter_active():
+                self._ui.apply_image_filter(suppress_show=True)
             if not self._state.is_multi_category:
                 self._navigator.next_image()
 
             target_dir = self._get_parent_dir() / category_name
-            self.file_moved.emit(real_path, str(target_dir / Path(real_path).name))
+            # UI 模型始终以原始逻辑路径为键；从 remove/旧分类恢复时 real_path
+            # 指向物理位置，不能用它更新列表行状态。
+            self.file_moved.emit(file_path, str(target_dir / Path(file_path).name))
             self._logger.info("图片已归类到 %s: %s", category_name, Path(real_path).name)
         except Exception as e:
             self._logger.error("移动到分类失败: %s", e)

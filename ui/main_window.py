@@ -3409,6 +3409,16 @@ class ImageClassifier(QMainWindow):
             if not suppress_show:  # 抑制时不显示toast
                 toast_info(self, "当前过滤条件下没有图片")
 
+    def is_image_filter_active(self) -> bool:
+        """返回当前筛选或搜索是否会改变图片列表内容。"""
+        all_statuses_visible = (
+            self.filter_unclassified
+            and self.filter_classified
+            and self.filter_removed
+        )
+        search_active = bool(getattr(self, '_image_search_text', '').strip())
+        return not all_statuses_visible or search_active
+
     def get_filter_stats(self):
         """获取过滤统计信息"""
         stats = {

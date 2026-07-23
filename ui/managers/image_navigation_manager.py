@@ -125,6 +125,9 @@ class ImageNavigationManager(QObject):
         self._selection_sync_timer.setSingleShot(True)
         self._selection_sync_timer.setInterval(50)
         self._selection_sync_timer.timeout.connect(self.sync_image_list_selection)
+        self._selection_sync_model = None
+        self._selection_sync_scrollbar = None
+        self.set_ui_components(image_list, image_list_model)
 
         # 连接文件扫描器信号（Manager统一管理scanner）
         self._scanner.initial_batch_ready.connect(self.on_initial_batch_ready)
@@ -139,8 +142,49 @@ class ImageNavigationManager(QObject):
             image_list: QListView 图片列表控件
             image_list_model: ImageListModel 图片列表数据模型
         """
+        # UI 重建或测试替换组件时，先解除旧连接，避免重复回调。
+        if self._selection_sync_model is not None:
+            try:
+                self._selection_sync_model.modelReset.disconnect(
+                    self._schedule_selection_sync
+                )
+            except (TypeError, RuntimeError):
+                pass
+        if self._selection_sync_scrollbar is not None:
+            try:
+                self._selection_sync_scrollbar.rangeChanged.disconnect(
+                    self._schedule_selection_sync
+                )
+            except (TypeError, RuntimeError):
+                pass
+
         self._image_list = image_list
         self._image_list_model = image_list_model
+        self._selection_sync_model = image_list_model
+        self._selection_sync_scrollbar = (
+            image_list.verticalScrollBar() if image_list is not None else None
+        )
+
+        # 模型重置和 Batched 布局扩展滚动范围时都重启同一个定时器。
+        # 快速连续分类只保留布局稳定后的最后一次校准。
+        if self._selection_sync_model is not None:
+            self._selection_sync_model.modelReset.connect(
+                self._schedule_selection_sync
+            )
+        if self._selection_sync_scrollbar is not None:
+            self._selection_sync_scrollbar.rangeChanged.connect(
+                self._schedule_selection_sync
+            )
+
+    def _schedule_selection_sync(self, *_args) -> None:
+        """合并模型重置和列表布局变化引起的选中项校准。"""
+        model = self._image_list_model
+        current_index = self._state.current_index
+        if current_index < 0:
+            return
+        if model is not None and model.rowCount() == 0:
+            return
+        self._selection_sync_timer.start()
 
     # ========== 图片加载 ==========
 
@@ -391,7 +435,7 @@ class ImageNavigationManager(QObject):
             # 立即同步业务索引与列表当前项，防止快捷键连续翻页时状态分叉。
             # 50ms 后使用可合并的单次定时器校准 Batched 布局滚动位置。
             self.sync_image_list_selection()
-            self._selection_sync_timer.start()
+            self._schedule_selection_sync()
 
             # 调度UI状态更新
             self._ui.schedule_ui_update('ui_state')
