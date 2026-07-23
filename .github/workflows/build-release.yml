@@ -127,7 +127,8 @@ jobs:
 
           # Extract update notes from _version_.py
           $notes = & python -c @"
-          import sys, json
+          import sys, re
+          sys.stdout.reconfigure(encoding='utf-8')
           sys.path.append('.')
           from _version_ import VERSION_HISTORY
           current_version = '${version}'
@@ -138,14 +139,13 @@ jobs:
                   highlights = v.get('highlights', [])
                   parts = [title]
                   for h in highlights[:3]:
-                      import re
-                      clean = re.sub(r'^[\U0001f300-\U0001f9ff\u2600-\u26ff\u2700-\u27bf\U0001fa00-\U0001fa6f]+\s*', '', h)
+                      clean = re.sub(r'^[\U0001f300-\U0001f9ff\u2600-\u26ff\u2700-\u27bf\U0001fa00-\U0001fa6f\ufe0f\u200d]+\s*', '', h)
                       parts.append('* ' + clean)
                   if len(highlights) > 3:
-                      parts.append('* and more...')
+                      parts.append('* 更多改进请查看完整更新日志...')
                   notes = '; '.join(parts)
                   break
-          print(json.dumps(notes, ensure_ascii=True)[1:-1])
+          print(notes)
           "@
 
           $manifest = @{
