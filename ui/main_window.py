@@ -786,21 +786,13 @@ class ImageClassifier(QMainWindow):
         """初始化美化的用户界面"""
         try:
             self.setWindowTitle(f"图像分类工具 v{self.version}")
-            # 降低最小窗口尺寸，兼容小屏幕笔记本（如1366×768）
-            self.setMinimumSize(960, 540)
+            # 普通窗口状态下也要完整容纳核心操作区。
+            self.setMinimumSize(1024, 600)
+            self._start_maximized = False
 
             # 尝试恢复上次保存的窗口位置和大小
             if not self._restore_window_geometry():
-                # 恢复失败或未启用，使用自适应默认值
-                screen = QApplication.primaryScreen()
-                if screen:
-                    available = screen.availableGeometry()
-                    init_width = min(int(available.width() * 0.85), 1400)
-                    init_height = min(int(available.height() * 0.85), 900)
-                    self.resize(init_width, init_height)
-                    x = available.x() + (available.width() - init_width) // 2
-                    y = available.y() + (available.height() - init_height) // 2
-                    self.move(x, y)
+                self._set_default_window_geometry()
             
             # 设置应用程序图标
             try:
@@ -1422,14 +1414,36 @@ class ImageClassifier(QMainWindow):
     
     # ===== 窗口几何信息保存与恢复 =====
 
+    def _set_default_window_geometry(self):
+        """首次启动使用居中的普通恢复尺寸，并默认以最大化状态显示。"""
+        self._start_maximized = True
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        init_width = min(max(1024, int(available.width() * 0.88)), 1500)
+        init_height = min(max(600, int(available.height() * 0.88)), 960)
+        init_width = min(init_width, available.width())
+        init_height = min(init_height, available.height())
+        self.resize(init_width, init_height)
+        x = available.x() + (available.width() - init_width) // 2
+        y = available.y() + (available.height() - init_height) // 2
+        self.move(x, y)
+
     def _save_window_geometry(self):
-        """保存当前窗口位置和大小到应用配置"""
+        """保存普通窗口几何信息、所在屏幕和最大化状态。"""
         try:
             app_config = get_app_config()
             if not app_config.remember_window_geometry:
                 return
 
-            geo = self.geometry()
+            maximized = self.isMaximized()
+            normal_geo = self.normalGeometry()
+            geo = (
+                normal_geo
+                if maximized and normal_geo.isValid()
+                else self.geometry()
+            )
             screen = self.screen()
             screen_name = screen.name() if screen else ""
             app_config.window_geometry = {
@@ -1437,9 +1451,14 @@ class ImageClassifier(QMainWindow):
                 "y": geo.y(),
                 "width": geo.width(),
                 "height": geo.height(),
-                "screen_name": screen_name
+                "screen_name": screen_name,
+                "maximized": maximized,
             }
-            self.logger.debug(f"窗口几何信息已保存: {geo.width()}x{geo.height()} at ({geo.x()},{geo.y()}) screen={screen_name}")
+            self.logger.debug(
+                f"窗口几何信息已保存: {geo.width()}x{geo.height()} "
+                f"at ({geo.x()},{geo.y()}) screen={screen_name} "
+                f"maximized={maximized}"
+            )
         except Exception as e:
             self.logger.warning(f"保存窗口几何信息失败: {e}")
 
@@ -1470,9 +1489,19 @@ class ImageClassifier(QMainWindow):
             if not screens:
                 return False
 
-            # 计算目标位置所在的屏幕
+            # 优先按显示器名称恢复，显示器变化时再按坐标查找。
             target_screen = None
-            if saved_x is not None and saved_y is not None:
+            saved_screen_name = str(geo.get("screen_name", "") or "")
+            if saved_screen_name:
+                target_screen = next(
+                    (
+                        screen
+                        for screen in screens
+                        if screen.name() == saved_screen_name
+                    ),
+                    None,
+                )
+            if target_screen is None and saved_x is not None and saved_y is not None:
                 from PyQt6.QtCore import QPoint as QP
                 target_point = QP(saved_x + saved_w // 2, saved_y + saved_h // 2)
                 target_screen = QApplication.screenAt(target_point)
@@ -1482,6 +1511,15 @@ class ImageClassifier(QMainWindow):
                 target_screen = QApplication.primaryScreen()
 
             available = target_screen.availableGeometry()
+
+            saved_maximized = geo.get("maximized")
+            if saved_maximized is None:
+                # 兼容旧配置：几何尺寸已接近铺满屏幕时视为最大化。
+                saved_maximized = (
+                    saved_w >= int(available.width() * 0.95)
+                    and saved_h >= int(available.height() * 0.95)
+                )
+            self._start_maximized = bool(saved_maximized)
 
             # 如果保存的大小超过当前屏幕，使用默认大小
             if saved_w > available.width() or saved_h > available.height():
@@ -1502,7 +1540,11 @@ class ImageClassifier(QMainWindow):
                 y = available.y() + (available.height() - saved_h) // 2
                 self.move(x, y)
 
-            self.logger.info(f"窗口几何信息已恢复: {saved_w}x{saved_h} at ({self.x()},{self.y()})")
+            self.logger.info(
+                f"窗口几何信息已恢复: {saved_w}x{saved_h} "
+                f"at ({self.x()},{self.y()}) "
+                f"maximized={self._start_maximized}"
+            )
             return True
 
         except Exception as e:

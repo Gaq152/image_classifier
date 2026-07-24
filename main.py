@@ -17,11 +17,9 @@ import time
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import Qt, QLocale
-from PyQt6.QtGui import QIcon
-from _version_ import __version__, get_full_version_string, print_version_info
+from PyQt6.QtCore import QLocale
+from _version_ import __version__
 from utils.paths import get_logs_dir
-from utils.app_config import get_app_config
 from .ui.main_window import ImageClassifier
 
 # 配置环境变量以减少调试输出
@@ -143,7 +141,7 @@ def setup_logging():
         logger.info("=" * 60)
         logger.info("图像分类工具启动")
         logger.info(f"日志目录: {log_dir}")
-        logger.info(f"日志保留天数: 7天")
+        logger.info("日志保留天数: 7天")
         logger.info("=" * 60)
 
         return True
@@ -172,7 +170,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     try:
         error_msg = f"程序遇到未预期的错误：\n{exc_value}\n\n请查看日志文件获取详细信息。"
         QMessageBox.critical(None, "程序错误", error_msg)
-    except:
+    except Exception:
         print(f"未捕获的异常: {exc_value}")
 
 
@@ -200,7 +198,10 @@ def main():
 
         # 创建主窗口
         window = ImageClassifier()
-        window.show()
+        if getattr(window, "_start_maximized", False):
+            window.showMaximized()
+        else:
+            window.show()
         
         logger = logging.getLogger(__name__)
         logger.info("应用程序启动成功")

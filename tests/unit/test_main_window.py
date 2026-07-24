@@ -4,7 +4,7 @@ import logging
 from unittest.mock import Mock, patch
 
 import pytest
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QRect, QTimer, pyqtSignal
 
 from PyQt6.QtWidgets import QMainWindow
 
@@ -487,6 +487,100 @@ def test_cancelled_download_returns_to_available_update(qapp):
 
         assert window._main_update_state == "available"
         assert "9.9.9" in window.update_download_button.text()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_save_window_geometry_records_maximized_state_and_normal_rect():
+    """最大化关闭时应保存最大化标记和可恢复的普通窗口尺寸。"""
+    config = Mock(remember_window_geometry=True)
+    window = Mock()
+    window.isMaximized.return_value = True
+    window.normalGeometry.return_value = QRect(120, 80, 1280, 720)
+    window.geometry.return_value = QRect(0, 0, 1920, 1040)
+    window.screen.return_value.name.return_value = "DISPLAY1"
+
+    with patch("ui.main_window.get_app_config", return_value=config):
+        ImageClassifier._save_window_geometry(window)
+
+    assert config.window_geometry == {
+        "x": 120,
+        "y": 80,
+        "width": 1280,
+        "height": 720,
+        "screen_name": "DISPLAY1",
+        "maximized": True,
+    }
+
+
+def test_restore_window_geometry_preserves_maximized_state(qapp):
+    """保存为最大化的窗口下次启动仍应进入最大化按钮状态。"""
+    screen = qapp.primaryScreen()
+    available = screen.availableGeometry()
+    width = max(200, available.width() - 100)
+    height = max(200, available.height() - 100)
+    config = Mock(
+        remember_window_geometry=True,
+        window_geometry={
+            "x": available.x() + 50,
+            "y": available.y() + 50,
+            "width": width,
+            "height": height,
+            "screen_name": screen.name(),
+            "maximized": True,
+        },
+    )
+    window = ToolbarHarness()
+    try:
+        with patch("ui.main_window.get_app_config", return_value=config):
+            restored = window._restore_window_geometry()
+
+        assert restored is True
+        assert window._start_maximized is True
+        assert (window.width(), window.height()) == (width, height)
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_legacy_nearly_full_screen_geometry_is_inferred_as_maximized(qapp):
+    """旧配置没有状态字段时，接近铺满屏幕的尺寸应兼容为最大化。"""
+    screen = qapp.primaryScreen()
+    available = screen.availableGeometry()
+    config = Mock(
+        remember_window_geometry=True,
+        window_geometry={
+            "x": available.x(),
+            "y": available.y(),
+            "width": available.width(),
+            "height": available.height(),
+            "screen_name": screen.name(),
+        },
+    )
+    window = ToolbarHarness()
+    try:
+        with patch("ui.main_window.get_app_config", return_value=config):
+            restored = window._restore_window_geometry()
+
+        assert restored is True
+        assert window._start_maximized is True
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_default_window_geometry_is_centered_and_starts_maximized(qapp):
+    """没有历史记录时普通恢复尺寸应居中，首次显示状态应为最大化。"""
+    window = ToolbarHarness()
+    try:
+        window._set_default_window_geometry()
+        available = qapp.primaryScreen().availableGeometry()
+        expected_x = available.x() + (available.width() - window.width()) // 2
+        expected_y = available.y() + (available.height() - window.height()) // 2
+
+        assert window._start_maximized is True
+        assert (window.x(), window.y()) == (expected_x, expected_y)
     finally:
         window.close()
         window.deleteLater()

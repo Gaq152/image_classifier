@@ -89,7 +89,8 @@ class AppConfig:
             "network_loop_enabled": False,  # 网络路径循环翻页（默认关闭，开启后会预热末尾图片）
             # 窗口位置与大小记忆
             "remember_window_geometry": True,  # 记住窗口位置和大小
-            "window_geometry": None  # 上次关闭时的窗口几何信息 {x, y, width, height, screen_name}
+            # {x, y, width, height, screen_name, maximized}
+            "window_geometry": None
         }
 
     def _load_config(self) -> Dict[str, Any]:
