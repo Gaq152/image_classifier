@@ -13,61 +13,47 @@ class ToolbarStyles:
 
     @staticmethod
     def get_main_toolbar_style() -> str:
-        """主工具栏样式"""
+        """主工具栏样式：操作按钮与方形工具按钮共享 32px 高度。"""
+        c = default_theme.colors
+        s = default_theme.sizes
         return f"""
             QToolBar {{
-                background-color: {default_theme.colors.BACKGROUND_PRIMARY};
-                border: {default_theme.sizes.BORDER_THIN} solid {default_theme.colors.BORDER_LIGHT};
-                border-radius: {default_theme.sizes.RADIUS_MEDIUM};
-                spacing: {default_theme.sizes.SPACING_XS};
-                padding: 3px;
-                margin: 2px;
+                background-color: {c.BACKGROUND_PRIMARY};
+                border: {s.BORDER_THIN} solid {c.BORDER_LIGHT};
+                border-radius: {s.RADIUS_MEDIUM};
+                spacing: 6px;
+                padding: 5px 6px;
+                margin: 2px 4px;
             }}
-            /* QAction 按钮样式 - 现代化蓝色主题 */
             QToolBar QToolButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #42A5F5, stop:1 #2196F3);
-                color: {default_theme.colors.TEXT_ON_PRIMARY};
-                border: none;
-                border-radius: {default_theme.sizes.RADIUS_LARGE};
-                padding: 2px 10px;
-                margin: 2px 2px;
-                font-size: {default_theme.sizes.FONT_MD};
+                background-color: {c.PRIMARY};
+                color: {c.TEXT_ON_PRIMARY};
+                border: 1px solid {c.PRIMARY};
+                border-radius: {s.RADIUS_MEDIUM};
+                padding: 0 14px;
+                margin: 0;
+                font-size: {s.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-width: 80px;
-                min-height: 24px;
-                max-height: 24px;
+                min-width: 88px;
+                min-height: 30px;
+                max-height: 30px;
             }}
             QToolBar QToolButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1E88E5, stop:1 #1976D2);
+                background-color: {c.PRIMARY_DARK};
+                border-color: {c.PRIMARY_DARK};
             }}
             QToolBar QToolButton:pressed {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1565C0, stop:1 #0D47A1);
+                background-color: {c.PRIMARY_DARK};
             }}
-            /* 普通QPushButton样式 - 不影响模式按钮，与QToolButton保持一致 */
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):not([objectName="sidebar_toggle_button"]):not([objectName="toolbar_collapse_button"]) {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #42A5F5, stop:1 #2196F3);
-                color: {default_theme.colors.TEXT_ON_PRIMARY};
-                border: none;
-                border-radius: {default_theme.sizes.RADIUS_LARGE};
-                padding: 2px 10px;
-                margin: 2px 2px;
-                font-size: {default_theme.sizes.FONT_MD};
-                font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-width: 80px;
-                min-height: 24px;
-                max-height: 24px;
+            QToolBar QToolButton:disabled {{
+                background-color: {c.GRAY_300};
+                color: {c.TEXT_DISABLED};
+                border-color: {c.GRAY_300};
             }}
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):not([objectName="sidebar_toggle_button"]):not([objectName="toolbar_collapse_button"]):hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1E88E5, stop:1 #1976D2);
-            }}
-            QToolBar QPushButton:not([objectName="mode_button"]):not([objectName="refresh_button"]):not([objectName="help_button"]):not([objectName="category_mode_button"]):not([objectName="sidebar_toggle_button"]):not([objectName="toolbar_collapse_button"]):pressed {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                           stop:0 #1565C0, stop:1 #0D47A1);
+            QToolBar::separator {{
+                background-color: {c.BORDER_LIGHT};
+                width: 1px;
+                margin: 6px 4px;
             }}
         """
 

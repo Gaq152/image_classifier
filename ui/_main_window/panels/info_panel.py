@@ -42,20 +42,6 @@ class InfoPanel(QWidget):
         # 提示文本 - 固定高度
         self.tips_label = QLabel('💡 ↑↓选择类别 | Enter确认 | 双击快速分类 | 滚轮缩放')
         self.tips_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.tips_label.setStyleSheet("""
-            QLabel {
-                color: #555;
-                font-size: 11px;
-                padding: 4px 8px;
-                background-color: #FFF8E1;
-                border: 1px solid #FFD54F;
-                border-radius: 4px;
-                margin: 2px 0px;
-                max-height: 24px;
-                min-height: 24px;
-                font-weight: 500;
-            }
-        """)
         main_layout.addWidget(self.tips_label, 0)
 
     # ========== Public API ==========

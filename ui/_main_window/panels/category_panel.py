@@ -2,7 +2,6 @@
 import functools
 import logging
 from typing import List, Dict, Optional
-from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
@@ -14,7 +13,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QAction
 from ...components.widgets.category_button import CategoryButton
 from ...components.styles import WidgetStyles
 from ...components.styles.theme import default_theme
-from ...dialogs import AddCategoriesDialog
+from ...components.dialog_utils import style_icon_button
 
 
 class CategoryPanel(QWidget):
@@ -60,6 +59,8 @@ class CategoryPanel(QWidget):
         self.button_layout = None
         self.sort_button = None
         self.sort_direction_button = None
+        self.add_button = None
+        self.category_title_label = None
 
         self._init_ui()
         self.apply_theme()  # 初始化时应用主题
@@ -78,54 +79,6 @@ class CategoryPanel(QWidget):
         self.category_scroll.setObjectName("category_list")
         self.category_scroll.setWidgetResizable(True)
         self.category_scroll.setMinimumHeight(80)
-        self.category_scroll.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #FFB74D;
-                border-radius: 4px;
-                background-color: #FFFFFF;
-            }
-            QScrollBar:vertical {
-                border: 1px solid #FFB74D;
-                background: #FFF8E1;
-                width: 10px;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:vertical {
-                background: #FF9800;
-                border-radius: 3px;
-                min-height: 15px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #F57C00;
-            }
-            QScrollBar::handle:vertical:pressed {
-                background: #E65100;
-            }
-            QScrollBar:horizontal {
-                border: 1px solid #FFB74D;
-                background: #FFF8E1;
-                height: 10px;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #FF9800;
-                border-radius: 3px;
-                min-width: 15px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #F57C00;
-            }
-            QScrollBar::handle:horizontal:pressed {
-                background: #E65100;
-            }
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical,
-            QScrollBar::add-line:horizontal,
-            QScrollBar::sub-line:horizontal {
-                border: none;
-                background: none;
-            }
-        """)
 
         self.category_widget = QWidget()
         self.button_layout = QVBoxLayout(self.category_widget)
@@ -140,33 +93,15 @@ class CategoryPanel(QWidget):
         # 标题容器
         category_title_container = QWidget()
         category_title_container.setObjectName("category_title_container")
-        category_title_container.setStyleSheet("""
-            QWidget#category_title_container {
-                border-bottom: 2px solid #FF9800;
-                margin-bottom: 4px;
-                max-height: 28px;
-                min-height: 28px;
-            }
-        """)
+        category_title_container.setFixedHeight(40)
         category_title_layout = QHBoxLayout(category_title_container)
-        category_title_layout.setContentsMargins(6, 0, 6, 4)
+        category_title_layout.setContentsMargins(6, 4, 6, 4)
         category_title_layout.setSpacing(8)
-        category_title_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        category_title_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # 标题
-        category_label = QLabel("🏷️ 分类类别")
-        category_label.setStyleSheet("""
-            QLabel {
-                font-size: 13px;
-                font-weight: bold;
-                color: #E65100;
-                border: none;
-                background-color: transparent;
-                padding: 0px;
-                margin: 0px;
-            }
-        """)
-        category_title_layout.addWidget(category_label)
+        self.category_title_label = QLabel("🏷️ 分类类别")
+        category_title_layout.addWidget(self.category_title_label)
         category_title_layout.addStretch()
 
         # 排序方向按钮
@@ -175,27 +110,9 @@ class CategoryPanel(QWidget):
             'sort_direction_button',
             '',
             self._on_sort_direction_clicked,
-            size=(18, 18)
+            size=(32, 32)
         )
-        self.sort_direction_button.setStyleSheet("""
-            QPushButton#sort_direction_button {
-                background-color: transparent;
-                color: #E65100;
-                border: none;
-                border-radius: 3px;
-                font-size: 12px;
-                font-weight: bold;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#sort_direction_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#sort_direction_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-        """)
+        style_icon_button(self.sort_direction_button)
         category_title_layout.addWidget(self.sort_direction_button)
         self._update_direction_button_tooltip()
 
@@ -204,56 +121,20 @@ class CategoryPanel(QWidget):
             '▼', 'sort_button',
             '类别排序方式',
             self._show_sort_menu,
-            size=(18, 18)
+            size=(32, 32)
         )
-        self.sort_button.setStyleSheet("""
-            QPushButton#sort_button {
-                background-color: transparent;
-                color: #E65100;
-                border: none;
-                border-radius: 3px;
-                font-size: 11px;
-                font-weight: normal;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#sort_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#sort_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-        """)
+        style_icon_button(self.sort_button)
         category_title_layout.addWidget(self.sort_button)
 
         # 添加类别按钮
-        add_button = self._create_toolbar_button(
+        self.add_button = self._create_toolbar_button(
             '+', 'add_category_button',
             '批量添加分类类别',
             self._on_add_clicked,
-            size=(18, 18)
+            size=(32, 32)
         )
-        add_button.setStyleSheet("""
-            QPushButton#add_category_button {
-                background-color: transparent;
-                color: #E65100;
-                border: none;
-                border-radius: 3px;
-                font-size: 14px;
-                font-weight: bold;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#add_category_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#add_category_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-        """)
-        category_title_layout.addWidget(add_button)
+        style_icon_button(self.add_button)
+        category_title_layout.addWidget(self.add_button)
 
         layout.addWidget(category_title_container, 0)
 
@@ -577,7 +458,6 @@ class CategoryPanel(QWidget):
         window = self.window()
         window_rect = window.rect()
         window_global_pos = window.mapToGlobal(window_rect.topLeft())
-        window_right = window_global_pos.x() + window_rect.width()
         window_bottom = window_global_pos.y() + window_rect.height()
 
         # 初始位置：按钮右下角，菜单右对齐
@@ -659,59 +539,75 @@ class CategoryPanel(QWidget):
         """应用主题到面板"""
         c = default_theme.colors
 
-        # 更新标题容器（橙色边框）
+        # 标题栏和工具按钮统一使用主色与 32px 紧凑尺寸。
         category_title_container = self.findChild(QWidget, "category_title_container")
         if category_title_container:
             category_title_container.setStyleSheet(f"""
                 QWidget#category_title_container {{
-                    border-bottom: 2px solid {c.WARNING};
-                    margin-bottom: 4px;
-                    max-height: 28px;
-                    min-height: 28px;
+                    border-bottom: 1px solid {c.BORDER_MEDIUM};
                 }}
             """)
 
-        # 更新滚动区域样式（橙色主题）
+        if self.category_title_label:
+            self.category_title_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {c.PRIMARY};
+                    font-size: 13px;
+                    font-weight: bold;
+                    border: none;
+                    background: transparent;
+                }}
+            """)
+
+        for button in (
+            self.sort_direction_button,
+            self.sort_button,
+            self.add_button,
+        ):
+            if button:
+                style_icon_button(button)
+
+        # 列表使用中性边框，交互强调色统一为主色。
         if self.category_scroll:
             self.category_scroll.setStyleSheet(f"""
                 QScrollArea {{
-                    border: 1px solid {c.WARNING};
+                    border: 1px solid {c.BORDER_MEDIUM};
                     border-radius: 4px;
                     background-color: {c.BACKGROUND_SECONDARY};
                 }}
                 QScrollBar:vertical {{
-                    border: 1px solid {c.WARNING};
+                    border: none;
                     background: {c.BACKGROUND_SECONDARY};
                     width: 10px;
                     border-radius: 3px;
                 }}
                 QScrollBar::handle:vertical {{
-                    background: {c.WARNING};
+                    background: {c.PRIMARY};
                     border-radius: 3px;
                     min-height: 15px;
                 }}
                 QScrollBar::handle:vertical:hover {{
-                    background: {c.WARNING_DARK};
+                    background: {c.PRIMARY_DARK};
                 }}
                 QScrollBar::handle:vertical:pressed {{
-                    background: {c.WARNING_DARK};
+                    background: {c.PRIMARY_DARK};
                 }}
                 QScrollBar:horizontal {{
-                    border: 1px solid {c.WARNING};
+                    border: none;
                     background: {c.BACKGROUND_SECONDARY};
                     height: 10px;
                     border-radius: 3px;
                 }}
                 QScrollBar::handle:horizontal {{
-                    background: {c.WARNING};
+                    background: {c.PRIMARY};
                     border-radius: 3px;
                     min-width: 15px;
                 }}
                 QScrollBar::handle:horizontal:hover {{
-                    background: {c.WARNING_DARK};
+                    background: {c.PRIMARY_DARK};
                 }}
                 QScrollBar::handle:horizontal:pressed {{
-                    background: {c.WARNING_DARK};
+                    background: {c.PRIMARY_DARK};
                 }}
                 QScrollBar::add-line:vertical,
                 QScrollBar::sub-line:vertical,

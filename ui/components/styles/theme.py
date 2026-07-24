@@ -10,40 +10,40 @@ class LightColors:
     """亮色主题颜色方案"""
 
     # 主色调
-    PRIMARY = "#3498DB"
-    PRIMARY_DARK = "#2980B9"
-    PRIMARY_LIGHT = "#5DADE2"
+    PRIMARY = "#2563EB"
+    PRIMARY_DARK = "#1D4ED8"
+    PRIMARY_LIGHT = "#DBEAFE"
 
     # 成功色
-    SUCCESS = "#27AE60"
-    SUCCESS_DARK = "#229954"
-    SUCCESS_LIGHT = "#58D68D"
+    SUCCESS = "#16A34A"
+    SUCCESS_DARK = "#15803D"
+    SUCCESS_LIGHT = "#DCFCE7"
 
     # 警告色
-    WARNING = "#F39C12"
-    WARNING_DARK = "#E67E22"
-    WARNING_LIGHT = "#F7DC6F"
+    WARNING = "#D97706"
+    WARNING_DARK = "#B45309"
+    WARNING_LIGHT = "#FEF3C7"
 
     # 错误色
-    ERROR = "#E74C3C"
-    ERROR_DARK = "#C0392B"
-    ERROR_LIGHT = "#F1948A"
+    ERROR = "#DC2626"
+    ERROR_DARK = "#B91C1C"
+    ERROR_LIGHT = "#FEE2E2"
 
     # 中性色
     WHITE = "#FFFFFF"
     BLACK = "#000000"
 
     # 灰色系
-    GRAY_50 = "#FAFAFA"
-    GRAY_100 = "#F5F5F5"
-    GRAY_200 = "#EEEEEE"
-    GRAY_300 = "#E0E0E0"
-    GRAY_400 = "#BDBDBD"
-    GRAY_500 = "#9E9E9E"
-    GRAY_600 = "#757575"
-    GRAY_700 = "#616161"
-    GRAY_800 = "#424242"
-    GRAY_900 = "#212121"
+    GRAY_50 = "#F8FAFC"
+    GRAY_100 = "#F1F5F9"
+    GRAY_200 = "#E2E8F0"
+    GRAY_300 = "#CBD5E1"
+    GRAY_400 = "#94A3B8"
+    GRAY_500 = "#64748B"
+    GRAY_600 = "#475569"
+    GRAY_700 = "#334155"
+    GRAY_800 = "#1E293B"
+    GRAY_900 = "#0F172A"
 
     # 背景色
     BACKGROUND_PRIMARY = WHITE
@@ -74,59 +74,59 @@ class DarkColors:
     """暗色主题颜色方案"""
 
     # 主色调
-    PRIMARY = "#42A5F5"
-    PRIMARY_DARK = "#1E88E5"
-    PRIMARY_LIGHT = "#64B5F6"
+    PRIMARY = "#3B82F6"
+    PRIMARY_DARK = "#2563EB"
+    PRIMARY_LIGHT = "#1E3A8A"
 
     # 成功色
-    SUCCESS = "#66BB6A"
-    SUCCESS_DARK = "#43A047"
-    SUCCESS_LIGHT = "#81C784"
+    SUCCESS = "#22C55E"
+    SUCCESS_DARK = "#16A34A"
+    SUCCESS_LIGHT = "#14532D"
 
     # 警告色
-    WARNING = "#FFA726"
-    WARNING_DARK = "#FB8C00"
-    WARNING_LIGHT = "#FFB74D"
+    WARNING = "#F59E0B"
+    WARNING_DARK = "#D97706"
+    WARNING_LIGHT = "#78350F"
 
     # 错误色
-    ERROR = "#EF5350"
-    ERROR_DARK = "#E53935"
-    ERROR_LIGHT = "#EF5350"
+    ERROR = "#EF4444"
+    ERROR_DARK = "#DC2626"
+    ERROR_LIGHT = "#7F1D1D"
 
     # 中性色
     WHITE = "#FFFFFF"
     BLACK = "#000000"
 
     # 灰色系（暗色反转）
-    GRAY_50 = "#1E1E1E"  # 最暗
-    GRAY_100 = "#252525"
-    GRAY_200 = "#2D2D2D"
-    GRAY_300 = "#383838"
-    GRAY_400 = "#4A4A4A"
-    GRAY_500 = "#6B6B6B"
-    GRAY_600 = "#9E9E9E"
-    GRAY_700 = "#B0B0B0"
-    GRAY_800 = "#C5C5C5"
-    GRAY_900 = "#E0E0E0"  # 最亮
+    GRAY_50 = "#0F172A"  # 最暗
+    GRAY_100 = "#111827"
+    GRAY_200 = "#1E293B"
+    GRAY_300 = "#334155"
+    GRAY_400 = "#475569"
+    GRAY_500 = "#64748B"
+    GRAY_600 = "#94A3B8"
+    GRAY_700 = "#CBD5E1"
+    GRAY_800 = "#E2E8F0"
+    GRAY_900 = "#F1F5F9"  # 最亮
 
     # 背景色
-    BACKGROUND_PRIMARY = "#1E1E1E"
-    BACKGROUND_SECONDARY = "#252525"
-    BACKGROUND_CARD = "#2D2D2D"
-    BACKGROUND_HOVER = "#383838"
-    BACKGROUND_PRESSED = "#4A4A4A"
+    BACKGROUND_PRIMARY = "#0F172A"
+    BACKGROUND_SECONDARY = "#111827"
+    BACKGROUND_CARD = "#1E293B"
+    BACKGROUND_HOVER = "#334155"
+    BACKGROUND_PRESSED = "#475569"
 
     # 文本色
-    TEXT_PRIMARY = "#E0E0E0"
-    TEXT_SECONDARY = "#B0B0B0"
-    TEXT_DISABLED = "#6B6B6B"
+    TEXT_PRIMARY = "#F1F5F9"
+    TEXT_SECONDARY = "#CBD5E1"
+    TEXT_DISABLED = "#64748B"
     TEXT_ON_PRIMARY = WHITE
     TEXT_ON_DARK = WHITE
 
     # 边框色
-    BORDER_LIGHT = "#383838"
-    BORDER_MEDIUM = "#4A4A4A"
-    BORDER_DARK = "#6B6B6B"
+    BORDER_LIGHT = "#334155"
+    BORDER_MEDIUM = "#475569"
+    BORDER_DARK = "#64748B"
 
     # 特殊用途颜色
     SHADOW = "rgba(0, 0, 0, 0.3)"
@@ -169,6 +169,15 @@ class Sizes:
     BUTTON_HEIGHT_MD = "32px"
     BUTTON_HEIGHT_LG = "36px"
     BUTTON_HEIGHT_XL = "40px"
+
+    # Python 布局使用的逻辑像素值（Qt 会按系统 DPI 自动缩放）
+    BUTTON_HEIGHT_COMPACT_PX = 32
+    BUTTON_HEIGHT_STANDARD_PX = 36
+    BUTTON_HEIGHT_LARGE_PX = 40
+    BUTTON_MIN_WIDTH_PX = 88
+    DIALOG_MARGIN_PX = 24
+    DIALOG_SPACING_PX = 16
+    CONTROL_SPACING_PX = 12
 
     # 边框宽度
     BORDER_THIN = "1px"

@@ -6,10 +6,13 @@
 
 import logging
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                            QPushButton, QProgressBar, QTextEdit, QMessageBox)
+                            QPushButton, QProgressBar, QTextEdit, QMessageBox,
+                            QSizePolicy)
 from PyQt6.QtCore import Qt
 from .components.toast import toast_error
+from .components.styles import DialogStyles
 from .components.styles.theme import default_theme
+from .components.dialog_utils import ThemedMessageBox, configure_dialog, style_button
 from utils.app_config import get_app_config
 from .update_download import get_update_download_controller
 
@@ -38,8 +41,7 @@ class UpdateInfoDialog(QDialog):
         self.setModal(True)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(20)
-        layout.setContentsMargins(30, 30, 30, 30)
+        configure_dialog(self, layout)
 
         # 图标和标题区域
         header_layout = QHBoxLayout()
@@ -124,12 +126,7 @@ class UpdateInfoDialog(QDialog):
         default_theme.set_theme(config.theme)
         c = default_theme.colors
 
-        # 整体对话框样式
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {c.BACKGROUND_PRIMARY};
-            }}
-        """)
+        self.setStyleSheet(DialogStyles.get_complete_dialog_style())
 
         # 图标样式
         self.icon_label.setStyleSheet(f"""
@@ -189,43 +186,8 @@ class UpdateInfoDialog(QDialog):
             margin-top: 10px;
         """)
 
-        # 确定按钮
-        self.confirm_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.PRIMARY};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-        """)
-
-        # 取消按钮
-        self.cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.GRAY_500};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {c.GRAY_600};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.GRAY_700};
-            }}
-        """)
+        style_button(self.confirm_btn, "primary", min_width=100)
+        style_button(self.cancel_btn, "secondary", min_width=100)
 
     def start_download(self):
         """开始下载更新"""
@@ -255,11 +217,14 @@ class DownloadProgressDialog(QDialog):
         self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        configure_dialog(self, layout, compact=True)
 
         # 提示标签
         self.label = QLabel("正在下载更新包...")
+        self.label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         layout.addWidget(self.label)
 
         # 进度条
@@ -296,12 +261,7 @@ class DownloadProgressDialog(QDialog):
         default_theme.set_theme(config.theme)
         c = default_theme.colors
 
-        # 整体对话框样式
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {c.BACKGROUND_PRIMARY};
-            }}
-        """)
+        self.setStyleSheet(DialogStyles.get_complete_dialog_style())
 
         # 提示标签样式
         self.label.setStyleSheet(f"""
@@ -325,41 +285,9 @@ class DownloadProgressDialog(QDialog):
             }}
         """)
 
-        self.background_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.GRAY_500};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
-                min-width: 90px;
-            }}
-            QPushButton:hover {{ background-color: {c.GRAY_600}; }}
-        """)
-        self.pause_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.PRIMARY};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
-                min-width: 90px;
-            }}
-            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-            QPushButton:disabled {{ background-color: {c.GRAY_500}; }}
-        """)
-        self.action_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.PRIMARY};
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
-                min-width: 90px;
-            }}
-            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-            QPushButton:disabled {{ background-color: {c.GRAY_500}; }}
-        """)
+        style_button(self.background_btn, "secondary")
+        style_button(self.pause_btn, "primary")
+        style_button(self.action_btn, "danger")
 
     def update_progress(self, done: int, total: int):
         """更新进度"""
@@ -416,6 +344,9 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.show()
             self.action_btn.setText("取消下载")
             self.action_btn.setEnabled(True)
+            style_button(self.background_btn, "secondary")
+            style_button(self.pause_btn, "primary")
+            style_button(self.action_btn, "danger")
         elif state == "retrying":
             self.label.setText(message or "网络波动，正在重试下载...")
             self.background_btn.setText("后台下载")
@@ -425,6 +356,9 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.show()
             self.action_btn.setText("取消下载")
             self.action_btn.setEnabled(True)
+            style_button(self.background_btn, "secondary")
+            style_button(self.pause_btn, "primary")
+            style_button(self.action_btn, "danger")
         elif state == "verifying":
             self.label.setText(message or "正在校验更新包...")
             self.background_btn.setText("后台运行")
@@ -434,6 +368,9 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.show()
             self.action_btn.setText("取消下载")
             self.action_btn.setEnabled(True)
+            style_button(self.background_btn, "secondary")
+            style_button(self.pause_btn, "primary")
+            style_button(self.action_btn, "danger")
         elif state == "pausing":
             self.label.setText(message or "正在暂停下载...")
             self.background_btn.hide()
@@ -442,12 +379,15 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.show()
             self.action_btn.setText("取消下载")
             self.action_btn.setEnabled(False)
+            style_button(self.pause_btn, "secondary")
+            style_button(self.action_btn, "danger")
         elif state == "cancelling":
             self.label.setText(message or "正在取消下载...")
             self.background_btn.hide()
             self.pause_btn.hide()
             self.action_btn.setText("正在取消...")
             self.action_btn.setEnabled(False)
+            style_button(self.action_btn, "danger")
         elif state == "paused":
             self.label.setText(message or "更新下载已暂停")
             self.background_btn.setText("关闭")
@@ -457,6 +397,9 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.show()
             self.action_btn.setText("取消下载")
             self.action_btn.setEnabled(True)
+            style_button(self.background_btn, "secondary")
+            style_button(self.pause_btn, "primary")
+            style_button(self.action_btn, "danger")
         elif state == "ready":
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
@@ -466,6 +409,8 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.hide()
             self.action_btn.setText("立即重启")
             self.action_btn.setEnabled(True)
+            style_button(self.background_btn, "secondary")
+            style_button(self.action_btn, "success")
         elif state == "failed":
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
@@ -474,6 +419,7 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.hide()
             self.action_btn.setText("关闭")
             self.action_btn.setEnabled(True)
+            style_button(self.action_btn, "secondary")
         elif state == "cancelled":
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
@@ -482,12 +428,14 @@ class DownloadProgressDialog(QDialog):
             self.pause_btn.hide()
             self.action_btn.setText("关闭")
             self.action_btn.setEnabled(True)
+            style_button(self.action_btn, "secondary")
         else:
             self.label.setText(message or "暂无更新下载任务")
             self.background_btn.hide()
             self.pause_btn.hide()
             self.action_btn.setText("关闭")
             self.action_btn.setEnabled(True)
+            style_button(self.action_btn, "secondary")
 
     def _handle_pause_action(self):
         if self.controller.state == "paused":
@@ -506,7 +454,7 @@ class DownloadProgressDialog(QDialog):
 
     def _confirm_cancel_download(self) -> bool:
         """二次确认是否取消并删除未完成的更新下载。"""
-        msg_box = QMessageBox(self)
+        msg_box = ThemedMessageBox(self)
         msg_box.setWindowTitle("确认取消下载")
         msg_box.setIcon(QMessageBox.Icon.Warning)
         msg_box.setText("确定要取消更新下载吗？")
@@ -522,32 +470,12 @@ class DownloadProgressDialog(QDialog):
         )
         msg_box.setDefaultButton(continue_btn)
 
-        config = get_app_config()
-        default_theme.set_theme(config.theme)
-        c = default_theme.colors
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {c.BACKGROUND_PRIMARY};
-                color: {c.TEXT_PRIMARY};
-            }}
-            QMessageBox QLabel {{ color: {c.TEXT_PRIMARY}; }}
-            QPushButton {{
-                border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
-                min-width: 90px;
-                background-color: {c.PRIMARY};
-                color: white;
-            }}
-            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-        """)
-
         msg_box.exec()
         return msg_box.clickedButton() == cancel_btn
 
     def _confirm_close_download(self) -> str:
         """关闭进度窗时让用户选择转入后台或取消下载。"""
-        msg_box = QMessageBox(self)
+        msg_box = ThemedMessageBox(self)
         msg_box.setWindowTitle("下载仍在进行")
         msg_box.setIcon(QMessageBox.Icon.Question)
         msg_box.setText("更新仍在下载，关闭窗口后如何处理？")
@@ -564,26 +492,6 @@ class DownloadProgressDialog(QDialog):
             QMessageBox.ButtonRole.DestructiveRole,
         )
         msg_box.setDefaultButton(background_btn)
-
-        config = get_app_config()
-        default_theme.set_theme(config.theme)
-        c = default_theme.colors
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {c.BACKGROUND_PRIMARY};
-                color: {c.TEXT_PRIMARY};
-            }}
-            QMessageBox QLabel {{ color: {c.TEXT_PRIMARY}; }}
-            QPushButton {{
-                border: none;
-                border-radius: 6px;
-                padding: 8px 18px;
-                min-width: 90px;
-                background-color: {c.PRIMARY};
-                color: white;
-            }}
-            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-        """)
 
         msg_box.exec()
         return (

@@ -17,9 +17,18 @@ class DialogStyles:
         """基础对话框样式"""
         return f"""
             QDialog {{
-                background-color: {default_theme.colors.BACKGROUND_SECONDARY};
+                background-color: {default_theme.colors.BACKGROUND_PRIMARY};
                 color: {default_theme.colors.TEXT_PRIMARY};
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
+            }}
+            QLabel {{ color: {default_theme.colors.TEXT_PRIMARY}; }}
+            QLabel[uiRole="title"] {{
+                font-size: {default_theme.sizes.FONT_XL};
+                font-weight: {default_theme.fonts.WEIGHT_BOLD};
+            }}
+            QLabel[uiRole="description"] {{
+                color: {default_theme.colors.TEXT_SECONDARY};
+                font-size: {default_theme.sizes.FONT_SM};
             }}
         """
 
@@ -71,7 +80,7 @@ class DialogStyles:
         """表单对话框样式"""
         return f"""
             QDialog {{
-                background-color: {default_theme.colors.BACKGROUND_CARD};
+                background-color: {default_theme.colors.BACKGROUND_PRIMARY};
                 color: {default_theme.colors.TEXT_PRIMARY};
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
             }}
@@ -91,7 +100,7 @@ class DialogStyles:
                 border-radius: {default_theme.sizes.RADIUS_SMALL};
                 padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_MD};
                 font-size: {default_theme.sizes.FONT_MD};
-                min-height: {default_theme.sizes.BUTTON_HEIGHT_SM};
+                min-height: 20px;
             }}
             QLineEdit:focus {{
                 border-color: {default_theme.colors.PRIMARY};
@@ -111,6 +120,17 @@ class DialogStyles:
                 selection-background-color: {default_theme.colors.HIGHLIGHT};
             }}
             QTextEdit:focus {{
+                border-color: {default_theme.colors.PRIMARY};
+            }}
+            QComboBox, QSpinBox, QDoubleSpinBox {{
+                background-color: {default_theme.colors.BACKGROUND_CARD};
+                color: {default_theme.colors.TEXT_PRIMARY};
+                border: 1px solid {default_theme.colors.BORDER_MEDIUM};
+                border-radius: {default_theme.sizes.RADIUS_MEDIUM};
+                padding: 6px 10px;
+                min-height: 20px;
+            }}
+            QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
                 border-color: {default_theme.colors.PRIMARY};
             }}
         """
@@ -245,8 +265,26 @@ class DialogStyles:
             {DialogStyles.get_form_dialog_style()}
             {DialogStyles.get_list_dialog_style()}
             {DialogStyles.get_text_browser_style()}
-            {ButtonStyles.get_primary_button_style()}
-            {ButtonStyles.get_secondary_button_style()}
+            {ButtonStyles.get_dialog_button_style()}
+        """
+
+    @staticmethod
+    def get_message_box_style() -> str:
+        """主题化消息框样式，与普通对话框共用按钮和排版规范。"""
+        c = default_theme.colors
+        return f"""
+            QMessageBox {{
+                background-color: {c.BACKGROUND_PRIMARY};
+                color: {c.TEXT_PRIMARY};
+                min-width: 420px;
+            }}
+            QMessageBox QLabel {{
+                color: {c.TEXT_PRIMARY};
+                font-size: {default_theme.sizes.FONT_LG};
+                padding: 6px 4px;
+                min-width: 280px;
+            }}
+            {ButtonStyles.get_dialog_button_style()}
         """
 
     @staticmethod

@@ -16,13 +16,27 @@ class ButtonStyles:
         """基础按钮样式"""
         return f"""
             QPushButton {{
-                border: none;
-                padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_LG};
+                background-color: {default_theme.colors.BACKGROUND_CARD};
+                color: {default_theme.colors.TEXT_PRIMARY};
+                border: {default_theme.sizes.BORDER_THIN} solid {default_theme.colors.BORDER_MEDIUM};
+                padding: 7px {default_theme.sizes.SPACING_LG};
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
                 font-size: {default_theme.sizes.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
                 text-align: center;
-                min-height: {default_theme.sizes.BUTTON_HEIGHT_MD};
+                min-height: 20px;
+            }}
+            QPushButton:hover {{
+                background-color: {default_theme.colors.BACKGROUND_HOVER};
+                border-color: {default_theme.colors.BORDER_DARK};
+            }}
+            QPushButton:pressed {{
+                background-color: {default_theme.colors.BACKGROUND_PRESSED};
+            }}
+            QPushButton:disabled {{
+                background-color: {default_theme.colors.GRAY_100};
+                color: {default_theme.colors.TEXT_DISABLED};
+                border-color: {default_theme.colors.BORDER_LIGHT};
             }}
         """
 
@@ -36,16 +50,16 @@ class ButtonStyles:
                 color: {default_theme.colors.TEXT_ON_PRIMARY};
                 border: none;
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
-                padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_LG};
+                padding: 7px {default_theme.sizes.SPACING_LG};
                 font-size: {default_theme.sizes.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-height: {default_theme.sizes.BUTTON_HEIGHT_MD};
+                min-height: 20px;
             }}
             {selector}:hover {{
                 background-color: {default_theme.colors.PRIMARY_DARK};
             }}
             {selector}:pressed {{
-                background-color: {default_theme.colors.PRIMARY_LIGHT};
+                background-color: {default_theme.colors.PRIMARY_DARK};
             }}
             {selector}:disabled {{
                 background-color: {default_theme.colors.GRAY_300};
@@ -63,10 +77,10 @@ class ButtonStyles:
                 color: {default_theme.colors.TEXT_PRIMARY};
                 border: {default_theme.sizes.BORDER_THIN} solid {default_theme.colors.BORDER_LIGHT};
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
-                padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_LG};
+                padding: 7px {default_theme.sizes.SPACING_LG};
                 font-size: {default_theme.sizes.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-height: {default_theme.sizes.BUTTON_HEIGHT_MD};
+                min-height: 20px;
             }}
             {selector}:hover {{
                 background-color: {default_theme.colors.BACKGROUND_HOVER};
@@ -92,10 +106,10 @@ class ButtonStyles:
                 color: {default_theme.colors.TEXT_ON_PRIMARY};
                 border: none;
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
-                padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_LG};
+                padding: 7px {default_theme.sizes.SPACING_LG};
                 font-size: {default_theme.sizes.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-height: {default_theme.sizes.BUTTON_HEIGHT_MD};
+                min-height: 20px;
             }}
             {selector}:hover {{
                 background-color: {default_theme.colors.SUCCESS_DARK};
@@ -115,16 +129,99 @@ class ButtonStyles:
                 color: {default_theme.colors.TEXT_ON_PRIMARY};
                 border: none;
                 border-radius: {default_theme.sizes.RADIUS_MEDIUM};
-                padding: {default_theme.sizes.SPACING_SM} {default_theme.sizes.SPACING_LG};
+                padding: 7px {default_theme.sizes.SPACING_LG};
                 font-size: {default_theme.sizes.FONT_MD};
                 font-weight: {default_theme.fonts.WEIGHT_MEDIUM};
-                min-height: {default_theme.sizes.BUTTON_HEIGHT_MD};
+                min-height: 20px;
             }}
             {selector}:hover {{
                 background-color: {default_theme.colors.ERROR_DARK};
             }}
             {selector}:pressed {{
                 background-color: {default_theme.colors.ERROR_LIGHT};
+            }}
+        """
+
+    @staticmethod
+    def get_dialog_button_style() -> str:
+        """对话框按钮体系：默认次要按钮，按 uiRole 切换语义颜色。"""
+        c = default_theme.colors
+        s = default_theme.sizes
+        return f"""
+            QPushButton {{
+                background-color: {c.BACKGROUND_CARD};
+                color: {c.TEXT_PRIMARY};
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: {s.RADIUS_MEDIUM};
+                padding: 0 16px;
+                font-size: {s.FONT_MD};
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+                border-color: {c.BORDER_DARK};
+            }}
+            QPushButton:pressed {{ background-color: {c.BACKGROUND_PRESSED}; }}
+            QPushButton:checked {{
+                background-color: {c.PRIMARY_LIGHT};
+                color: {c.TEXT_PRIMARY};
+                border-color: {c.PRIMARY};
+            }}
+            QPushButton:disabled {{
+                background-color: {c.GRAY_100};
+                color: {c.TEXT_DISABLED};
+                border-color: {c.BORDER_LIGHT};
+            }}
+            QPushButton[uiRole="primary"] {{
+                background-color: {c.PRIMARY};
+                color: {c.TEXT_ON_PRIMARY};
+                border-color: {c.PRIMARY};
+            }}
+            QPushButton[uiRole="primary"]:hover {{
+                background-color: {c.PRIMARY_DARK};
+                border-color: {c.PRIMARY_DARK};
+            }}
+            QPushButton[uiRole="primary"]:pressed {{
+                background-color: {c.PRIMARY_DARK};
+                border-color: {c.PRIMARY_DARK};
+            }}
+            QPushButton[uiRole="danger"] {{
+                background-color: {c.ERROR};
+                color: {c.TEXT_ON_PRIMARY};
+                border-color: {c.ERROR};
+            }}
+            QPushButton[uiRole="danger"]:hover {{
+                background-color: {c.ERROR_DARK};
+                border-color: {c.ERROR_DARK};
+            }}
+            QPushButton[uiRole="danger"]:pressed {{
+                background-color: {c.ERROR_DARK};
+                border-color: {c.ERROR_DARK};
+            }}
+            QPushButton[uiRole="success"] {{
+                background-color: {c.SUCCESS};
+                color: {c.TEXT_ON_PRIMARY};
+                border-color: {c.SUCCESS};
+            }}
+            QPushButton[uiRole="success"]:hover {{
+                background-color: {c.SUCCESS_DARK};
+                border-color: {c.SUCCESS_DARK};
+            }}
+            QPushButton[uiRole="success"]:pressed {{
+                background-color: {c.SUCCESS_DARK};
+                border-color: {c.SUCCESS_DARK};
+            }}
+            QPushButton[uiRole="ghost"] {{
+                background-color: transparent;
+                border-color: transparent;
+                color: {c.TEXT_SECONDARY};
+            }}
+            QPushButton[uiRole="ghost"]:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QPushButton[uiKind="icon"] {{
+                padding: 0;
             }}
         """
 
@@ -243,7 +340,7 @@ class ButtonStyles:
                 text-decoration: underline;
             }}
             QPushButton:pressed {{
-                color: {default_theme.colors.PRIMARY_LIGHT};
+                color: {default_theme.colors.PRIMARY_DARK};
             }}
             QPushButton:disabled {{
                 color: {default_theme.colors.TEXT_DISABLED};

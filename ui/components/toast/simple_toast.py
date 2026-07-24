@@ -5,10 +5,11 @@
 
 import logging
 from PyQt6.QtWidgets import QLabel
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QFont
 from enum import Enum
 from utils.app_config import get_app_config
+from ..styles.theme import default_theme
 
 
 class ToastType(Enum):
@@ -44,39 +45,33 @@ class ToastPosition(Enum):
 class Toast:
     """简化Toast系统 - 基于成功的悬浮消息实现"""
 
-    # Toast样式配置
-    STYLES = {
-        ToastType.DEBUG: {
-            'background': 'rgba(108, 117, 125, 230)',
-            'border': 'rgba(73, 80, 87, 255)',
-            'icon': '🐛'
-        },
-        ToastType.INFO: {
-            'background': 'rgba(52, 152, 219, 230)',
-            'border': 'rgba(41, 128, 185, 255)',
-            'icon': 'ℹ️'
-        },
-        ToastType.SUCCESS: {
-            'background': 'rgba(39, 174, 96, 230)',
-            'border': 'rgba(34, 153, 84, 255)',
-            'icon': '✅'
-        },
-        ToastType.WARNING: {
-            'background': 'rgba(243, 156, 18, 230)',
-            'border': 'rgba(211, 134, 15, 255)',
-            'icon': '⚠️'
-        },
-        ToastType.ERROR: {
-            'background': 'rgba(231, 76, 60, 230)',
-            'border': 'rgba(192, 57, 43, 255)',
-            'icon': '❌'
-        },
-        ToastType.FLOATING: {
-            'background': 'rgba(0, 0, 0, 200)',
-            'border': 'rgba(255, 255, 255, 100)',
-            'icon': ''  # 不使用默认图标，保持消息中的原始emoji
-        }
+    ICONS = {
+        ToastType.DEBUG: '🐛',
+        ToastType.INFO: 'ℹ️',
+        ToastType.SUCCESS: '✅',
+        ToastType.WARNING: '⚠️',
+        ToastType.ERROR: '❌',
+        ToastType.FLOATING: '',
     }
+
+    @staticmethod
+    def _get_style(toast_type: ToastType):
+        """从当前主题实时生成 Toast 语义色。"""
+        c = default_theme.colors
+        colors = {
+            ToastType.DEBUG: (c.GRAY_600, c.GRAY_700),
+            ToastType.INFO: (c.PRIMARY, c.PRIMARY_DARK),
+            ToastType.SUCCESS: (c.SUCCESS, c.SUCCESS_DARK),
+            ToastType.WARNING: (c.WARNING, c.WARNING_DARK),
+            ToastType.ERROR: (c.ERROR, c.ERROR_DARK),
+            ToastType.FLOATING: (c.GRAY_900, c.GRAY_700),
+        }
+        background, border = colors.get(toast_type, colors[ToastType.INFO])
+        return {
+            'background': background,
+            'border': border,
+            'icon': Toast.ICONS.get(toast_type, 'ℹ️'),
+        }
 
     @staticmethod
     def _should_show_toast(toast_type: ToastType) -> bool:
@@ -127,7 +122,7 @@ class Toast:
                 return
 
             # 获取样式
-            style = Toast.STYLES.get(toast_type, Toast.STYLES[ToastType.INFO])
+            style = Toast._get_style(toast_type)
 
             # 如果已有Toast，先隐藏
             if hasattr(parent, '_toast') and parent._toast:

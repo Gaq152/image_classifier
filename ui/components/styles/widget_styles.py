@@ -154,6 +154,10 @@ class WidgetStyles:
                 border-bottom: {default_theme.sizes.BORDER_THIN} solid {default_theme.get_rgba_color(default_theme.colors.WHITE, 0.3)};
                 margin-bottom: 5px;
             }}
+            QLabel[objectName="info_section_title"] {{
+                color: {default_theme.colors.SUCCESS};
+                font-weight: {default_theme.fonts.WEIGHT_BOLD};
+            }}
             QPushButton {{
                 background-color: {default_theme.get_rgba_color(default_theme.colors.SUCCESS, 0.8)};
                 color: {default_theme.colors.TEXT_ON_DARK};
@@ -165,6 +169,17 @@ class WidgetStyles:
             }}
             QPushButton:hover {{
                 background-color: {default_theme.get_rgba_color(default_theme.colors.SUCCESS, 0.9)};
+            }}
+            QTextEdit {{
+                background-color: {default_theme.get_rgba_color(default_theme.colors.WHITE, 0.08)};
+                border: 1px solid {default_theme.get_rgba_color(default_theme.colors.WHITE, 0.2)};
+                border-radius: {default_theme.sizes.RADIUS_SMALL};
+                padding: 4px;
+                font-size: {default_theme.sizes.FONT_XS};
+                color: {default_theme.colors.TEXT_ON_DARK};
+            }}
+            QTextEdit:focus {{
+                border-color: {default_theme.get_rgba_color(default_theme.colors.SUCCESS, 0.7)};
             }}
         """
 

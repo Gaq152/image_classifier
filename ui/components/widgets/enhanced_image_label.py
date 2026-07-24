@@ -8,11 +8,10 @@ import logging
 import math
 import os
 from datetime import datetime
-from pathlib import Path
 from PyQt6.QtWidgets import (QLabel, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
                             QTextEdit, QApplication)
 from PyQt6.QtCore import Qt, QTimer, QPoint, QFileInfo
-from PyQt6.QtGui import QPixmap, QPainter, QFont
+from PyQt6.QtGui import QPixmap, QPainter
 
 from ..toast import toast_floating
 from ..styles import apply_enhanced_image_label_style
@@ -534,38 +533,7 @@ class EnhancedImageLabel(QLabel):
             # 创建半透明面板
             self.info_panel = QFrame(self)
             self.info_panel.setFixedWidth(450)
-            self.info_panel.setStyleSheet("""
-                QFrame {
-                    background-color: rgba(0, 0, 0, 180);
-                    border-radius: 8px;
-                    border: 1px solid rgba(255, 255, 255, 50);
-                }
-                QLabel {
-                    color: white;
-                    background: transparent;
-                    font-size: 12px;
-                    padding: 2px 8px;
-                }
-                QLabel[objectName="info_title"] {
-                    font-size: 14px;
-                    font-weight: bold;
-                    color: #4CAF50;
-                    border-bottom: 1px solid rgba(255, 255, 255, 30);
-                    margin-bottom: 5px;
-                }
-                QPushButton {
-                    background-color: rgba(76, 175, 80, 180);
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 4px 8px;
-                    font-size: 11px;
-                    margin: 2px;
-                }
-                QPushButton:hover {
-                    background-color: rgba(76, 175, 80, 220);
-                }
-            """)
+            self.info_panel.setStyleSheet(WidgetStyles.get_info_panel_style())
 
             layout = QVBoxLayout(self.info_panel)
             layout.setContentsMargins(10, 10, 10, 10)
@@ -749,7 +717,7 @@ class EnhancedImageLabel(QLabel):
             p = math.pow(1024, i)
             s = round(size_bytes / p, 2)
             return f"{s} {size_names[i]}"
-        except:
+        except (ValueError, OverflowError, IndexError):
             return f"{size_bytes} B"
 
 
@@ -765,7 +733,7 @@ class EnhancedImageLabel(QLabel):
 
             # 路径标题
             path_title = QLabel("完整路径:")
-            path_title.setStyleSheet("font-weight: bold; color: #4CAF50;")
+            path_title.setObjectName("info_section_title")
             path_layout.addWidget(path_title)
 
             # 路径显示和复制按钮的容器
@@ -780,41 +748,12 @@ class EnhancedImageLabel(QLabel):
             self.path_text_edit.setReadOnly(True)
             self.path_text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self.path_text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            self.path_text_edit.setStyleSheet("""
-                QTextEdit {
-                    background-color: rgba(255, 255, 255, 20);
-                    border: 1px solid rgba(255, 255, 255, 50);
-                    border-radius: 4px;
-                    padding: 4px;
-                    font-size: 11px;
-                    color: white;
-                }
-                QTextEdit:focus {
-                    border-color: rgba(76, 175, 80, 150);
-                }
-            """)
             path_content_layout.addWidget(self.path_text_edit, 1)  # 占据大部分空间
 
             # 复制按钮
             copy_button = QPushButton("📋")
             copy_button.setFixedSize(30, 30)
             copy_button.setToolTip("复制完整路径到剪贴板")
-            copy_button.setStyleSheet("""
-                QPushButton {
-                    background-color: rgba(76, 175, 80, 180);
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: rgba(76, 175, 80, 220);
-                }
-                QPushButton:pressed {
-                    background-color: rgba(76, 175, 80, 255);
-                }
-            """)
             copy_button.clicked.connect(self.copy_path_to_clipboard)
             path_content_layout.addWidget(copy_button)
 
@@ -855,6 +794,9 @@ class EnhancedImageLabel(QLabel):
             # 更新信息按钮样式
             if hasattr(self, 'info_button') and self.info_button:
                 self.info_button.setStyleSheet(WidgetStyles.get_info_button_style())
+
+            if hasattr(self, 'info_panel') and self.info_panel:
+                self.info_panel.setStyleSheet(WidgetStyles.get_info_panel_style())
 
         except Exception as e:
             self.logger.error(f"应用主题到图像标签失败: {e}")

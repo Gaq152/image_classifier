@@ -28,21 +28,27 @@ class ImageListDelegate(QStyledItemDelegate):
 
     def _init_icons(self):
         """预生成所有状态的图标，避免在 paint 中重复创建"""
+        c = default_theme.colors
+        self._icon_cache.clear()
         self._icon_cache["classified"] = self._create_status_icon(
-            "#4CAF50", "#2E7D32", "check"   # 绿色
+            c.SUCCESS, c.SUCCESS_DARK, "check"
         )
         self._icon_cache["removed"] = self._create_status_icon(
-            "#F44336", "#C62828", "cross"   # 红色
+            c.ERROR, c.ERROR_DARK, "cross"
         )
         self._icon_cache["multi"] = self._create_status_icon(
-            "#2196F3", "#1565C0", "multi"   # 蓝色
+            c.PRIMARY, c.PRIMARY_DARK, "multi"
         )
         self._icon_cache["warning"] = self._create_status_icon(
-            "#FFC107", "#F57C00", "warning" # 黄色（保留备用）
+            c.WARNING, c.WARNING_DARK, "warning"
         )
         self._icon_cache["pending"] = self._create_status_icon(
-            "#FF9800", "#F57C00", "warning" # 橙色（与旧版一致）
+            c.WARNING, c.WARNING_DARK, "warning"
         )
+
+    def refresh_theme(self):
+        """主题切换后重建小型图标缓存。"""
+        self._init_icons()
 
     def _create_status_icon(self, color_str: str, shadow_str: str, symbol: str) -> QIcon:
         """

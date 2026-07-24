@@ -10,32 +10,35 @@ import psutil
 import sys
 import json
 import threading
-import functools
 import shutil
-import hashlib
 import traceback
 from pathlib import Path
-from typing import Optional, List, Dict, Set, Union
+from typing import Optional, List, Dict
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
-                            QSplitter, QLabel, QScrollArea, QStatusBar, QToolBar
+                            QSplitter, QLabel, QStatusBar, QToolBar
                             , QSizePolicy, QFileDialog,
                             QMessageBox, QApplication, QListView,
-                            QButtonGroup, QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu, QDialog)
+                            QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu, QDialog)
 # Phase 1.1: QListWidget已废弃，Model/View架构使用QListView
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent, QThread, QItemSelectionModel
-from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush, QFont
-from .components.widgets import (CategoryButton, EnhancedImageLabel,
-                                StatisticsPanel, ExpandableSearch)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent, QItemSelectionModel
+from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush
+from .components.widgets import ExpandableSearch
 # Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
 from .models.image_list_model import ImageListModel
 from ._main_window.panels import CategoryPanel, ImageViewPanel, InfoPanel
 from .delegates.image_list_delegate import ImageListDelegate
 from .components.toast import toast_info, toast_success, toast_warning, toast_error
-from .components.styles import ButtonStyles, DialogStyles, ToolbarStyles, MainWindowStyles, WidgetStyles
+from .components.dialog_utils import (
+    ThemedMessageBox,
+    ThemedProgressDialog,
+    configure_dialog,
+    style_button,
+    style_icon_button,
+)
+from .components.styles import ToolbarStyles, MainWindowStyles, WidgetStyles
 from .components.styles.theme import default_theme
-from .components.styles.widget_styles import WidgetStyles as WS, apply_category_button_style
 from .components.tutorial import TutorialManager
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
                      TabbedHelpDialog, ProgressDialog, SettingsDialog, ManageIgnoredCategoriesDialog,
@@ -44,10 +47,6 @@ from .managers import FileStateManager
 from .managers.image_navigation_manager import ImageNavigationManager
 from .managers.file_operation_manager import FileOperationManager as UIFileOperationManager
 from .managers.category_manager import CategoryManager
-from ._main_window.state.interfaces import (
-    StateView, StateMutator, UIHooks, ImageLoader as ImageLoaderInterface,
-    ImageNavigator
-)
 from .update_dialog import UpdateInfoDialog
 from .update_download import get_update_download_controller
 from core.config import Config
@@ -705,12 +704,17 @@ class ImageClassifier(QMainWindow):
 
     def show_message_box(self, title: str, message: str, msg_type: str = 'info') -> None:
         """显示消息框"""
-        if msg_type == 'info':
-            QMessageBox.information(self, title, message)
-        elif msg_type == 'warning':
-            QMessageBox.warning(self, title, message)
-        elif msg_type == 'error':
-            QMessageBox.critical(self, title, message)
+        icons = {
+            'info': QMessageBox.Icon.Information,
+            'warning': QMessageBox.Icon.Warning,
+            'error': QMessageBox.Icon.Critical,
+        }
+        box = ThemedMessageBox(self)
+        box.setIcon(icons.get(msg_type, QMessageBox.Icon.Information))
+        box.setWindowTitle(title)
+        box.setText(message)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     def show_question(self, title: str, message: str) -> bool:
         """显示确认对话框（中文按钮）"""
@@ -725,8 +729,7 @@ class ImageClassifier(QMainWindow):
 
     def show_progress_dialog(self, title: str, message: str, maximum: int = 100):
         """显示进度对话框"""
-        from PyQt6.QtWidgets import QProgressDialog
-        progress = QProgressDialog(message, "取消", 0, maximum, self)
+        progress = ThemedProgressDialog(message, "取消", 0, maximum, self)
         progress.setWindowTitle(title)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.show()
@@ -894,13 +897,6 @@ class ImageClassifier(QMainWindow):
         self.right_widget.setObjectName("right_panel")  # 设置对象名用于精确样式选择
         self.right_widget.setMaximumWidth(380)
         self.right_widget.setMinimumWidth(220)
-        self.right_widget.setStyleSheet("""
-            QWidget#right_panel {
-                background-color: #FFFFFF;
-                border: 1px solid #DEE2E6;
-                border-radius: 6px;
-            }
-        """)
         right_layout = QVBoxLayout(self.right_widget)
         right_layout.setContentsMargins(6, 6, 6, 6)
         right_layout.setSpacing(6)
@@ -933,33 +929,15 @@ class ImageClassifier(QMainWindow):
         # 图片列表标题行 - 包含标题和文件夹图标按钮
         list_title_container = QWidget()
         list_title_container.setObjectName("list_title_container")
-        list_title_container.setStyleSheet("""
-            QWidget#list_title_container {
-                border-bottom: 2px solid #0D6EFD;
-                margin-bottom: 4px;
-                max-height: 28px;
-                min-height: 28px;
-            }
-        """)
+        list_title_container.setFixedHeight(40)
         list_title_layout = QHBoxLayout(list_title_container)
-        list_title_layout.setContentsMargins(6, 0, 6, 4)  # 底部留4px给蓝色边框
+        list_title_layout.setContentsMargins(6, 4, 6, 4)
         list_title_layout.setSpacing(8)
-        list_title_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # 顶部对齐，避免遮挡底边框
+        list_title_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # 图片列表标题
-        list_label = QLabel("📂 图片列表")
-        list_label.setStyleSheet("""
-            QLabel {
-                font-size: 13px;
-                font-weight: bold;
-                color: #0D6EFD;
-                border: none;
-                background-color: transparent;
-                padding: 0px;
-                margin: 0px;
-            }
-        """)
-        list_title_layout.addWidget(list_label)
+        self.image_list_title_label = QLabel("📂 图片列表")
+        list_title_layout.addWidget(self.image_list_title_label)
 
         # 添加弹性空间，推送右侧按钮到最右边
         list_title_layout.addStretch()
@@ -974,65 +952,26 @@ class ImageClassifier(QMainWindow):
         self.filter_button = self.create_toolbar_button('▼', 'filter_button',
                                                        '筛选图片显示条件',
                                                        self.show_filter_menu,
-                                                       size=(18, 18))
+                                                       size=(32, 32))
         # 初始化过滤器状态（默认全部显示）
         self.filter_unclassified = True
         self.filter_classified = True
         self.filter_removed = True
         self._image_search_text = ""  # 图片列表搜索关键字
 
-        # 应用样式
-        self.filter_button.setStyleSheet("""
-            QPushButton#filter_button {
-                background-color: transparent;
-                color: #0D6EFD;
-                border: none;
-                border-radius: 3px;
-                font-size: 11px;
-                font-weight: normal;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#filter_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#filter_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-            QPushButton#filter_button[active="true"] {
-                color: #2196F3;
-                font-weight: bold;
-            }
-        """)
+        style_icon_button(self.filter_button)
         list_title_layout.addWidget(self.filter_button)
 
         # 文件夹图标按钮 - 打开目录功能
-        folder_button = self.create_toolbar_button('📁', 'folder_button',
-                                                  '选择包含图片的目录',
-                                                  self.open_directory,
-                                                  size=(18, 18))
-        # 重写样式为透明背景蓝色图标，确保不遮挡蓝色边框
-        folder_button.setStyleSheet("""
-            QPushButton#folder_button {
-                background-color: transparent;
-                color: #0D6EFD;
-                border: none;
-                border-radius: 3px;
-                font-size: 11px;
-                font-weight: normal;
-                text-align: center;
-                margin: 0px;
-                padding: 0px;
-            }
-            QPushButton#folder_button:hover {
-                background-color: rgba(245, 245, 245, 180);
-            }
-            QPushButton#folder_button:pressed {
-                background-color: rgba(224, 224, 224, 180);
-            }
-        """)
-        list_title_layout.addWidget(folder_button)
+        self.folder_button = self.create_toolbar_button(
+            '📁',
+            'folder_button',
+            '选择包含图片的目录',
+            self.open_directory,
+            size=(32, 32),
+        )
+        style_icon_button(self.folder_button)
+        list_title_layout.addWidget(self.folder_button)
 
         layout.addWidget(list_title_container, 0)  # 不拉伸
 
@@ -1060,71 +999,7 @@ class ImageClassifier(QMainWindow):
         self.image_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.image_list.setWordWrap(False)  # 禁用文字换行，允许横向滚动
 
-        # 移除最大高度限制，让它能够拉伸
-        self.image_list.setStyleSheet("""
-            QListView {
-                border: 1px solid #B3D9FF;
-                border-radius: 4px;
-                background-color: #FFFFFF;
-                padding: 2px;
-            }
-            QListView::item {
-                border: 1px solid transparent;
-                border-radius: 3px;
-                padding: 4px 6px;
-                margin: 1px;
-            }
-            QListView::item:hover {
-                background-color: #E3F2FD;
-                border-color: #2196F3;
-            }
-            QListView::item:selected {
-                background-color: #2196F3;
-                color: white;
-                border-color: #0D47A1;
-            }
-            QScrollBar:vertical {
-                border: 1px solid #B3D9FF;
-                background: #F3F9FF;
-                width: 10px;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:vertical {
-                background: #2196F3;
-                border-radius: 3px;
-                min-height: 15px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #1976D2;
-            }
-            QScrollBar::handle:vertical:pressed {
-                background: #0D47A1;
-            }
-            QScrollBar:horizontal {
-                border: 1px solid #B3D9FF;
-                background: #F3F9FF;
-                height: 10px;
-                border-radius: 3px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #2196F3;
-                border-radius: 3px;
-                min-width: 15px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #1976D2;
-            }
-            QScrollBar::handle:horizontal:pressed {
-                background: #0D47A1;
-            }
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical,
-            QScrollBar::add-line:horizontal,
-            QScrollBar::sub-line:horizontal {
-                border: none;
-                background: none;
-            }
-        """)
+        # 列表外观由 apply_theme 统一设置，避免初始化和切换主题各维护一套样式。
         # Signal changed from itemClicked(QListWidgetItem) to clicked(QModelIndex)
         self.image_list.clicked.connect(self.on_image_list_item_clicked)
         layout.addWidget(self.image_list, 1)  # 设置拉伸权重1
@@ -1150,7 +1025,7 @@ class ImageClassifier(QMainWindow):
         button.setFixedSize(*size)
 
         # 应用统一样式 - 使用新的样式系统
-        button.setStyleSheet(ButtonStyles.get_square_button_style(object_name))
+        style_icon_button(button)
 
         # 绑定点击事件
         if click_handler:
@@ -1289,17 +1164,7 @@ class ImageClassifier(QMainWindow):
         self.update_download_button.clicked.connect(
             self._handle_update_button_clicked
         )
-        self.update_download_button.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 4px;
-                padding: 2px 8px;
-                color: white;
-                background-color: #6C757D;
-                font-size: 11px;
-            }
-            QPushButton:hover { background-color: #5C636A; }
-        """)
+        self._apply_update_button_style("idle")
         self.update_download_button.show()
         self.statusBar.addPermanentWidget(self.update_download_button)
 
@@ -1545,7 +1410,7 @@ class ImageClassifier(QMainWindow):
                         f"内存上限:{cache_size_mb:.0f}MB 缩略图缓存:{self.image_loader.thumbnail_cache_size}张")
             self.logger.info(f"[加载策略] OpenCV优先:{self.image_loader.use_opencv} "
                         f"网络优化:启用 滑动窗口:智能预加载")
-            self.logger.info(f"[性能监控] 详细日志:启用 切换计时:启用 内存监控:启用 预加载追踪:启用")
+            self.logger.info("[性能监控] 详细日志:启用 切换计时:启用 内存监控:启用 预加载追踪:启用")
             self.logger.info("=" * 80)
             
         except Exception as e:
@@ -2085,8 +1950,6 @@ class ImageClassifier(QMainWindow):
         self.initial_batch_loaded = True  # 标记扫描完成
         
         # 最终数据同步和去重处理
-        original_count = len(self.image_files)
-        
         # 对文件列表进行最终去重
         unique_files = []
         seen_paths = set()
@@ -2170,7 +2033,7 @@ class ImageClassifier(QMainWindow):
 
             # 弹出确认对话框
 
-            msg_box = QMessageBox(self)
+            msg_box = ThemedMessageBox(self)
             msg_box.setWindowTitle("恢复上次位置")
             msg_box.setText(f"检测到上次处理到第 {last_index + 1} 张图片")
             msg_box.setInformativeText("是否跳转到上次处理的位置继续工作？")
@@ -2186,42 +2049,8 @@ class ImageClassifier(QMainWindow):
 
             # 添加按钮
             yes_btn = msg_box.addButton("跳转", QMessageBox.ButtonRole.YesRole)
-            no_btn = msg_box.addButton("从头开始", QMessageBox.ButtonRole.NoRole)
+            msg_box.addButton("从头开始", QMessageBox.ButtonRole.NoRole)
             msg_box.setDefaultButton(yes_btn)
-
-            # 应用主题样式（支持亮色和暗色主题）
-            c = default_theme.colors
-            msg_box.setStyleSheet(f"""
-                QMessageBox {{
-                    background-color: {c.BACKGROUND_PRIMARY};
-                    color: {c.TEXT_PRIMARY};
-                    border: 1px solid {c.BORDER_MEDIUM};
-                    border-radius: 8px;
-                    font-size: 14px;
-                }}
-                QMessageBox QLabel {{
-                    color: {c.TEXT_PRIMARY};
-                    font-size: 14px;
-                    padding: 10px;
-                    background: transparent;
-                }}
-                QPushButton {{
-                    background-color: {c.PRIMARY};
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-size: 13px;
-                    font-weight: bold;
-                    min-width: 80px;
-                }}
-                QPushButton:hover {{
-                    background-color: {c.PRIMARY_DARK};
-                }}
-                QPushButton:pressed {{
-                    background-color: {c.PRIMARY_DARK};
-                }}
-            """)
 
             # 显示对话框并获取用户选择
             msg_box.exec()
@@ -2348,7 +2177,7 @@ class ImageClassifier(QMainWindow):
             self.image_list_model.update_status_by_path(path, is_classified=False, is_removed=True, is_multi=False)
         # 更新统计（不包含 image_list，避免重建列表）
         self.schedule_ui_update('statistics')
-        self.statusBar.showMessage(f"✅ 已移除")
+        self.statusBar.showMessage("✅ 已移除")
 
     def on_file_restored(self, path: str):
         """文件恢复完成"""
@@ -2364,7 +2193,7 @@ class ImageClassifier(QMainWindow):
         self.schedule_ui_update('statistics', 'category_counts', 'category_buttons')
         # 刷新按钮样式（撤销分类后需要更新已分类状态显示）
         self.refresh_category_buttons_style()
-        self.statusBar.showMessage(f"✅ 已撤销")
+        self.statusBar.showMessage("✅ 已撤销")
 
     def on_mode_changed(self, is_copy_mode: bool):
         """操作模式变更"""
@@ -3266,7 +3095,6 @@ class ImageClassifier(QMainWindow):
         # 获取主窗口的实际可见区域
         window_rect = self.rect()
         window_global_pos = self.mapToGlobal(window_rect.topLeft())
-        window_right = window_global_pos.x() + window_rect.width()
         window_bottom = window_global_pos.y() + window_rect.height()
 
         # 初始位置：按钮右下角，菜单右对齐
@@ -3583,7 +3411,7 @@ class ImageClassifier(QMainWindow):
 
                 # 更新类别按钮列表（重新排序）
                 self.update_category_buttons()
-                self.logger.info(f"类别按钮列表已更新")
+                self.logger.info("类别按钮列表已更新")
 
         except Exception as e:
             self.logger.error(f"修改快捷键失败: {e}")
@@ -3789,18 +3617,16 @@ class ImageClassifier(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("模式切换迁移确认")
         dialog.setModal(True)
-        dialog.setFixedSize(500, 400)
-
-        # 使用统一的样式系统
-        dialog.setStyleSheet(DialogStyles.get_form_dialog_style())
+        dialog.setMinimumSize(520, 420)
 
         layout = QVBoxLayout(dialog)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        configure_dialog(dialog, layout)
 
         # 标题
         title_label = QLabel(f"⚠️ 检测到分类记录，切换到{'复制' if target_mode else '移动'}模式需要数据迁移")
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #E67E22;")
+        title_label.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {default_theme.colors.WARNING};"
+        )
         layout.addWidget(title_label)
 
         # 说明文本
@@ -3837,63 +3663,26 @@ class ImageClassifier(QMainWindow):
 
         # 警告
         warning_label = QLabel("⚠️ 此操作会修改文件系统，建议在操作前备份重要数据")
-        warning_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+        warning_label.setStyleSheet(
+            f"color: {default_theme.colors.ERROR}; font-weight: bold;"
+        )
         layout.addWidget(warning_label)
 
         # 按钮布局（修复：危险操作按钮在左侧）
         button_layout = QHBoxLayout()
 
-        c = default_theme.colors
-        s = default_theme.sizes
-
-        # 统一的按钮基础样式
-        button_base_style = f"""
-            QPushButton {{
-                border: none;
-                border-radius: {s.RADIUS_MEDIUM};
-                padding: 8px 16px;
-                font-weight: bold;
-                min-width: 120px;
-                font-size: {s.FONT_MD};
-            }}
-        """
-
-        # 确认按钮（危险操作，红色背景，放在左侧）
+        # 危险操作始终使用统一的红色语义按钮。
         confirm_button = QPushButton(f"确认迁移到{target_mode_name}模式")
         confirm_button.clicked.connect(dialog.accept)
-        confirm_button.setStyleSheet(button_base_style + f"""
-            QPushButton {{
-                background-color: {c.ERROR};
-                color: {c.TEXT_ON_PRIMARY};
-            }}
-            QPushButton:hover {{
-                background-color: {c.ERROR_DARK};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.ERROR_DARK};
-            }}
-        """)
-        button_layout.addWidget(confirm_button)
+        style_button(confirm_button, "danger", min_width=160)
 
-        button_layout.addStretch()  # 弹簧在中间
-
-        # 取消按钮（安全操作，放在右侧，样式与确认按钮对等）
         cancel_button = QPushButton("取消")
         cancel_button.clicked.connect(dialog.reject)
-        cancel_button.setStyleSheet(button_base_style + f"""
-            QPushButton {{
-                background-color: {c.BACKGROUND_SECONDARY};
-                color: {c.TEXT_PRIMARY};
-                border: 1px solid {c.BORDER_MEDIUM};
-            }}
-            QPushButton:hover {{
-                background-color: {c.BACKGROUND_HOVER};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.BACKGROUND_PRESSED};
-            }}
-        """)
+        style_button(cancel_button, "secondary")
+
+        button_layout.addStretch()
         button_layout.addWidget(cancel_button)
+        button_layout.addWidget(confirm_button)
 
         layout.addLayout(button_layout)
 
@@ -4025,7 +3814,7 @@ class ImageClassifier(QMainWindow):
                     # 删除原文件（修复：移除只读属性后再删除）
                     try:
                         file_path_obj.unlink()
-                    except PermissionError as pe:
+                    except PermissionError:
                         # 只读文件，尝试移除只读属性后重试
                         self.logger.warning(f"文件只读，尝试移除只读属性: {file_path}")
                         remove_readonly(file_path_obj)
@@ -4358,7 +4147,7 @@ class ImageClassifier(QMainWindow):
             # 显示提示（统一格式，显示当前状态）
             current_text, _ = self._get_sort_tooltip_texts()
             toast_success(self, f"已切换：{current_text}")
-            self.logger.info(f"排序方向已切换")
+            self.logger.info("排序方向已切换")
 
         except Exception as e:
             self.logger.error(f"切换排序方向失败: {e}")
@@ -4667,46 +4456,18 @@ class ImageClassifier(QMainWindow):
             drive_info = f" ({last_dir_path.drive})" if last_dir_path.drive else ""
 
             # 创建询问对话框
-            msg_box = QMessageBox(self)
+            msg_box = ThemedMessageBox(self)
             msg_box.setWindowTitle("恢复上次任务")
-            msg_box.setText(f"检测到上次打开的工作目录")
+            msg_box.setText("检测到上次打开的工作目录")
             msg_box.setInformativeText(
                 f"路径：{last_dir}\n"
                 f"{path_type_icon} {path_type_text}{drive_info}\n\n"
                 f"是否继续上次的任务？"
             )
 
-            # 应用主题样式
-            c = default_theme.colors
-            msg_box.setStyleSheet(f"""
-                QMessageBox {{
-                    background-color: {c.BACKGROUND_PRIMARY};
-                    color: {c.TEXT_PRIMARY};
-                }}
-                QMessageBox QLabel {{
-                    color: {c.TEXT_PRIMARY};
-                    font-size: 13px;
-                }}
-                QPushButton {{
-                    background-color: {c.PRIMARY};
-                    color: white;
-                    border: none;
-                    padding: 6px 16px;
-                    border-radius: 4px;
-                    font-size: 13px;
-                    min-width: 70px;
-                }}
-                QPushButton:hover {{
-                    background-color: {c.PRIMARY_DARK};
-                }}
-                QPushButton:pressed {{
-                    background-color: {c.PRIMARY_DARK};
-                }}
-            """)
-
             # 添加按钮
             yes_btn = msg_box.addButton("继续上次任务", QMessageBox.ButtonRole.YesRole)
-            no_btn = msg_box.addButton("重新选择", QMessageBox.ButtonRole.NoRole)
+            msg_box.addButton("重新选择", QMessageBox.ButtonRole.NoRole)
             msg_box.setDefaultButton(yes_btn)
 
             # 显示对话框并获取结果
@@ -4952,10 +4713,21 @@ class ImageClassifier(QMainWindow):
             if list_title_container:
                 list_title_container.setStyleSheet(f"""
                     QWidget#list_title_container {{
-                        border-bottom: 2px solid {c.PRIMARY};
-                        margin-bottom: 4px;
-                        max-height: 28px;
-                        min-height: 28px;
+                        border-bottom: 1px solid {c.BORDER_MEDIUM};
+                    }}
+                """)
+                delegate = self.image_list.itemDelegate()
+                if hasattr(delegate, 'refresh_theme'):
+                    delegate.refresh_theme()
+
+            if hasattr(self, 'image_list_title_label'):
+                self.image_list_title_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {c.PRIMARY};
+                        font-size: 13px;
+                        font-weight: bold;
+                        border: none;
+                        background: transparent;
                     }}
                 """)
 
@@ -4995,6 +4767,10 @@ class ImageClassifier(QMainWindow):
             # 更新统计面板
             if hasattr(self, 'statistics_panel') and hasattr(self.statistics_panel, 'apply_theme'):
                 self.statistics_panel.apply_theme()
+
+            tutorial_manager = getattr(self, 'tutorial_manager', None)
+            if tutorial_manager and hasattr(tutorial_manager, 'bubble'):
+                tutorial_manager.bubble.apply_theme()
 
             # 更新移除按钮（红色主题按钮）
             if hasattr(self, 'delete_button'):
@@ -5056,6 +4832,9 @@ class ImageClassifier(QMainWindow):
                     }}
                 """)
 
+            if hasattr(self, 'update_download_button'):
+                self._apply_update_button_style(self._main_update_state)
+
             # Phase 1.1 性能优化：只更新按钮样式，不重新创建（避免6秒卡顿）
             if hasattr(self, 'category_buttons') and self.category_buttons:
                 # 不要调用 _update_category_buttons_internal()，那会重建所有按钮
@@ -5073,12 +4852,15 @@ class ImageClassifier(QMainWindow):
                 ('settings_button', 'settings_button'),
                 ('help_button', 'help_button'),
                 ('filter_button', 'filter_button'),
+                ('folder_button', 'folder_button'),
+                ('_sidebar_toggle_btn', 'sidebar_toggle_button'),
+                ('_toolbar_collapse_btn', 'toolbar_collapse_button'),
             ]
             for attr_name, object_name in toolbar_buttons:
                 if hasattr(self, attr_name):
                     button = getattr(self, attr_name)
                     if button:
-                        button.setStyleSheet(ButtonStyles.get_square_button_style(object_name))
+                        style_icon_button(button)
 
             # 强制重绘
             self.update()
@@ -5316,30 +5098,41 @@ class ImageClassifier(QMainWindow):
 
     def _apply_update_button_style(self, state: str):
         """应用统一入口在不同更新状态下的颜色。"""
+        c = default_theme.colors
         colors = {
-            "idle": ("#6C757D", "#5C636A"),
-            "checking": ("#0D6EFD", "#0B5ED7"),
-            "available": ("#F59E0B", "#D97706"),
-            "downloading": ("#0D6EFD", "#0B5ED7"),
-            "retrying": ("#0D6EFD", "#0B5ED7"),
-            "verifying": ("#0D6EFD", "#0B5ED7"),
-            "pausing": ("#6F42C1", "#59359A"),
-            "paused": ("#6F42C1", "#59359A"),
-            "cancelling": ("#6C757D", "#5C636A"),
-            "ready": ("#198754", "#157347"),
-            "failed": ("#DC3545", "#BB2D3B"),
+            "idle": (c.BACKGROUND_CARD, c.BACKGROUND_HOVER, c.TEXT_PRIMARY, c.BORDER_MEDIUM),
+            "checking": (c.PRIMARY, c.PRIMARY_DARK, c.TEXT_ON_PRIMARY, c.PRIMARY),
+            "available": (c.WARNING, c.WARNING_DARK, c.TEXT_ON_PRIMARY, c.WARNING),
+            "downloading": (c.PRIMARY, c.PRIMARY_DARK, c.TEXT_ON_PRIMARY, c.PRIMARY),
+            "retrying": (c.PRIMARY, c.PRIMARY_DARK, c.TEXT_ON_PRIMARY, c.PRIMARY),
+            "verifying": (c.PRIMARY, c.PRIMARY_DARK, c.TEXT_ON_PRIMARY, c.PRIMARY),
+            "pausing": (c.WARNING, c.WARNING_DARK, c.TEXT_ON_PRIMARY, c.WARNING),
+            "paused": (c.WARNING, c.WARNING_DARK, c.TEXT_ON_PRIMARY, c.WARNING),
+            "cancelling": (c.BACKGROUND_CARD, c.BACKGROUND_HOVER, c.TEXT_PRIMARY, c.BORDER_MEDIUM),
+            "ready": (c.SUCCESS, c.SUCCESS_DARK, c.TEXT_ON_PRIMARY, c.SUCCESS),
+            "failed": (c.ERROR, c.ERROR_DARK, c.TEXT_ON_PRIMARY, c.ERROR),
         }
-        normal, hover = colors.get(state, colors["idle"])
+        normal, hover, text_color, border = colors.get(state, colors["idle"])
+        self.update_download_button.setProperty("uiState", state)
+        self.update_download_button.setFixedHeight(
+            default_theme.sizes.BUTTON_HEIGHT_COMPACT_PX
+        )
+        self.update_download_button.setMinimumWidth(
+            default_theme.sizes.BUTTON_MIN_WIDTH_PX
+        )
         self.update_download_button.setStyleSheet(f"""
             QPushButton {{
-                border: none;
-                border-radius: 4px;
-                padding: 2px 8px;
-                color: white;
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 0 12px;
+                color: {text_color};
                 background-color: {normal};
                 font-size: 11px;
+                font-weight: 500;
             }}
-            QPushButton:hover {{ background-color: {hover}; }}
+            QPushButton:hover {{
+                background-color: {hover};
+            }}
         """)
         self.update_download_button.show()
 
@@ -5984,10 +5777,7 @@ class ImageClassifier(QMainWindow):
 
     def _show_wechat_warning(self):
         """显示微信目录警告"""
-        from ui.components.toast import toast_warning
-        c = default_theme.colors
-
-        msg_box = QMessageBox(self)
+        msg_box = ThemedMessageBox(self)
         msg_box.setWindowTitle("⚠️ 微信目录警告")
         msg_box.setIcon(QMessageBox.Icon.Warning)
         msg_box.setText("检测到您正在微信的文件目录中工作")
@@ -6002,36 +5792,12 @@ class ImageClassifier(QMainWindow):
             "继续使用可能会遇到权限错误，但不影响基本功能。"
         )
 
-        # 应用主题样式
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {c.BACKGROUND_CARD};
-                color: {c.TEXT_PRIMARY};
-                border-radius: 8px;
-            }}
-            QMessageBox QLabel {{
-                color: {c.TEXT_PRIMARY};
-            }}
-            QPushButton {{
-                background-color: {c.PRIMARY};
-                color: {c.TEXT_ON_PRIMARY};
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-                min-width: 80px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-        """)
-
         msg_box.exec()
 
     def _create_styled_message_box(self, icon_type, title, text, buttons=None):
         """创建具有统一样式和中文按钮的消息框"""
 
-        msgBox = QMessageBox(self)
+        msgBox = ThemedMessageBox(self)
         msgBox.setIcon(icon_type)
         msgBox.setWindowTitle(title)
         msgBox.setText(text)
@@ -6043,31 +5809,6 @@ class ImageClassifier(QMainWindow):
                 msgBox.setWindowIcon(QIcon(str(icon_path)))
         except Exception:
             pass
-
-        # 使用主题样式
-        c = default_theme.colors
-        message_box_style = f"""
-            QMessageBox {{
-                background-color: {c.BACKGROUND_CARD};
-                color: {c.TEXT_PRIMARY};
-                border: 1px solid {c.BORDER_MEDIUM};
-                border-radius: 8px;
-                font-size: 14px;
-            }}
-            QMessageBox QLabel {{
-                color: {c.TEXT_PRIMARY};
-                font-size: 14px;
-                padding: 10px;
-            }}
-            {ButtonStyles.get_primary_button_style()}
-            QPushButton:default {{
-                background-color: {c.SUCCESS};
-            }}
-            QPushButton:default:hover {{
-                background-color: {c.SUCCESS_DARK};
-            }}
-        """
-        msgBox.setStyleSheet(message_box_style)
 
         # 设置中文按钮
         if buttons is None:

@@ -5,6 +5,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 from ...components.widgets.enhanced_image_label import EnhancedImageLabel
 from ...components.styles.theme import default_theme
+from ...components.dialog_utils import style_icon_button
 
 
 class ImageViewPanel(QWidget):
@@ -52,13 +53,6 @@ class ImageViewPanel(QWidget):
         self.image_scroll_area.setObjectName("image_preview_container")
         self.image_scroll_area.setWidgetResizable(True)
         self.image_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #ADB5BD;
-                border-radius: 4px;
-                background-color: #F8F9FA;
-            }
-        """)
 
         self.image_label = EnhancedImageLabel()
         self.image_scroll_area.setWidget(self.image_label)
@@ -69,27 +63,13 @@ class ImageViewPanel(QWidget):
         """创建标题栏"""
         title_container = QWidget()
         title_container.setObjectName("title_container")
-        title_container.setStyleSheet("""
-            QWidget#title_container {
-                border-bottom: 1px solid #DEE2E6;
-                max-height: 28px;
-                min-height: 28px;
-            }
-        """)
+        title_container.setFixedHeight(40)
         title_layout = QHBoxLayout(title_container)
         title_layout.setContentsMargins(6, 4, 6, 4)
         title_layout.setSpacing(8)
 
         # 标题
         self.title_label = QLabel("🖼️ 图片预览")
-        self.title_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                font-weight: bold;
-                color: #495057;
-                border: none;
-            }
-        """)
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
 
@@ -98,25 +78,9 @@ class ImageViewPanel(QWidget):
             '🗑', 'remove_button',
             '移除当前图片到移除目录',
             self._on_remove_clicked,
-            size=(24, 24)
+            size=(32, 32)
         )
-        self.delete_button.setStyleSheet("""
-            QPushButton#remove_button {
-                background-color: #f44336;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-                font-weight: normal;
-                text-align: center;
-            }
-            QPushButton#remove_button:hover {
-                background-color: #e53935;
-            }
-            QPushButton#remove_button:pressed {
-                background-color: #d32f2f;
-            }
-        """)
+        style_icon_button(self.delete_button, "danger")
         title_layout.addWidget(self.delete_button)
 
         layout.addWidget(title_container, 0)  # 不拉伸
@@ -168,8 +132,6 @@ class ImageViewPanel(QWidget):
             title_container.setStyleSheet(f"""
                 QWidget#title_container {{
                     border-bottom: 1px solid {c.BORDER_MEDIUM};
-                    max-height: 28px;
-                    min-height: 28px;
                 }}
             """)
 
@@ -179,7 +141,7 @@ class ImageViewPanel(QWidget):
                 QLabel {{
                     font-size: 14px;
                     font-weight: bold;
-                    color: {c.TEXT_SECONDARY};
+                    color: {c.PRIMARY};
                     border: none;
                 }}
             """)
@@ -194,25 +156,8 @@ class ImageViewPanel(QWidget):
                 }}
             """)
 
-        # 更新移除按钮（保持红色主题）
         if self.delete_button:
-            self.delete_button.setStyleSheet(f"""
-                QPushButton#remove_button {{
-                    background-color: {c.ERROR};
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    font-size: 14px;
-                    font-weight: normal;
-                    text-align: center;
-                }}
-                QPushButton#remove_button:hover {{
-                    background-color: {c.ERROR_DARK};
-                }}
-                QPushButton#remove_button:pressed {{
-                    background-color: {c.ERROR_DARK};
-                }}
-            """)
+            style_icon_button(self.delete_button, "danger")
 
         # 更新EnhancedImageLabel背景
         if self.image_label and hasattr(self.image_label, 'apply_theme'):

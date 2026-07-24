@@ -6,12 +6,11 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QTabWidget, QApplication,
+    QPushButton, QMessageBox, QTabWidget,
     QWidget, QCheckBox, QGroupBox, QScrollArea, QComboBox,
     QDoubleSpinBox, QSpinBox
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent
-from PyQt6.QtGui import QKeySequence
 
 from utils.app_config import get_app_config
 from utils.paths import get_cache_dir, get_update_dir
@@ -19,7 +18,8 @@ from _version_ import compare_version, __version__, get_manifest_url
 from core.update_utils import load_ready_update
 from ...components.toast import toast_info, toast_success, toast_warning, toast_error
 from ...components.styles.theme import default_theme
-from ...components.styles import ButtonStyles, DialogStyles
+from ...components.styles import ButtonStyles
+from ...components.dialog_utils import ThemedMessageBox, configure_dialog, style_button
 from ...components.widgets.switch import Switch
 from ...update_dialog import UpdateInfoDialog
 from ...update_download import get_update_download_controller
@@ -56,8 +56,7 @@ class SettingsDialog(QDialog):
 
         # 主布局
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        configure_dialog(self, layout)
 
         # 创建Tab控件
         self.tab_widget = QTabWidget()
@@ -167,6 +166,7 @@ class SettingsDialog(QDialog):
 
     def create_tutorial_section(self) -> QGroupBox:
         """创建教程设置区域"""
+        c = default_theme.colors
         group = QGroupBox("🎓 教程设置")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
@@ -185,13 +185,13 @@ class SettingsDialog(QDialog):
         # 确定当前状态
         if self.app_config.tutorial_completed:
             status_text = "✅ 教程已完成"
-            status_color = "#10B981"
+            status_color = c.SUCCESS
         elif self.app_config.tutorial_skipped:
             status_text = "⏭️ 教程已跳过"
-            status_color = "#F59E0B"
+            status_color = c.WARNING
         else:
             status_text = "⏸️ 教程未开始"
-            status_color = "#6B7280"
+            status_color = c.TEXT_SECONDARY
 
         # 状态显示和按钮（横向布局）
         control_widget = QWidget()
@@ -467,76 +467,23 @@ class SettingsDialog(QDialog):
 
         # 编辑按钮
         self.endpoint_edit_btn = QPushButton("✏️ 编辑")
-        self.endpoint_edit_btn.setFixedHeight(28)
         self.endpoint_edit_btn.setObjectName("iconButton")
         self.endpoint_edit_btn.setToolTip("编辑更新服务器地址（通常无需修改）")
-        self.endpoint_edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6B7280;
-                color: white;
-                font-size: 12px;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-            }
-            QPushButton:pressed {
-                background-color: #374151;
-            }
-        """)
         self.endpoint_edit_btn.clicked.connect(self.edit_endpoint)
         endpoint_header_layout.addWidget(self.endpoint_edit_btn)
 
         # 保存按钮（初始隐藏）
         self.endpoint_save_btn = QPushButton("✓ 保存")
-        self.endpoint_save_btn.setFixedHeight(28)
         self.endpoint_save_btn.setObjectName("iconButton")
         self.endpoint_save_btn.setToolTip("保存更新地址")
-        self.endpoint_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-            QPushButton:pressed {
-                background-color: #047857;
-            }
-        """)
         self.endpoint_save_btn.clicked.connect(self.save_endpoint)
         self.endpoint_save_btn.hide()
         endpoint_header_layout.addWidget(self.endpoint_save_btn)
 
         # 取消按钮（初始隐藏）
         self.endpoint_cancel_btn = QPushButton("✕ 取消")
-        self.endpoint_cancel_btn.setFixedHeight(28)
         self.endpoint_cancel_btn.setObjectName("iconButton")
         self.endpoint_cancel_btn.setToolTip("取消编辑")
-        self.endpoint_cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #EF4444;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #DC2626;
-            }
-            QPushButton:pressed {
-                background-color: #B91C1C;
-            }
-        """)
         self.endpoint_cancel_btn.clicked.connect(self.cancel_endpoint_edit)
         self.endpoint_cancel_btn.hide()
         endpoint_header_layout.addWidget(self.endpoint_cancel_btn)
@@ -573,104 +520,31 @@ class SettingsDialog(QDialog):
 
         # 显示/隐藏按钮
         self.show_token_btn = QPushButton("👁️ 显示")
-        self.show_token_btn.setFixedHeight(28)
         self.show_token_btn.setCheckable(True)
         self.show_token_btn.setObjectName("iconButton")
         self.show_token_btn.setToolTip("显示/隐藏令牌内容")
-        self.show_token_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6B7280;
-                color: white;
-                font-size: 12px;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-            }
-            QPushButton:pressed {
-                background-color: #374151;
-            }
-            QPushButton:checked {
-                background-color: #3B82F6;
-            }
-        """)
         self.show_token_btn.clicked.connect(self.toggle_token_visibility)
         token_header_layout.addWidget(self.show_token_btn)
 
         # 编辑按钮
         self.token_edit_btn = QPushButton("✏️ 编辑")
-        self.token_edit_btn.setFixedHeight(28)
         self.token_edit_btn.setObjectName("iconButton")
         self.token_edit_btn.setToolTip("编辑访问私有更新服务器的令牌（可选）")
-        self.token_edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6B7280;
-                color: white;
-                font-size: 12px;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-            }
-            QPushButton:pressed {
-                background-color: #374151;
-            }
-        """)
         self.token_edit_btn.clicked.connect(self.edit_token)
         token_header_layout.addWidget(self.token_edit_btn)
 
         # 保存按钮（初始隐藏）
         self.token_save_btn = QPushButton("✓ 保存")
-        self.token_save_btn.setFixedHeight(28)
         self.token_save_btn.setObjectName("iconButton")
         self.token_save_btn.setToolTip("保存令牌")
-        self.token_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-            QPushButton:pressed {
-                background-color: #047857;
-            }
-        """)
         self.token_save_btn.clicked.connect(self.save_token)
         self.token_save_btn.hide()
         token_header_layout.addWidget(self.token_save_btn)
 
         # 取消按钮（初始隐藏）
         self.token_cancel_btn = QPushButton("✕ 取消")
-        self.token_cancel_btn.setFixedHeight(28)
         self.token_cancel_btn.setObjectName("iconButton")
         self.token_cancel_btn.setToolTip("取消编辑")
-        self.token_cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #EF4444;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #DC2626;
-            }
-            QPushButton:pressed {
-                background-color: #B91C1C;
-            }
-        """)
         self.token_cancel_btn.clicked.connect(self.cancel_token_edit)
         self.token_cancel_btn.hide()
         token_header_layout.addWidget(self.token_cancel_btn)
@@ -883,7 +757,7 @@ class SettingsDialog(QDialog):
         spinbox_container_layout.addWidget(self.warmup_count_spinbox)
 
         # 使用统一的按钮创建方法
-        warmup_buttons = self._create_spinbox_buttons(self.warmup_count_spinbox, button_height=12)
+        warmup_buttons = self._create_spinbox_buttons(self.warmup_count_spinbox, button_height=16)
         spinbox_container_layout.addWidget(warmup_buttons)
 
         # 单位标签（放在外面）
@@ -1772,7 +1646,7 @@ class SettingsDialog(QDialog):
 
     def reset_tutorial(self):
         """重置教程状态"""
-        msgBox = QMessageBox(self)
+        msgBox = ThemedMessageBox(self)
         msgBox.setWindowTitle("确认重置")
         msgBox.setText("确定要重置教程状态吗？\n下次启动程序时将重新显示新手引导。")
         msgBox.setIcon(QMessageBox.Icon.Question)
@@ -1812,7 +1686,7 @@ class SettingsDialog(QDialog):
 
     def clear_directory_history(self):
         """清除目录历史"""
-        msgBox = QMessageBox(self)
+        msgBox = ThemedMessageBox(self)
         msgBox.setWindowTitle("确认清除")
         msgBox.setText("确定要清除工作目录历史记录吗？")
         msgBox.setIcon(QMessageBox.Icon.Question)
@@ -1869,44 +1743,13 @@ class SettingsDialog(QDialog):
                         # 跳过提示，继续检查线上更新
                     else:
                         # 本地更新包版本不同于当前版本，询问用户是否安装
-                        msg_box = QMessageBox(self)
+                        msg_box = ThemedMessageBox(self)
                         msg_box.setWindowTitle("发现已下载更新")
                         msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
                         msg_box.setIcon(QMessageBox.Icon.Question)
 
-                        # 应用主题适配样式
-                        c = default_theme.colors
-                        msg_box.setStyleSheet(f"""
-                            QMessageBox {{
-                                background-color: {c.BACKGROUND_PRIMARY};
-                                color: {c.TEXT_PRIMARY};
-                                border: 1px solid {c.BORDER_MEDIUM};
-                                border-radius: 8px;
-                                font-size: 14px;
-                                min-width: 400px;
-                            }}
-                            QMessageBox QLabel {{
-                                color: {c.TEXT_PRIMARY};
-                                font-size: 14px;
-                                padding: 10px;
-                            }}
-                            QPushButton {{
-                                background-color: {c.PRIMARY};
-                                color: white;
-                                border: none;
-                                border-radius: 6px;
-                                padding: 10px 24px;
-                                font-size: 14px;
-                                font-weight: bold;
-                                min-width: 100px;
-                                min-height: 36px;
-                            }}
-                            QPushButton:hover {{ background-color: {c.PRIMARY_DARK}; }}
-                            QPushButton:pressed {{ background-color: {c.PRIMARY_DARK}; }}
-                        """)
-
                         yes_btn = msg_box.addButton("是", QMessageBox.ButtonRole.YesRole)
-                        no_btn = msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
+                        msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
                         msg_box.setDefaultButton(yes_btn)
 
                         msg_box.exec()
@@ -1989,7 +1832,7 @@ class SettingsDialog(QDialog):
 
     def clear_smb_cache(self):
         """清除SMB缓存"""
-        msgBox = QMessageBox(self)
+        msgBox = ThemedMessageBox(self)
         msgBox.setWindowTitle("确认清除")
         msgBox.setText("确定要清除SMB/NAS网络路径的图片缓存吗？\n这将删除本地缓存目录中的所有文件。")
         msgBox.setIcon(QMessageBox.Icon.Question)
@@ -2102,10 +1945,8 @@ class SettingsDialog(QDialog):
 
     def reset_to_defaults(self):
         """恢复默认设置"""
-        c = default_theme.colors
-
         # 创建消息框（与删除类别确认框样式一致）
-        msg_box = QMessageBox(self)
+        msg_box = ThemedMessageBox(self)
         msg_box.setWindowTitle("⚠️ 确认恢复默认")
         msg_box.setText("确定要恢复所有设置到默认值吗？")
         msg_box.setInformativeText("此操作不可撤销。")
@@ -2120,20 +1961,6 @@ class SettingsDialog(QDialog):
 
         # 设置默认按钮为"否"
         msg_box.setDefaultButton(no_button)
-
-        # 使用主题样式
-        message_box_style = f"""
-            QMessageBox {{
-                background-color: {c.BACKGROUND_CARD};
-                color: {c.TEXT_PRIMARY};
-            }}
-            QMessageBox QLabel {{
-                color: {c.TEXT_PRIMARY};
-                font-size: 14px;
-            }}
-            {ButtonStyles.get_primary_button_style()}
-        """
-        msg_box.setStyleSheet(message_box_style)
 
         # 显示对话框并处理结果
         msg_box.exec()
@@ -2205,25 +2032,7 @@ class SettingsDialog(QDialog):
             QTabBar::tab:hover {{
                 background-color: {c.BACKGROUND_HOVER};
             }}
-            QPushButton {{
-                background-color: {c.PRIMARY};
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-size: 13px;
-                min-height: 32px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-            QPushButton:checked {{
-                background-color: {c.PRIMARY};
-                border: 2px solid {c.PRIMARY_DARK};
-            }}
+            {ButtonStyles.get_dialog_button_style()}
             QLineEdit {{
                 background-color: {c.BACKGROUND_SECONDARY};
                 color: {c.TEXT_PRIMARY};
@@ -2371,6 +2180,22 @@ class SettingsDialog(QDialog):
             }}
         """)
 
+        self._style_action_buttons()
+
+        # SpinBox 使用自己的组合控件样式，避免父级 QLineEdit 内边距裁切数字。
+        for spinbox in self.findChildren(QSpinBox):
+            self._apply_spinbox_style(spinbox)
+        for spinbox in self.findChildren(QDoubleSpinBox):
+            self._apply_spinbox_style(spinbox)
+        for button in self.findChildren(QPushButton):
+            direction = button.property("uiSpinDirection")
+            if direction:
+                self._style_spinbox_button(
+                    button,
+                    direction,
+                    int(button.property("uiSpinHeight") or 16),
+                )
+
         # 单独更新教程状态标签的样式（使用内联样式确保优先级）
         if hasattr(self, 'tutorial_status_label') and hasattr(self, 'tutorial_status_color'):
             if default_theme.is_dark:
@@ -2392,6 +2217,21 @@ class SettingsDialog(QDialog):
         # 强制刷新所有子组件的样式（防止缓存导致颜色不更新）
         # 参考主窗口的实现，确保主题切换时所有组件都能正确渲染新颜色
         self._refresh_all_widgets()
+
+    def _style_action_buttons(self):
+        """按按钮语义统一设置页中的颜色、宽度和 36px 高度。"""
+        for button in self.findChildren(QPushButton):
+            if button.property("uiControlPart"):
+                continue
+            text = button.text().replace("✓", "").replace("✕", "").strip()
+            size = "compact" if button.objectName() == "iconButton" else "standard"
+            min_width = 72 if size == "compact" else None
+            if any(keyword in text for keyword in ("恢复默认", "清除历史", "清除SMB")):
+                style_button(button, "danger", size, min_width=min_width)
+            elif any(keyword in text for keyword in ("检查更新", "保存")):
+                style_button(button, "primary", size, min_width=min_width)
+            else:
+                style_button(button, "secondary", size, min_width=min_width)
 
     def _refresh_all_widgets(self):
         """强制刷新所有子组件的样式渲染
@@ -2511,8 +2351,16 @@ class SettingsDialog(QDialog):
                 border-radius: 4px;
                 border-top-right-radius: 0px;
                 border-bottom-right-radius: 0px;
-                padding: 4px 8px;
+                padding: 0px 8px;
                 font-size: 13px;
+                selection-background-color: {c.PRIMARY};
+            }}
+            QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{
+                background-color: transparent;
+                color: {c.TEXT_PRIMARY};
+                border: none;
+                padding: 0px;
+                margin: 0px;
                 selection-background-color: {c.PRIMARY};
             }}
             QSpinBox:hover, QDoubleSpinBox:hover {{
@@ -2529,6 +2377,45 @@ class SettingsDialog(QDialog):
                 background: transparent;
             }}
         """)
+        # 必须在 setStyleSheet 之后设置，Qt 的样式重新 polish 会重算最小高度。
+        spinbox.setFixedHeight(32)
+
+    def _style_spinbox_button(self, button, direction: str, button_height: int):
+        """应用组合 SpinBox 上下按钮样式，并支持运行时切换主题。"""
+        c = default_theme.colors
+        is_up = direction == "up"
+        top_right_radius = "4px" if is_up else "0px"
+        bottom_right_radius = "0px" if is_up else "4px"
+        horizontal_border = (
+            f"border-bottom: 1px solid {c.BORDER_MEDIUM};"
+            if is_up
+            else "border-top: none;"
+        )
+        button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.BACKGROUND_SECONDARY};
+                color: {c.TEXT_SECONDARY};
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-left: none;
+                {horizontal_border}
+                border-top-right-radius: {top_right_radius};
+                border-bottom-right-radius: {bottom_right_radius};
+                margin: 0px;
+                padding: 0px;
+                font-size: 8px;
+                min-height: 0px;
+                max-height: {button_height}px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+                color: {c.TEXT_PRIMARY};
+            }}
+            QPushButton:pressed {{
+                background-color: {c.PRIMARY};
+                color: {c.TEXT_ON_PRIMARY};
+            }}
+        """)
+        button.setFixedHeight(button_height)
 
     def _create_spinbox_buttons(self, spinbox, button_height=12):
         """创建外部垂直排列的上下按钮（组合式组件风格）
@@ -2540,82 +2427,41 @@ class SettingsDialog(QDialog):
         Returns:
             QWidget: 包含上下按钮的容器组件
         """
-        c = default_theme.colors
-
         # 按钮容器
         btn_container = QWidget()
         btn_container.setFixedWidth(20)
+        btn_container.setFixedHeight(button_height * 2)
         buttons_layout = QVBoxLayout(btn_container)
         buttons_layout.setSpacing(0)
         buttons_layout.setContentsMargins(0, 0, 0, 0)
 
         # 上箭头按钮（右上圆角，无左边框，底部分割线）
         up_button = QPushButton("▲")
+        up_button.setProperty("uiControlPart", True)
+        up_button.setProperty("uiSpinDirection", "up")
+        up_button.setProperty("uiSpinHeight", button_height)
         up_button.setFixedHeight(button_height)
         up_button.setCursor(Qt.CursorShape.PointingHandCursor)
         up_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # 防止抢走输入框焦点
         up_button.setAutoRepeat(True)  # 长按连发
         up_button.setAutoRepeatDelay(400)  # 首次延迟400ms
         up_button.setAutoRepeatInterval(80)  # 之后每80ms触发一次
-        up_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.BACKGROUND_SECONDARY};
-                color: {c.TEXT_SECONDARY};
-                border: 1px solid {c.BORDER_MEDIUM};
-                border-left: none;
-                border-bottom: 1px solid {c.BORDER_MEDIUM};
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 0px;
-                margin: 0px;
-                padding: 0px;
-                font-size: 8px;
-                min-height: 0px;
-                max-height: {button_height}px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.BACKGROUND_HOVER};
-                color: {c.TEXT_PRIMARY};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.PRIMARY};
-                color: #FFFFFF;
-            }}
-        """)
+        self._style_spinbox_button(up_button, "up", button_height)
         up_button.clicked.connect(lambda: spinbox.stepUp())
         buttons_layout.addWidget(up_button)
 
         # 下箭头按钮（右下圆角，无左边框，无上边框）
         down_button = QPushButton("▼")
+        down_button.setProperty("uiControlPart", True)
+        down_button.setProperty("uiSpinDirection", "down")
+        down_button.setProperty("uiSpinHeight", button_height)
         down_button.setFixedHeight(button_height)
         down_button.setCursor(Qt.CursorShape.PointingHandCursor)
         down_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # 防止抢走输入框焦点
         down_button.setAutoRepeat(True)  # 长按连发
         down_button.setAutoRepeatDelay(400)  # 首次延迟400ms
         down_button.setAutoRepeatInterval(80)  # 之后每80ms触发一次
-        down_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.BACKGROUND_SECONDARY};
-                color: {c.TEXT_SECONDARY};
-                border: 1px solid {c.BORDER_MEDIUM};
-                border-left: none;
-                border-top: none;
-                border-top-right-radius: 0px;
-                border-bottom-right-radius: 4px;
-                margin: 0px;
-                padding: 0px;
-                font-size: 8px;
-                min-height: 0px;
-                max-height: {button_height}px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.BACKGROUND_HOVER};
-                color: {c.TEXT_PRIMARY};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.PRIMARY};
-                color: #FFFFFF;
-            }}
-        """)
+        self._style_spinbox_button(down_button, "down", button_height)
         down_button.clicked.connect(lambda: spinbox.stepDown())
         buttons_layout.addWidget(down_button)
 

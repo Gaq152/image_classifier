@@ -6,8 +6,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
 
-from ..components.styles import ButtonStyles, DialogStyles
 from ..components.styles.theme import default_theme
+from ..components.dialog_utils import configure_dialog, style_button
 from ..components.toast import toast_success, toast_warning
 
 
@@ -22,14 +22,12 @@ class CategoryShortcutDialog(QDialog):
 
         self.setWindowTitle(f'设置类别"{category}"的快捷键')
         self.setModal(True)
+        self.setMinimumWidth(460)
 
-        # 应用主题样式
         c = default_theme.colors
-        self.setStyleSheet(DialogStyles.get_form_dialog_style())
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        configure_dialog(self, layout)
 
         # 创建快捷键编辑区域
         row = QHBoxLayout()
@@ -55,9 +53,10 @@ class CategoryShortcutDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
 
         # 应用按钮样式
-        ok_btn.setStyleSheet(ButtonStyles.get_primary_button_style())
-        cancel_btn.setStyleSheet(ButtonStyles.get_secondary_button_style(""))
+        style_button(ok_btn, "primary")
+        style_button(cancel_btn, "secondary")
 
+        buttons.addStretch()
         buttons.addWidget(ok_btn)
         buttons.addWidget(cancel_btn)
         layout.addLayout(buttons)
@@ -110,18 +109,12 @@ class CategoryShortcutDialog(QDialog):
                 else:
                     # 找出使用该快捷键的类别（大小写不敏感）
                     conflict_category = None
-                    conflict_key = None
                     for cat, key in self.config.category_shortcuts.items():
                         if cat != self.category and self.config._normalize_shortcut(key) == normalized_shortcut:
                             conflict_category = cat
-                            conflict_key = key
                             break
 
                     if conflict_category:
-                        case_note = ""
-                        if conflict_key != shortcut:
-                            case_note = f"\n\n注意：该快捷键已以 \"{conflict_key}\" 的形式被使用。\n字母快捷键不区分大小写。"
-
                         toast_warning(toast_parent, f'快捷键 "{shortcut}" 已被类别 "{conflict_category}" 使用，请选择其他快捷键')
                     else:
                         toast_warning(toast_parent, f'快捷键 "{shortcut}" 已被占用，请选择其他快捷键')

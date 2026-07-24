@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
 )
 
 from utils.file_operations import normalize_folder_name, retry_file_operation
-from ..components.styles import ButtonStyles, DialogStyles
 from ..components.styles.theme import default_theme
+from ..components.dialog_utils import configure_dialog, style_button
 from ..components.toast import toast_warning, toast_error
 
 
@@ -41,13 +41,10 @@ class AddCategoriesDialog(QDialog):
         try:
             # 应用主题样式
             c = default_theme.colors
-            self.setStyleSheet(DialogStyles.get_form_dialog_style())
-
             self.setWindowTitle('批量添加类别')
-            self.setMinimumWidth(400)
+            self.setMinimumWidth(480)
             layout = QVBoxLayout(self)
-            layout.setContentsMargins(20, 20, 20, 20)
-            layout.setSpacing(15)
+            configure_dialog(self, layout)
 
             # 添加说明标签
             tip_label = QLabel('请输入类别名称，多个类别用逗号或换行分隔\n已存在和已忽略的类别会被自动跳过')
@@ -108,73 +105,21 @@ class AddCategoriesDialog(QDialog):
             btn_layout = QHBoxLayout()
             btn_layout.addStretch()  # 左侧弹性空间，让按钮靠右
 
-            # 统一按钮样式：固定padding和height
-            button_style_base = """
-                padding: 6px 16px;
-                font-size: 13px;
-                font-weight: 500;
-                border-radius: 4px;
-                min-height: 24px;
-            """
-
             add_btn = QPushButton('添加')
-            add_btn.setMinimumWidth(100)
             add_btn.clicked.connect(self.add_categories)
-            add_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {c.PRIMARY};
-                    color: white;
-                    border: none;
-                    {button_style_base}
-                }}
-                QPushButton:hover {{
-                    background-color: {c.PRIMARY_DARK};
-                }}
-                QPushButton:pressed {{
-                    background-color: {c.PRIMARY_DARK};
-                }}
-            """)
+            style_button(add_btn, "primary", min_width=100)
 
             continue_btn = QPushButton('添加并继续')
-            continue_btn.setMinimumWidth(120)
             continue_btn.clicked.connect(self.add_and_continue)
-            continue_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {c.SUCCESS};
-                    color: white;
-                    border: none;
-                    {button_style_base}
-                }}
-                QPushButton:hover {{
-                    background-color: {c.SUCCESS_DARK};
-                }}
-                QPushButton:pressed {{
-                    background-color: {c.SUCCESS_DARK};
-                }}
-            """)
+            style_button(continue_btn, "success", min_width=120)
 
             cancel_btn = QPushButton('取消')
-            cancel_btn.setMinimumWidth(100)
             cancel_btn.clicked.connect(self.reject)
-            cancel_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {c.GRAY_100};
-                    color: {c.TEXT_PRIMARY};
-                    border: 1px solid {c.BORDER_LIGHT};
-                    {button_style_base}
-                }}
-                QPushButton:hover {{
-                    background-color: {c.BACKGROUND_HOVER};
-                    border-color: {c.BORDER_MEDIUM};
-                }}
-                QPushButton:pressed {{
-                    background-color: {c.BACKGROUND_PRESSED};
-                }}
-            """)
+            style_button(cancel_btn, "secondary", min_width=100)
 
+            btn_layout.addWidget(cancel_btn)
             btn_layout.addWidget(add_btn)
             btn_layout.addWidget(continue_btn)
-            btn_layout.addWidget(cancel_btn)
             layout.addLayout(btn_layout)
 
             # 连接文本变化信号
@@ -310,7 +255,7 @@ class AddCategoriesDialog(QDialog):
                             added = True
                             self.logger.info(f"成功创建类别目录: {category_dir}")
                         else:
-                            errors.append(f'无法获取父目录信息')
+                            errors.append('无法获取父目录信息')
                     except Exception as e:
                         errors.append(f'创建类别 "{chinese_name}" 失败: {str(e)}')
                         continue

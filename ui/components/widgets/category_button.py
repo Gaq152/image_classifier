@@ -13,8 +13,13 @@ from PyQt6.QtWidgets import (QPushButton, QLabel, QHBoxLayout, QDialog, QVBoxLay
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from ..toast import toast_error
-from ..styles import apply_category_button_style, WidgetStyles, ButtonStyles
+from ..styles import apply_category_button_style, WidgetStyles
 from ..styles.theme import default_theme
+from ..dialog_utils import (
+    ThemedMessageBox,
+    configure_dialog,
+    style_button,
+)
 
 
 class CategoryButton(QPushButton):
@@ -202,17 +207,13 @@ class CategoryButton(QPushButton):
             dialog = QDialog(self)
             dialog.setWindowTitle("修改类别名称")
             dialog.setModal(True)
-            dialog.setFixedSize(350, 150)
-
-            # 使用统一的样式系统
-            dialog.setStyleSheet(WidgetStyles.get_custom_rename_dialog_style())
+            dialog.setMinimumWidth(420)
 
             layout = QVBoxLayout(dialog)
-            layout.setSpacing(15)
-            layout.setContentsMargins(20, 20, 20, 20)
+            configure_dialog(dialog, layout)
 
             # 标签
-            label = QLabel(f"请输入新的类别名称:")
+            label = QLabel("请输入新的类别名称:")
             layout.addWidget(label)
 
             # 输入框
@@ -225,12 +226,13 @@ class CategoryButton(QPushButton):
             button_layout.addStretch()
 
             ok_button = QPushButton("确定")
+            style_button(ok_button, "primary")
             ok_button.clicked.connect(dialog.accept)
             ok_button.setDefault(True)
             button_layout.addWidget(ok_button)
 
             cancel_button = QPushButton("取消")
-            cancel_button.setObjectName("cancelButton")
+            style_button(cancel_button, "secondary")
             cancel_button.clicked.connect(dialog.reject)
             button_layout.addWidget(cancel_button)
 
@@ -272,15 +274,13 @@ class CategoryButton(QPushButton):
         """切换排序模式 - 该功能已迁移到 CategoryPanel，此方法保留以兼容旧代码"""
         # Phase 2.5: 排序模式切换已由 CategoryPanel 直接处理
         # 此方法仅保留空实现以防止旧代码调用报错
-        self.logger.warning(f"change_sort_mode 已弃用，排序模式切换请使用 CategoryPanel")
+        self.logger.warning("change_sort_mode 已弃用，排序模式切换请使用 CategoryPanel")
 
     def ignore_category(self):
         """忽略类别 - 显示确认对话框并发射信号"""
         try:
-            c = default_theme.colors
-
             # 创建自定义消息框
-            msg_box = QMessageBox(self)
+            msg_box = ThemedMessageBox(self)
             msg_box.setWindowTitle("⊘ 确认忽略")
             msg_box.setText(f"确定要忽略类别 '{self.category_name}' 吗？")
             msg_box.setInformativeText("注意：忽略后该目录将不再显示在类别列表中，但目录和文件不会被删除！")
@@ -295,20 +295,6 @@ class CategoryButton(QPushButton):
 
             # 设置默认按钮为"否"
             msg_box.setDefaultButton(no_button)
-
-            # 使用主题样式
-            message_box_style = f"""
-                QMessageBox {{
-                    background-color: {c.BACKGROUND_CARD};
-                    color: {c.TEXT_PRIMARY};
-                }}
-                QMessageBox QLabel {{
-                    color: {c.TEXT_PRIMARY};
-                    font-size: 14px;
-                }}
-                {ButtonStyles.get_primary_button_style()}
-            """
-            msg_box.setStyleSheet(message_box_style)
 
             # 显示对话框并处理结果
             msg_box.exec()
@@ -325,10 +311,8 @@ class CategoryButton(QPushButton):
     def delete_category(self):
         """删除类别 - 显示确认对话框并发射信号"""
         try:
-            c = default_theme.colors
-
             # 创建自定义消息框
-            msg_box = QMessageBox(self)
+            msg_box = ThemedMessageBox(self)
             msg_box.setWindowTitle("🗑️ 确认删除")
             msg_box.setText(f"确定要删除类别 '{self.category_name}' 吗？")
             msg_box.setInformativeText("注意：这将删除对应的文件夹及其中的所有文件！")
@@ -338,25 +322,11 @@ class CategoryButton(QPushButton):
             yes_button = QPushButton("是")
             no_button = QPushButton("否")
 
-            msg_box.addButton(yes_button, QMessageBox.ButtonRole.YesRole)
+            msg_box.addButton(yes_button, QMessageBox.ButtonRole.DestructiveRole)
             msg_box.addButton(no_button, QMessageBox.ButtonRole.NoRole)
 
             # 设置默认按钮为"否"
             msg_box.setDefaultButton(no_button)
-
-            # 使用主题样式
-            message_box_style = f"""
-                QMessageBox {{
-                    background-color: {c.BACKGROUND_CARD};
-                    color: {c.TEXT_PRIMARY};
-                }}
-                QMessageBox QLabel {{
-                    color: {c.TEXT_PRIMARY};
-                    font-size: 14px;
-                }}
-                {ButtonStyles.get_primary_button_style()}
-            """
-            msg_box.setStyleSheet(message_box_style)
 
             # 显示对话框并处理结果
             msg_box.exec()

@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButt
 from PyQt6.QtCore import pyqtSignal
 from ..components.styles.theme import default_theme
 from ..components.styles import DialogStyles
+from ..components.dialog_utils import configure_dialog, style_button
 
 
 class ProgressDialog(QDialog):
@@ -28,8 +29,7 @@ class ProgressDialog(QDialog):
         c = default_theme.colors
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        configure_dialog(self, layout)
 
         # 主要进度信息
         self.main_label = QLabel("正在处理...")
@@ -50,13 +50,14 @@ class ProgressDialog(QDialog):
         button_layout = QHBoxLayout()
         self.cancel_button = QPushButton("取消")
         self.cancel_button.clicked.connect(self.cancel_operation)
+        style_button(self.cancel_button, "danger")
         button_layout.addStretch()
         button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
 
         # 设置样式
         self.setStyleSheet(f"""
-            {DialogStyles.get_base_dialog_style()}
+            {DialogStyles.get_complete_dialog_style()}
             QLabel {{
                 padding: 4px;
             }}
@@ -76,17 +77,8 @@ class ProgressDialog(QDialog):
                 border-radius: 8px;
                 margin: 1px;
             }}
-            QPushButton {{
-                padding: 6px 20px;
-                background-color: {c.ERROR};
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.ERROR_DARK};
-            }}
         """)
+        style_button(self.cancel_button, "danger")
 
     def update_progress(self, value, maximum=100):
         """更新进度"""

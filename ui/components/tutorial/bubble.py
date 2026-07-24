@@ -10,6 +10,8 @@ from PyQt6.QtCore import Qt, QPoint, QPointF, QRect, QRectF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPainterPath, QFont
 from typing import Optional
 from enum import Enum
+from ..dialog_utils import style_button
+from ..styles.theme import default_theme
 
 
 class ArrowPosition(Enum):
@@ -42,9 +44,9 @@ class TutorialBubble(QWidget):
         super().__init__(parent)
 
         # 气泡样式配置
-        self._bubble_color = QColor(255, 255, 255)  # 白色背景
-        self._border_color = QColor(66, 133, 244)  # 蓝色边框
-        self._text_color = QColor(60, 64, 67)  # 深灰色文字
+        self._bubble_color = QColor(default_theme.colors.BACKGROUND_CARD)
+        self._border_color = QColor(default_theme.colors.PRIMARY)
+        self._text_color = QColor(default_theme.colors.TEXT_PRIMARY)
         self._border_width = 2
         self._corner_radius = 12
         self._arrow_size = 16  # 箭头大小
@@ -67,6 +69,21 @@ class TutorialBubble(QWidget):
 
         # 初始化隐藏
         self.hide()
+
+    def apply_theme(self):
+        """同步气泡、文本及按钮到当前主题。"""
+        c = default_theme.colors
+        self._bubble_color = QColor(c.BACKGROUND_CARD)
+        self._border_color = QColor(c.PRIMARY)
+        self._text_color = QColor(c.TEXT_PRIMARY)
+        self._content_label.setStyleSheet(
+            f"color: {c.TEXT_PRIMARY}; background: transparent;"
+        )
+        style_button(self._skip_button, "ghost")
+        style_button(self._prev_button, "secondary")
+        style_button(self._next_button, "primary")
+        style_button(self._finish_button, "success")
+        self.update()
 
     def _setup_ui(self):
         """设置UI布局"""
@@ -101,22 +118,7 @@ class TutorialBubble(QWidget):
 
         # 跳过按钮
         self._skip_button = QPushButton("跳过教程")
-        self._skip_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: rgb(95, 99, 104);
-                border: 1px solid rgb(218, 220, 224);
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 10pt;
-            }
-            QPushButton:hover {
-                background-color: rgb(248, 249, 250);
-            }
-            QPushButton:pressed {
-                background-color: rgb(241, 243, 244);
-            }
-        """)
+        style_button(self._skip_button, "ghost")
         self._skip_button.clicked.connect(self.skip_clicked.emit)
         button_layout.addWidget(self._skip_button)
 
@@ -124,68 +126,19 @@ class TutorialBubble(QWidget):
 
         # 上一步按钮
         self._prev_button = QPushButton("上一步")
-        self._prev_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: rgb(66, 133, 244);
-                border: 1px solid rgb(66, 133, 244);
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 10pt;
-            }
-            QPushButton:hover {
-                background-color: rgba(66, 133, 244, 0.08);
-            }
-            QPushButton:pressed {
-                background-color: rgba(66, 133, 244, 0.16);
-            }
-            QPushButton:disabled {
-                color: rgb(189, 193, 198);
-                border-color: rgb(218, 220, 224);
-            }
-        """)
+        style_button(self._prev_button, "secondary")
         self._prev_button.clicked.connect(self.prev_clicked.emit)
         button_layout.addWidget(self._prev_button)
 
         # 下一步按钮
         self._next_button = QPushButton("下一步")
-        self._next_button.setStyleSheet("""
-            QPushButton {
-                background-color: rgb(66, 133, 244);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 10pt;
-            }
-            QPushButton:hover {
-                background-color: rgb(51, 103, 214);
-            }
-            QPushButton:pressed {
-                background-color: rgb(26, 115, 232);
-            }
-        """)
+        style_button(self._next_button, "primary")
         self._next_button.clicked.connect(self.next_clicked.emit)
         button_layout.addWidget(self._next_button)
 
         # 完成按钮（初始隐藏，最后一步显示）
         self._finish_button = QPushButton("完成")
-        self._finish_button.setStyleSheet("""
-            QPushButton {
-                background-color: rgb(52, 168, 83);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 10pt;
-            }
-            QPushButton:hover {
-                background-color: rgb(46, 125, 50);
-            }
-            QPushButton:pressed {
-                background-color: rgb(27, 94, 32);
-            }
-        """)
+        style_button(self._finish_button, "success")
         self._finish_button.clicked.connect(self.finish_clicked.emit)
         self._finish_button.hide()
         button_layout.addWidget(self._finish_button)

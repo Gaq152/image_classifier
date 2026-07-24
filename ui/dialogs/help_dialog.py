@@ -7,14 +7,15 @@ import sys
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTabWidget, QWidget, QTextBrowser, QMessageBox, QApplication
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QTabWidget, QWidget, QTextBrowser, QApplication
 )
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QDesktopServices, QIcon
+from PyQt6.QtGui import QDesktopServices
 
 from ..components.toast import toast_success, toast_error
 from ..components.styles.theme import default_theme
+from ..components.styles import DialogStyles
+from ..components.dialog_utils import configure_dialog
 from _version_ import CONTACT_INFO, VERSION_HISTORY, get_about_info
 
 
@@ -72,6 +73,8 @@ class TabbedHelpDialog(QDialog):
             # 动态数据
             'version': about_info["version"],
             'support_email': CONTACT_INFO['support_email'],
+            'company': CONTACT_INFO['company'],
+            'copyright_year': CONTACT_INFO['copyright_year'],
             'version_history': self._generate_version_history_html(),
         }
 
@@ -123,10 +126,7 @@ class TabbedHelpDialog(QDialog):
         """根据当前主题获取对话框样式"""
         c = default_theme.colors
         return f"""
-            QDialog {{
-                background-color: {c.BACKGROUND_PRIMARY};
-                color: {c.TEXT_PRIMARY};
-            }}
+            {DialogStyles.get_complete_dialog_style()}
             QTabWidget {{
                 background-color: {c.BACKGROUND_PRIMARY};
                 border: 1px solid {c.BORDER_MEDIUM};
@@ -160,22 +160,6 @@ class TabbedHelpDialog(QDialog):
             }}
             QTabBar::tab:selected:hover {{
                 background-color: {c.BACKGROUND_PRIMARY};
-            }}
-            QPushButton {{
-                background-color: {c.PRIMARY};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: normal;
-                min-width: 80px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.PRIMARY_DARK};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.PRIMARY_DARK};
             }}
             QTextBrowser {{
                 background-color: {c.BACKGROUND_PRIMARY};
@@ -285,6 +269,7 @@ class TabbedHelpDialog(QDialog):
             self.setStyleSheet(self._get_dialog_style())
 
             layout = QVBoxLayout(self)
+            configure_dialog(self, layout)
             tab_widget = QTabWidget()
 
             # 使用工厂方法创建标签页

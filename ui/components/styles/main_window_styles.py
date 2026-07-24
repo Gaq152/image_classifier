@@ -19,8 +19,8 @@ class MainWindowStyles:
                 background-color: {default_theme.colors.BACKGROUND_PRIMARY};
             }}
             QSplitter::handle {{
-                background-color: #BDC3C7;
-                border: {default_theme.sizes.BORDER_THIN} solid #95A5A6;
+                background-color: {default_theme.colors.BORDER_LIGHT};
+                border: {default_theme.sizes.BORDER_THIN} solid {default_theme.colors.BORDER_MEDIUM};
                 width: 4px;
                 border-radius: {default_theme.sizes.RADIUS_SMALL};
             }}

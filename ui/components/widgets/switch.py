@@ -8,6 +8,8 @@ from PyQt6.QtWidgets import QAbstractButton
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt6.QtGui import QPainter, QColor, QPen
 
+from ..styles.theme import default_theme
+
 
 class Switch(QAbstractButton):
     """iOS风格的滑块开关"""
@@ -52,17 +54,17 @@ class Switch(QAbstractButton):
 
         # 背景
         if self.isChecked():
-            bg_color = QColor("#3B82F6")  # 蓝色
+            bg_color = QColor(default_theme.colors.PRIMARY)
         else:
-            bg_color = QColor("#D1D5DB")  # 灰色
+            bg_color = QColor(default_theme.colors.GRAY_300)
 
         painter.setBrush(bg_color)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, self.width(), self.height(), 13, 13)
 
         # 圆形滑块
-        painter.setBrush(QColor("#FFFFFF"))
-        painter.setPen(QPen(QColor("#E5E7EB"), 1))
+        painter.setBrush(QColor(default_theme.colors.WHITE))
+        painter.setPen(QPen(QColor(default_theme.colors.BORDER_LIGHT), 1))
         painter.drawEllipse(int(self._circle_position), 3, 20, 20)
 
     def sizeHint(self):

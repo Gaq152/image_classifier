@@ -5,7 +5,7 @@
 """
 
 import datetime
-from typing import Dict, List, Tuple
+from typing import Dict
 
 # ================================
 # 🎯 核心版本信息
@@ -770,8 +770,8 @@ DOWNLOAD_INFO = {
 
 # 联系信息
 CONTACT_INFO = {
-    "support_email": "anlife123456@gmail.com",
-    "company": "GAQ",
+    "support_email": "admin@anlife.top",
+    "company": "anlife",
     "copyright_year": "2024"
 }
 

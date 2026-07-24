@@ -19,7 +19,8 @@ class ExpandableSearch(QWidget):
     search_cleared = pyqtSignal()       # 清除/关闭搜索
 
     # 展开宽度
-    EXPANDED_WIDTH = 150
+    EXPANDED_WIDTH = 180
+    CONTROL_SIZE = 32
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,7 +43,7 @@ class ExpandableSearch(QWidget):
         self.search_input.setPlaceholderText("搜索...")
         self.search_input.setFixedWidth(0)
         self.search_input.setMinimumWidth(0)
-        self.search_input.setFixedHeight(20)
+        self.search_input.setFixedHeight(self.CONTROL_SIZE)
         self.search_input.hide()
 
         # Gemini建议：使用内置清除按钮，自动处理显示/隐藏逻辑
@@ -57,7 +58,7 @@ class ExpandableSearch(QWidget):
         self.search_btn.setText("🔍")
         self.search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.search_btn.setToolTip("搜索图片文件名\n输入关键字后按 Enter 确认")
-        self.search_btn.setFixedSize(20, 20)
+        self.search_btn.setFixedSize(self.CONTROL_SIZE, self.CONTROL_SIZE)
         self._apply_button_style()
         self.search_btn.clicked.connect(self._toggle_search)
 
@@ -76,18 +77,18 @@ class ExpandableSearch(QWidget):
         c = default_theme.colors
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
-                border: none;
-                border-bottom: 2px solid {c.PRIMARY};
-                background-color: transparent;
-                padding: 2px 4px;
-                margin-right: 2px;
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: 6px 0 0 6px;
+                background-color: {c.BACKGROUND_CARD};
+                padding: 0 8px;
+                margin-right: 0;
                 color: {c.TEXT_PRIMARY};
                 font-size: 12px;
                 selection-background-color: {c.PRIMARY};
             }}
             QLineEdit:focus {{
-                background-color: {c.BACKGROUND_SECONDARY};
-                border-bottom: 2px solid {c.PRIMARY_LIGHT};
+                background-color: {c.BACKGROUND_CARD};
+                border-color: {c.PRIMARY};
             }}
         """)
 
@@ -96,17 +97,18 @@ class ExpandableSearch(QWidget):
         c = default_theme.colors
         self.search_btn.setStyleSheet(f"""
             QToolButton {{
-                border: none;
-                border-radius: 10px;
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-left: none;
+                border-radius: 0 6px 6px 0;
                 color: {c.PRIMARY};
-                font-size: 12px;
-                background: transparent;
+                font-size: 13px;
+                background: {c.BACKGROUND_CARD};
             }}
             QToolButton:hover {{
-                background-color: rgba(52, 152, 219, 0.15);
+                background-color: {c.BACKGROUND_HOVER};
             }}
             QToolButton:pressed {{
-                background-color: rgba(52, 152, 219, 0.25);
+                background-color: {c.BACKGROUND_PRESSED};
             }}
         """)
 

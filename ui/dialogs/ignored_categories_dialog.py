@@ -13,8 +13,8 @@ from PyQt6.QtWidgets import (
     QCheckBox,
 )
 
-from ..components.styles import DialogStyles
 from ..components.styles.theme import default_theme
+from ..components.dialog_utils import configure_dialog, style_button
 from ..components.toast import toast_success, toast_warning, toast_info, toast_error
 
 
@@ -31,9 +31,6 @@ class ManageIgnoredCategoriesDialog(QDialog):
         self.setModal(True)
         self.setMinimumSize(500, 400)
 
-        # 使用统一样式
-        self.setStyleSheet(DialogStyles.get_form_dialog_style())
-
         self.init_ui()
         self.load_ignored_list()
 
@@ -42,8 +39,7 @@ class ManageIgnoredCategoriesDialog(QDialog):
         c = default_theme.colors
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        configure_dialog(self, layout)
 
         # 标题说明
         title_label = QLabel("当前已忽略的类别目录：")
@@ -95,45 +91,13 @@ class ManageIgnoredCategoriesDialog(QDialog):
         # 批量恢复按钮
         batch_restore_btn = QPushButton("批量恢复选中")
         batch_restore_btn.clicked.connect(self.batch_restore)
-        batch_restore_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.WARNING};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                min-width: 100px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.WARNING_DARK};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.WARNING_DARK};
-            }}
-        """)
+        style_button(batch_restore_btn, "success", min_width=120)
         button_layout.addWidget(batch_restore_btn)
 
         # 关闭按钮
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.close_dialog)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.GRAY_500};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                min-width: 80px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.GRAY_600};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.GRAY_700};
-            }}
-        """)
+        style_button(close_btn, "secondary")
         button_layout.addWidget(close_btn)
 
         layout.addLayout(button_layout)
@@ -180,22 +144,7 @@ class ManageIgnoredCategoriesDialog(QDialog):
 
         # 恢复按钮
         restore_btn = QPushButton("恢复")
-        restore_btn.setFixedSize(60, 32)
-        restore_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {c.SUCCESS};
-                color: white;
-                border: none;
-                border-radius: 3px;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.SUCCESS_DARK};
-            }}
-            QPushButton:pressed {{
-                background-color: {c.SUCCESS_DARK};
-            }}
-        """)
+        style_button(restore_btn, "success", "compact", min_width=60)
         restore_btn.clicked.connect(lambda: self.restore_category(category_name))
         item_layout.addWidget(restore_btn)
 
