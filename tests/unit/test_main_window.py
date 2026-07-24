@@ -26,6 +26,7 @@ class ToolbarHarness(ImageClassifier):
         self._pending_update_version = None
         self._pending_update_manifest = None
         self._pending_update_token = ""
+        self._update_info_dialog = None
         self._update_check_manual = False
         self._update_check_animation_step = 0
         self._update_check_animation_timer = QTimer(self)
@@ -213,6 +214,7 @@ def test_idle_update_button_starts_manual_check_and_animation(qapp):
         assert window._main_update_state == "checking"
         assert window._update_check_animation_timer.isActive()
         assert window.update_download_button.text().startswith("检查更新")
+        assert not window.update_download_button.isEnabled()
         checker.start.assert_called_once_with()
         toast.assert_called_once_with(window, "正在检查更新...")
     finally:
@@ -290,10 +292,35 @@ def test_manual_check_without_update_restores_idle_and_keeps_toast(qapp):
 
         assert window._main_update_state == "idle"
         assert window.update_download_button.text() == "检查更新"
+        assert window.update_download_button.isEnabled()
         toast.assert_called_once_with(
             window,
             f"当前已是最新版本 v{window.version}",
         )
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_update_info_dialog_is_single_instance_during_reentrant_open(qapp):
+    """更新详情窗打开期间再次收到打开请求时只能置顶现有窗口。"""
+    window = ToolbarHarness()
+    window._pending_update_version = "9.9.9"
+    window._pending_update_manifest = {
+        "version": "9.9.9",
+        "url": "https://example.invalid/ImageClassifier.exe",
+    }
+    dialog = Mock()
+    dialog.isVisible.return_value = True
+    dialog.exec.side_effect = window._show_pending_update_dialog
+    try:
+        with patch("ui.main_window.UpdateInfoDialog", return_value=dialog) as factory:
+            window._show_pending_update_dialog()
+
+        factory.assert_called_once()
+        dialog.exec.assert_called_once_with()
+        dialog.raise_.assert_called_once_with()
+        dialog.activateWindow.assert_called_once_with()
     finally:
         window.close()
         window.deleteLater()

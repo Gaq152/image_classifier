@@ -44,6 +44,15 @@ class SettingsDialog(QDialog):
 
         # 修复问题4：后台更新检查线程
         self.update_checker_thread = None
+        self.check_update_btn = None
+        self._update_info_dialog = None
+        self._update_check_in_progress = False
+        self._update_check_animation_step = 0
+        self._update_check_animation_timer = QTimer(self)
+        self._update_check_animation_timer.setInterval(300)
+        self._update_check_animation_timer.timeout.connect(
+            self._advance_update_check_animation
+        )
         self.update_download_controller = get_update_download_controller()
 
         self.initUI()
@@ -418,11 +427,11 @@ class SettingsDialog(QDialog):
         control_layout.setSpacing(15)
 
         # 检查更新按钮
-        check_update_btn = QPushButton("检查更新")
-        check_update_btn.clicked.connect(self.check_for_updates)
-        check_update_btn.setMinimumHeight(36)
-        check_update_btn.setMinimumWidth(120)
-        control_layout.addWidget(check_update_btn)
+        self.check_update_btn = QPushButton("检查更新")
+        self.check_update_btn.clicked.connect(self.check_for_updates)
+        self.check_update_btn.setMinimumHeight(36)
+        self.check_update_btn.setMinimumWidth(120)
+        control_layout.addWidget(self.check_update_btn)
 
         control_layout.addStretch()
 
@@ -1700,14 +1709,51 @@ class SettingsDialog(QDialog):
             self.last_dir_label.setText("（无）")
             toast_success(self, "历史记录已清除")
 
+    def _begin_update_check_ui(self) -> bool:
+        """进入手动检查状态；正在检查时拒绝重复请求。"""
+        if self._update_check_in_progress:
+            return False
+        if self.update_checker_thread and self.update_checker_thread.isRunning():
+            return False
+
+        self._update_check_in_progress = True
+        self._update_check_animation_step = 0
+        if self.check_update_btn is not None:
+            self.check_update_btn.setText("检查更新·")
+            self.check_update_btn.setEnabled(False)
+        self._update_check_animation_timer.start()
+        return True
+
+    def _advance_update_check_animation(self):
+        """在禁用的检查按钮上循环显示点状加载动画。"""
+        if not self._update_check_in_progress:
+            self._update_check_animation_timer.stop()
+            return
+        self._update_check_animation_step = (
+            self._update_check_animation_step + 1
+        ) % 3
+        if self.check_update_btn is not None:
+            dots = "·" * (self._update_check_animation_step + 1)
+            self.check_update_btn.setText(f"检查更新{dots}")
+
+    def _finish_update_check_ui(self):
+        """恢复手动检查按钮，允许下一次检查。"""
+        self._update_check_in_progress = False
+        self._update_check_animation_timer.stop()
+        self._update_check_animation_step = 0
+        if self.check_update_btn is not None:
+            self.check_update_btn.setText("检查更新")
+            self.check_update_btn.setEnabled(True)
+
     def check_for_updates(self):
         """检查更新"""
+        if self.update_download_controller.has_download_task:
+            self.update_download_controller.show_progress_dialog(self.window())
+            return
+        if not self._begin_update_check_ui():
+            return
+
         try:
-
-            if self.update_download_controller.has_download_task:
-                self.update_download_controller.show_progress_dialog(self.window())
-                return
-
             # 1. 首先检查本地是否有待安装的更新包
             local_pending_version = None
             local_download_path = None
@@ -1743,6 +1789,7 @@ class SettingsDialog(QDialog):
                         # 跳过提示，继续检查线上更新
                     else:
                         # 本地更新包版本不同于当前版本，询问用户是否安装
+                        self._finish_update_check_ui()
                         msg_box = ThemedMessageBox(self)
                         msg_box.setWindowTitle("发现已下载更新")
                         msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
@@ -1771,12 +1818,6 @@ class SettingsDialog(QDialog):
             endpoint = self.app_config.update_endpoint or manifest_url
             token = self.app_config.update_token
 
-            # 停止旧的检查线程（如果存在）
-            if self.update_checker_thread and self.update_checker_thread.isRunning():
-                self.logger.debug("停止旧的更新检查线程")
-                self.update_checker_thread.quit()
-                self.update_checker_thread.wait()
-
             # 创建新的后台检查线程
             self.update_checker_thread = UpdateCheckerThread(endpoint, token)
             self.update_checker_thread.check_success.connect(self._on_update_check_success)
@@ -1785,11 +1826,13 @@ class SettingsDialog(QDialog):
             self.logger.debug("后台更新检查线程已启动")
 
         except Exception as e:
+            self._finish_update_check_ui()
             self.logger.error(f"检查更新失败: {e}")
             toast_error(self, f"检查更新失败: {str(e)}")
 
     def _on_update_check_success(self, manifest, endpoint, token):
         """修复问题4：后台更新检查成功的回调"""
+        self._finish_update_check_ui()
         try:
             new_ver = manifest.get('version')
             if not new_ver:
@@ -1804,17 +1847,13 @@ class SettingsDialog(QDialog):
                 size_bytes = int(manifest.get('size_bytes', 0) or 0)
                 notes = str(manifest.get('notes', '')).strip()
 
-                # 创建详细信息对话框
-                update_dialog = UpdateInfoDialog(
-                    new_version=new_ver,
-                    current_version=__version__,
-                    size_bytes=size_bytes,
-                    notes=notes,
-                    manifest=manifest,
-                    token=token,
-                    parent=self
+                self._show_update_info_dialog(
+                    new_ver,
+                    size_bytes,
+                    notes,
+                    manifest,
+                    token,
                 )
-                update_dialog.exec()
             elif cmp_result == 0:
                 toast_success(self, f"当前已是最新版本 v{__version__}")
             else:
@@ -1823,8 +1862,44 @@ class SettingsDialog(QDialog):
             self.logger.error(f"处理更新检查结果失败: {e}")
             toast_error(self, f"处理更新失败: {str(e)}")
 
+    def _show_update_info_dialog(
+        self,
+        version,
+        size_bytes,
+        notes,
+        manifest,
+        token,
+    ):
+        """更新详情窗保持单例，重复结果只置顶已有窗口。"""
+        existing_dialog = self._update_info_dialog
+        if existing_dialog is not None:
+            try:
+                if existing_dialog.isVisible():
+                    existing_dialog.raise_()
+                    existing_dialog.activateWindow()
+                    return
+            except RuntimeError:
+                self._update_info_dialog = None
+
+        update_dialog = UpdateInfoDialog(
+            new_version=version,
+            current_version=__version__,
+            size_bytes=size_bytes,
+            notes=notes,
+            manifest=manifest,
+            token=token,
+            parent=self,
+        )
+        self._update_info_dialog = update_dialog
+        try:
+            update_dialog.exec()
+        finally:
+            self._update_info_dialog = None
+            update_dialog.deleteLater()
+
     def _on_update_check_failed(self, error_message):
         """修复问题4：后台更新检查失败的回调"""
+        self._finish_update_check_ui()
         self.logger.warning(
             f"检查线上更新失败: endpoint={self.app_config.update_endpoint}, error={error_message}"
         )

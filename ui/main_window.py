@@ -438,6 +438,7 @@ class ImageClassifier(QMainWindow):
         self._pending_update_version = None
         self._pending_update_manifest = None
         self._pending_update_token = ""
+        self._update_info_dialog = None
         self._update_check_manual = False
         self._update_check_animation_step = 0
         self._update_check_animation_timer = QTimer(self)
@@ -5072,6 +5073,7 @@ class ImageClassifier(QMainWindow):
         self._main_update_state = state
         if not hasattr(self, 'update_download_button'):
             return
+        self.update_download_button.setEnabled(state != "checking")
         if state == "checking":
             self.update_download_button.setText("检查更新·")
             self.update_download_button.setToolTip("正在检查更新...")
@@ -5174,6 +5176,17 @@ class ImageClassifier(QMainWindow):
         if not manifest or not version:
             self._set_main_update_state("idle")
             return
+
+        existing_dialog = getattr(self, '_update_info_dialog', None)
+        if existing_dialog is not None:
+            try:
+                if existing_dialog.isVisible():
+                    existing_dialog.raise_()
+                    existing_dialog.activateWindow()
+                    return
+            except RuntimeError:
+                self._update_info_dialog = None
+
         update_dialog = UpdateInfoDialog(
             new_version=version,
             current_version=__version__,
@@ -5183,7 +5196,12 @@ class ImageClassifier(QMainWindow):
             token=self._pending_update_token,
             parent=self,
         )
-        update_dialog.exec()
+        self._update_info_dialog = update_dialog
+        try:
+            update_dialog.exec()
+        finally:
+            self._update_info_dialog = None
+            update_dialog.deleteLater()
 
     def _schedule_auto_update_check(self):
         """根据配置调度一次自动检查更新（应用启动后几秒执行）"""
