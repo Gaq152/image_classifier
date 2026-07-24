@@ -3,6 +3,7 @@
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from PyQt6.QtWidgets import (
@@ -170,76 +171,36 @@ def test_settings_zoom_spinboxes_do_not_clip_numbers(qtbot):
         assert "QDoubleSpinBox QLineEdit" in spinbox.styleSheet()
 
 
-def test_settings_update_check_disables_button_and_rejects_duplicates(qtbot):
-    from unittest.mock import Mock, patch
-
+def test_settings_only_exposes_update_proxy(qtbot):
     from ui.dialogs.settings.settings_dialog import SettingsDialog
 
     dialog = SettingsDialog()
     qtbot.addWidget(dialog)
-    checker = Mock()
-    checker.isRunning.return_value = True
-    checker.check_success.connect = Mock()
-    checker.check_failed.connect = Mock()
 
-    with (
-        patch(
-            "ui.dialogs.settings.settings_dialog.load_ready_update",
-            return_value=None,
-        ),
-        patch(
-            "ui.dialogs.settings.settings_dialog.UpdateCheckerThread",
-            return_value=checker,
-        ),
-        patch("ui.dialogs.settings.settings_dialog.toast_info"),
-    ):
-        dialog.check_for_updates()
-        dialog.check_for_updates()
-
-    checker.start.assert_called_once_with()
-    assert not dialog.check_update_btn.isEnabled()
-    assert dialog.check_update_btn.text().startswith("检查更新")
-    assert dialog._update_check_animation_timer.isActive()
-
-    dialog._on_update_check_failed("测试失败")
-    assert dialog.check_update_btn.isEnabled()
-    assert dialog.check_update_btn.text() == "检查更新"
-    assert not dialog._update_check_animation_timer.isActive()
+    assert hasattr(dialog, "update_proxy_input")
+    assert not hasattr(dialog, "check_update_btn")
+    assert not hasattr(dialog, "auto_update_switch")
+    assert not hasattr(dialog, "endpoint_input")
+    assert not hasattr(dialog, "token_input")
+    button_texts = {button.text() for button in dialog.findChildren(QPushButton)}
+    assert "检查更新" not in button_texts
 
 
-def test_settings_update_info_dialog_is_single_instance(qtbot):
-    from unittest.mock import Mock, patch
-
+def test_settings_normalizes_and_saves_clash_proxy(qtbot):
     from ui.dialogs.settings.settings_dialog import SettingsDialog
 
-    settings = SettingsDialog()
-    qtbot.addWidget(settings)
-    update_dialog = Mock()
-    update_dialog.isVisible.return_value = True
-    update_dialog.exec.side_effect = lambda: settings._show_update_info_dialog(
-        "9.9.9",
-        123,
-        "测试更新",
-        {"version": "9.9.9"},
-        "token",
-    )
+    dialog = SettingsDialog()
+    qtbot.addWidget(dialog)
+    fake_config = SimpleNamespace(update_proxy="")
+    dialog.app_config = fake_config
+    dialog.update_proxy_input.setText("127.0.0.1:7890")
 
-    with patch(
-        "ui.dialogs.settings.settings_dialog.UpdateInfoDialog",
-        return_value=update_dialog,
-    ) as factory:
-        settings._show_update_info_dialog(
-            "9.9.9",
-            123,
-            "测试更新",
-            {"version": "9.9.9"},
-            "token",
-        )
+    with patch("ui.dialogs.settings.settings_dialog.toast_success") as toast:
+        dialog.save_update_proxy()
 
-    factory.assert_called_once()
-    update_dialog.exec.assert_called_once_with()
-    update_dialog.raise_.assert_called_once_with()
-    update_dialog.activateWindow.assert_called_once_with()
+    assert fake_config.update_proxy == "http://127.0.0.1:7890"
+    assert dialog.update_proxy_input.text() == "http://127.0.0.1:7890"
+    toast.assert_called_once_with(dialog, "更新代理已保存")
 
 
 def test_ui_code_does_not_bypass_themed_message_box():

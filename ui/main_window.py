@@ -47,8 +47,8 @@ from .managers import FileStateManager
 from .managers.image_navigation_manager import ImageNavigationManager
 from .managers.file_operation_manager import FileOperationManager as UIFileOperationManager
 from .managers.category_manager import CategoryManager
-from .update_dialog import UpdateInfoDialog
 from .update_download import get_update_download_controller
+from .update_popover import UpdateCenterPopover
 from core.config import Config
 from utils.app_config import get_app_config
 from core.scanner import FileScannerThread
@@ -163,13 +163,9 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"教程管理器初始化失败: {e}")
             self.tutorial_manager = None
 
-        # 启动后自动检查更新（非阻塞，可配置开关）
+        # 启动后固定启用静默自动检查更新。
         try:
-            app_config = get_app_config()
-            if app_config.auto_update_enabled:
-                self._schedule_auto_update_check()
-            else:
-                self.logger.info("自动检查更新：已关闭")
+            self._schedule_auto_update_check()
         except Exception as e:
             self.logger.debug(f"启动自动检查更新调度失败: {e}")
 
@@ -435,10 +431,10 @@ class ImageClassifier(QMainWindow):
         # 修复问题4：后台更新检查线程
         self.update_checker_thread = None
         self._main_update_state = "idle"
+        self._main_update_message = ""
         self._pending_update_version = None
         self._pending_update_manifest = None
-        self._pending_update_token = ""
-        self._update_info_dialog = None
+        self._latest_checked_version = ""
         self._update_check_manual = False
         self._update_check_animation_step = 0
         self._update_check_animation_timer = QTimer(self)
@@ -1158,29 +1154,36 @@ class ImageClassifier(QMainWindow):
         self.setStatusBar(self.statusBar)
         self.statusBar.showMessage("准备就绪")
 
-        # 更新流程统一入口：检查、新版本、下载进度和重启更新。
-        self.update_download_button = QPushButton("检查更新")
+        # 版本号是唯一更新入口，点击后在按钮上方向上展开更新中心。
+        self.update_download_button = QPushButton(f"v{__version__}")
         self.update_download_button.setObjectName("update_download_button")
-        self.update_download_button.setToolTip("查看更新下载进度")
+        self.update_download_button.setToolTip("打开更新中心")
         self.update_download_button.clicked.connect(
             self._handle_update_button_clicked
         )
         self._apply_update_button_style("idle")
         self.update_download_button.show()
         self.statusBar.addPermanentWidget(self.update_download_button)
-
-        # 在状态栏右侧添加版本信息
-        self.version_label = QLabel(f"版本 {__version__}")
-        # 使用主题颜色
-        c = default_theme.colors
-        self.version_label.setStyleSheet(f"""
-            QLabel {{
-                color: {c.TEXT_SECONDARY};
-                padding: 2px 8px;
-                font-size: 11px;
-            }}
-        """)
-        self.statusBar.addPermanentWidget(self.version_label)
+        self.update_center_popover = UpdateCenterPopover(self)
+        self.update_center_popover.check_requested.connect(
+            lambda: self._start_main_update_check(manual=True)
+        )
+        self.update_center_popover.download_requested.connect(
+            self._start_pending_update_download
+        )
+        self.update_center_popover.pause_requested.connect(
+            self.update_download_controller.pause
+        )
+        self.update_center_popover.resume_requested.connect(
+            self.update_download_controller.resume
+        )
+        self.update_center_popover.cancel_requested.connect(
+            self.update_download_controller.cancel
+        )
+        self.update_center_popover.restart_requested.connect(
+            self._restart_and_install_update
+        )
+        self._sync_update_popover()
     
     @performance_monitor
     def setup_shortcuts(self):
@@ -4823,18 +4826,10 @@ class ImageClassifier(QMainWindow):
                     }}
                 """)
 
-            # 更新版本标签样式
-            if hasattr(self, 'version_label'):
-                self.version_label.setStyleSheet(f"""
-                    QLabel {{
-                        color: {c.TEXT_SECONDARY};
-                        padding: 2px 8px;
-                        font-size: 11px;
-                    }}
-                """)
-
             if hasattr(self, 'update_download_button'):
                 self._apply_update_button_style(self._main_update_state)
+            if hasattr(self, 'update_center_popover'):
+                self.update_center_popover.apply_theme()
 
             # Phase 1.1 性能优化：只更新按钮样式，不重新创建（避免6秒卡顿）
             if hasattr(self, 'category_buttons') and self.category_buttons:
@@ -4979,10 +4974,13 @@ class ImageClassifier(QMainWindow):
     def _on_update_download_completed(self, metadata: dict):
         """下载完成后提示用户通过统一入口决定何时重启。"""
         version = str(metadata.get("version", "")).strip()
+        if version:
+            self._latest_checked_version = version
+        self._sync_update_popover()
         message = (
-            f"更新 v{version} 已下载，可点击右下角“重启更新”完成安装"
+            f"更新 v{version} 已下载，可点击右下角版本按钮完成安装"
             if version
-            else "更新包已下载，可点击右下角“重启更新”完成安装"
+            else "更新包已下载，可点击右下角版本按钮完成安装"
         )
         toast_success(
             self,
@@ -5011,12 +5009,16 @@ class ImageClassifier(QMainWindow):
                 prefix = "重试更新"
             else:
                 prefix = "更新"
-            self.update_download_button.setText(f"{prefix} {percentage}%")
+            self.update_download_button.setText(
+                f"v{__version__} · {prefix} {percentage}%"
+            )
         else:
             self.update_download_button.setText(
-                "更新已暂停" if state == "paused" else "更新下载中"
+                f"v{__version__} · "
+                + ("已暂停" if state == "paused" else "下载中")
             )
         self._apply_update_button_style(state)
+        self._sync_update_popover()
 
     def _on_update_download_state(self, state: str, message: str):
         """把下载控制器状态映射到右下角统一更新入口。"""
@@ -5035,19 +5037,19 @@ class ImageClassifier(QMainWindow):
             self._main_update_state = state
             self.update_download_button.setToolTip(message or "点击查看下载进度")
             if state == "verifying":
-                self.update_download_button.setText("正在校验更新")
+                self.update_download_button.setText(f"v{__version__} · 校验中")
             elif state == "retrying":
-                self.update_download_button.setText("正在重试更新")
+                self.update_download_button.setText(f"v{__version__} · 重试中")
             elif state == "pausing":
-                self.update_download_button.setText("正在暂停更新")
+                self.update_download_button.setText(f"v{__version__} · 暂停中")
             elif state == "cancelling":
-                self.update_download_button.setText("正在取消下载")
+                self.update_download_button.setText(f"v{__version__} · 取消中")
             else:
-                self.update_download_button.setText("更新下载中")
+                self.update_download_button.setText(f"v{__version__} · 下载中")
             self._apply_update_button_style(state)
         elif state == "paused":
             self._main_update_state = "paused"
-            self.update_download_button.setText("继续更新")
+            self.update_download_button.setText(f"v{__version__} · 已暂停")
             self.update_download_button.setToolTip(
                 message or "更新已暂停，点击查看并继续下载"
             )
@@ -5062,6 +5064,7 @@ class ImageClassifier(QMainWindow):
             )
         else:
             self._set_main_update_state("idle")
+        self._sync_update_popover()
 
     def _set_main_update_state(
         self,
@@ -5071,32 +5074,36 @@ class ImageClassifier(QMainWindow):
     ):
         """设置右下角更新按钮的状态、文字和样式。"""
         self._main_update_state = state
+        self._main_update_message = tooltip
+        if version:
+            self._latest_checked_version = str(version)
         if not hasattr(self, 'update_download_button'):
             return
-        self.update_download_button.setEnabled(state != "checking")
+        self.update_download_button.setEnabled(True)
         if state == "checking":
-            self.update_download_button.setText("检查更新·")
-            self.update_download_button.setToolTip("正在检查更新...")
+            self.update_download_button.setText(f"v{__version__} · 检查中")
+            self.update_download_button.setToolTip("正在检查更新，点击查看")
         elif state == "available":
-            label = f"发现新版本 {version}" if version else "发现新版本"
+            label = f"v{__version__} · v{version} 可用" if version else f"v{__version__} · 有更新"
             self.update_download_button.setText(label)
             self.update_download_button.setToolTip(
-                tooltip or "点击查看更新内容"
+                tooltip or "点击打开更新中心"
             )
         elif state == "ready":
-            self.update_download_button.setText("重启更新")
+            self.update_download_button.setText(f"v{__version__} · 重启更新")
             self.update_download_button.setToolTip(
                 tooltip or "更新已下载，点击重启安装"
             )
         elif state == "failed":
-            self.update_download_button.setText("更新失败")
+            self.update_download_button.setText(f"v{__version__} · 更新异常")
             self.update_download_button.setToolTip(
                 tooltip or "点击查看失败原因"
             )
         else:
-            self.update_download_button.setText("检查更新")
-            self.update_download_button.setToolTip("点击检查更新")
+            self.update_download_button.setText(f"v{__version__}")
+            self.update_download_button.setToolTip("打开更新中心")
         self._apply_update_button_style(state)
+        self._sync_update_popover()
 
     def _apply_update_button_style(self, state: str):
         """应用统一入口在不同更新状态下的颜色。"""
@@ -5138,79 +5145,90 @@ class ImageClassifier(QMainWindow):
         """)
         self.update_download_button.show()
 
+    def _sync_update_popover(self):
+        """把唯一更新状态同步到版本按钮的锚定浮层。"""
+        popover = getattr(self, "update_center_popover", None)
+        if popover is None:
+            return
+        controller = self.update_download_controller
+        active_states = set(
+            getattr(
+                controller,
+                "ACTIVE_STATES",
+                {"downloading", "retrying", "verifying", "pausing", "cancelling"},
+            )
+        )
+        state = self._main_update_state
+        if controller.state in active_states or controller.state in {
+            "paused",
+            "ready",
+        }:
+            state = controller.state
+        latest_version = str(
+            getattr(self, "_latest_checked_version", "")
+            or getattr(controller, "_version", "")
+            or getattr(self, "_pending_update_version", "")
+            or ""
+        )
+        message = (
+            controller.message
+            if state in active_states | {"paused", "ready"}
+            else getattr(self, "_main_update_message", "")
+        )
+        popover.set_state(
+            state,
+            __version__,
+            latest_version,
+            message,
+            controller.downloaded,
+            controller.total,
+            can_download=bool(self._pending_update_manifest),
+        )
+
     def _advance_update_check_animation(self):
-        """更新检查期间循环显示点状动画。"""
+        """只在更新中心内部显示手动检查动画。"""
         if self._main_update_state != "checking":
             self._update_check_animation_timer.stop()
             return
         self._update_check_animation_step = (
             self._update_check_animation_step + 1
         ) % 3
-        dots = "·" * (self._update_check_animation_step + 1)
-        self.update_download_button.setText(f"检查更新{dots}")
+        popover = getattr(self, "update_center_popover", None)
+        if popover is not None:
+            popover.set_checking_step(self._update_check_animation_step)
 
     def _handle_update_button_clicked(self):
-        """按当前状态执行检查、查看、进度或重启操作。"""
-        if self.update_download_controller.is_active:
-            self.update_download_controller.show_progress_dialog(self)
+        """版本按钮只负责打开或收起唯一更新中心。"""
+        popover = self.update_center_popover
+        if popover.isVisible():
+            popover.hide()
             return
-        if self.update_download_controller.state == "paused":
-            self.update_download_controller.show_progress_dialog(self)
-            return
-        if self._main_update_state == "available":
-            self._show_pending_update_dialog()
-        elif self._main_update_state == "ready":
-            # 下载完成时和后续从状态栏进入时复用同一个主题进度窗口。
-            self.update_download_controller.show_progress_dialog(self)
-        elif self._main_update_state == "failed":
-            self.update_download_controller.show_progress_dialog(self)
-        elif self._main_update_state == "checking":
-            toast_info(self, "正在检查更新...")
-        else:
-            self._start_main_update_check(manual=True)
+        self._sync_update_popover()
+        popover.show_anchored(self.update_download_button)
 
-    def _show_pending_update_dialog(self):
-        """用户主动点击新版本提醒后展示更新内容。"""
+    def _start_pending_update_download(self):
+        """从更新中心启动当前线上版本下载。"""
         manifest = self._pending_update_manifest
         version = self._pending_update_version
         if not manifest or not version:
-            self._set_main_update_state("idle")
+            self._set_main_update_state("failed", tooltip="更新信息已失效，请重新检查")
             return
+        if not self.update_download_controller.start(
+            manifest,
+            version,
+        ):
+            self._sync_update_popover()
 
-        existing_dialog = getattr(self, '_update_info_dialog', None)
-        if existing_dialog is not None:
-            try:
-                if existing_dialog.isVisible():
-                    existing_dialog.raise_()
-                    existing_dialog.activateWindow()
-                    return
-            except RuntimeError:
-                self._update_info_dialog = None
-
-        update_dialog = UpdateInfoDialog(
-            new_version=version,
-            current_version=__version__,
-            size_bytes=int(manifest.get('size_bytes', 0) or 0),
-            notes=str(manifest.get('notes', '')).strip(),
-            manifest=manifest,
-            token=self._pending_update_token,
-            parent=self,
-        )
-        self._update_info_dialog = update_dialog
-        try:
-            update_dialog.exec()
-        finally:
-            self._update_info_dialog = None
-            update_dialog.deleteLater()
-
+    def _restart_and_install_update(self):
+        """在浮层内确认后启动安装。"""
+        if not self.update_download_controller.install_ready_update():
+            self._set_main_update_state(
+                "failed",
+                tooltip=self.update_download_controller.message,
+            )
     def _schedule_auto_update_check(self):
-        """根据配置调度一次自动检查更新（应用启动后几秒执行）"""
+        """调度固定启用的自动检查更新。"""
         try:
-            app_config = get_app_config()
-            if not app_config.auto_update_enabled:
-                self.logger.debug("自动检查更新已关闭")
-                return
-
             # 启动后5秒首次检查
             QTimer.singleShot(5000, self._auto_check_update_once)
 
@@ -5222,10 +5240,6 @@ class ImageClassifier(QMainWindow):
     def _start_periodic_update_check(self):
         """启动定期检查更新定时器（每1小时检查一次）"""
         try:
-            app_config = get_app_config()
-            if not app_config.auto_update_enabled:
-                return
-
             # 创建定时器，每1小时（3600000毫秒）触发一次
             self.periodic_update_timer = QTimer(self)
             self.periodic_update_timer.timeout.connect(self._periodic_check_update)
@@ -5269,8 +5283,8 @@ class ImageClassifier(QMainWindow):
             )
         except Exception as e:
             self.logger.error(f"处理更新检查结果失败: {e}")
-            self._set_main_update_state("idle")
             if manual:
+                self._set_main_update_state("failed", tooltip=str(e))
                 toast_error(self, f"处理更新失败: {e}")
 
     def _on_update_check_failed(self, error_message):
@@ -5297,7 +5311,7 @@ class ImageClassifier(QMainWindow):
         if self.update_download_controller.is_active:
             self.logger.debug("更新包正在下载，跳过重复检查")
             if manual:
-                self.update_download_controller.show_progress_dialog(self)
+                self._sync_update_popover()
             return
         if self.update_download_controller.state == "paused":
             self._on_update_download_state(
@@ -5305,19 +5319,23 @@ class ImageClassifier(QMainWindow):
                 self.update_download_controller.message,
             )
             if manual:
-                self.update_download_controller.show_progress_dialog(self)
+                self._sync_update_popover()
             return
 
         if self.update_checker_thread and self.update_checker_thread.isRunning():
             if manual:
+                self._update_check_manual = True
+                self._set_main_update_state("checking")
+                self._update_check_animation_step = 0
+                self._update_check_animation_timer.start()
                 toast_info(self, "正在检查更新...")
             return
 
         self._update_check_manual = manual
-        self._set_main_update_state("checking")
-        self._update_check_animation_step = 0
-        self._update_check_animation_timer.start()
         if manual:
+            self._set_main_update_state("checking")
+            self._update_check_animation_step = 0
+            self._update_check_animation_timer.start()
             toast_info(self, "正在检查更新...")
 
         local_pending_version = None
@@ -5348,15 +5366,13 @@ class ImageClassifier(QMainWindow):
 
         try:
             self.logger.debug("检查线上更新：开始（后台线程）")
-            endpoint = None
-            token = ''
-            if self.config:
-                endpoint = getattr(self.config, 'update_endpoint', None)
-                token = getattr(self.config, 'update_token', '')
-            if not endpoint:
-                endpoint = get_manifest_url(latest=True)
-
-            self.update_checker_thread = UpdateCheckerThread(endpoint, token)
+            endpoint = get_manifest_url(latest=True)
+            proxy = get_app_config().update_proxy
+            self.update_checker_thread = UpdateCheckerThread(
+                endpoint,
+                "",
+                proxy,
+            )
             self.update_checker_thread.check_success.connect(self._on_update_check_success)
             self.update_checker_thread.check_failed.connect(self._on_update_check_failed)
             self.update_checker_thread.start()
@@ -5375,13 +5391,11 @@ class ImageClassifier(QMainWindow):
         """清理供右下角入口展示的线上更新信息。"""
         self._pending_update_version = None
         self._pending_update_manifest = None
-        self._pending_update_token = ""
 
-    def _remember_pending_update(self, version, manifest, token):
+    def _remember_pending_update(self, version, manifest, _token=None):
         """保存线上更新信息，等待用户点击状态栏入口。"""
         self._pending_update_version = str(version)
         self._pending_update_manifest = manifest
-        self._pending_update_token = token or ""
 
     def _discard_local_ready_update(self, local_batch_path=None):
         """删除不再适用的完整更新包及遗留安装脚本。"""
@@ -5458,6 +5472,7 @@ class ImageClassifier(QMainWindow):
 
         if online_version:
             try:
+                self._latest_checked_version = str(online_version)
                 cmp_result = compare_version(online_version, __version__)
                 if cmp_result > 0 and manifest:
                     already_pending = (
@@ -5472,7 +5487,7 @@ class ImageClassifier(QMainWindow):
                     self._set_main_update_state(
                         "available",
                         online_version,
-                        "点击查看更新内容并选择是否下载",
+                        "点击打开更新中心并下载",
                     )
                     if manual or not already_pending:
                         toast_info(self, f"发现新版本 v{online_version}")
@@ -5493,9 +5508,10 @@ class ImageClassifier(QMainWindow):
                 error_message = str(e)
                 self.logger.error(f"处理线上更新失败: {e}")
 
-        self._set_main_update_state("idle")
         if manual:
-            toast_warning(self, error_message or "无法获取更新信息")
+            failure_message = error_message or "无法获取更新信息"
+            self._set_main_update_state("failed", tooltip=failure_message)
+            toast_warning(self, failure_message)
     
     def keyPressEvent(self, event):
         """处理键盘事件 - 优化按键处理和日志记录"""

@@ -29,23 +29,34 @@ class UpdateCheckerThread(QThread):
     # 信号：检查失败 (错误信息)
     check_failed = pyqtSignal(str)
 
-    def __init__(self, endpoint: str, token: str = None):
+    def __init__(
+        self,
+        endpoint: str,
+        token: str = None,
+        proxy: str = "",
+    ):
         """初始化更新检查线程
 
         Args:
             endpoint: 更新服务器地址
             token: 可选的认证令牌
+            proxy: 本地 HTTP 代理或 GitHub URL 加速前缀
         """
         super().__init__()
         self.endpoint = endpoint
         self.token = token
+        self.proxy = proxy
         self.logger = logging.getLogger(__name__)
 
     def run(self):
         """在后台线程中执行更新检查"""
         try:
             self.logger.debug(f"[后台更新检查] 开始检查: {self.endpoint}")
-            manifest = fetch_manifest(self.endpoint, self.token or None)
+            manifest = fetch_manifest(
+                self.endpoint,
+                self.token or None,
+                proxy=self.proxy,
+            )
             self.logger.debug(f"[后台更新检查] 检查成功: v{manifest.get('version', 'unknown')}")
             # 发送成功信号
             self.check_success.emit(manifest, self.endpoint, self.token or '')

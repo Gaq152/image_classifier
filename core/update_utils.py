@@ -16,15 +16,16 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
-import sys
 import time
 from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlparse
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from utils.paths import get_update_dir
 
@@ -49,6 +50,62 @@ def resolve_token(preferred: Optional[str] = None) -> Optional[str]:
     if env_val:
         return env_val
     return BUILTIN_UPDATE_TOKEN or None
+
+
+def normalize_update_proxy(value: Optional[str]) -> str:
+    """规范化更新代理配置。
+
+    支持本地 HTTP 代理（例如 ``127.0.0.1:7890``）以及 GitHub URL
+    加速前缀（例如 ``https://ghfast.top``）。空值表示直接连接。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = f"http://{text}" if ":" in text else f"https://{text}"
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("代理地址必须是有效的 HTTP 或 HTTPS 地址")
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("代理端口必须是有效数字") from exc
+    return text.rstrip("/")
+
+
+def _is_forward_proxy(proxy: str) -> bool:
+    """判断配置是否为 Clash 一类的标准转发代理。"""
+    parsed = urlparse(proxy)
+    hostname = (parsed.hostname or "").lower()
+    if hostname == "localhost" or parsed.port is not None:
+        return True
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private
+
+
+def resolve_update_url(url: str, proxy: Optional[str] = None) -> str:
+    """将 GitHub URL 应用到 URL 加速前缀；转发代理保持原 URL。"""
+    normalized = normalize_update_proxy(proxy)
+    if not normalized or _is_forward_proxy(normalized):
+        return url
+    prefix = f"{normalized}/"
+    return url if url.startswith(prefix) else f"{prefix}{url}"
+
+
+def _open_update_request(
+    request: Request,
+    timeout: int,
+    proxy: Optional[str] = None,
+):
+    """使用指定转发代理打开请求；URL 加速已在请求构造前完成。"""
+    normalized = normalize_update_proxy(proxy)
+    if normalized and _is_forward_proxy(normalized):
+        handler = ProxyHandler({"http": normalized, "https": normalized})
+        return build_opener(handler).open(request, timeout=timeout)
+    return urlopen(request, timeout=timeout)
 
 
 def sha256_file(
@@ -105,7 +162,13 @@ def _build_request(url: str, token: Optional[str]) -> Request:
     return req
 
 
-def fetch_manifest(url: str, token: Optional[str] = None, timeout: int = 8, retries: int = 3) -> Dict:
+def fetch_manifest(
+    url: str,
+    token: Optional[str] = None,
+    timeout: int = 8,
+    retries: int = 3,
+    proxy: Optional[str] = None,
+) -> Dict:
     """拉取 manifest.json，支持自动重试机制
 
     Args:
@@ -113,6 +176,7 @@ def fetch_manifest(url: str, token: Optional[str] = None, timeout: int = 8, retr
         token: 访问令牌
         timeout: 超时时间（秒）
         retries: 最大重试次数，默认3次
+        proxy: 本地 HTTP 代理或 GitHub URL 加速前缀
 
     Returns:
         解析后的 manifest 字典
@@ -121,12 +185,12 @@ def fetch_manifest(url: str, token: Optional[str] = None, timeout: int = 8, retr
         RuntimeError: 拉取或解析失败
     """
     token = resolve_token(token)
-    req = _build_request(url, token)
+    req = _build_request(resolve_update_url(url, proxy), token)
 
     last_error = None
     for attempt in range(retries + 1):
         try:
-            with urlopen(req, timeout=timeout) as resp:
+            with _open_update_request(req, timeout, proxy) as resp:
                 data = resp.read()
                 return json.loads(data.decode('utf-8'))
         except HTTPError as e:
@@ -189,6 +253,7 @@ def download_with_progress(
     retries: int = 3,
     retry_delay: float = 0.5,
     retry_cb: Optional[Callable[[int, int, str], None]] = None,
+    proxy: Optional[str] = None,
 ) -> None:
     """支持 Range 续传和网络异常自动重试地下载到临时文件。"""
     token = resolve_token(token)
@@ -208,13 +273,13 @@ def download_with_progress(
             dest.unlink(missing_ok=True)
             existing_size = 0
 
-        req = _build_request(url, token)
+        req = _build_request(resolve_update_url(url, proxy), token)
         if existing_size > 0:
             req.add_header("Range", f"bytes={existing_size}-")
 
         response = None
         try:
-            response = urlopen(req, timeout=timeout)
+            response = _open_update_request(req, timeout, proxy)
             if response_cb:
                 response_cb(response)
 
@@ -603,7 +668,6 @@ def ensure_persistent_updater(target_exe: Path) -> Path:
     )
     escaped_target = _escape_win_path(str(exe_path))
     escaped_dir = _escape_win_path(str(exe_dir))
-    escaped_update = _escape_win_path(str(update_dir))
     exe_name = exe_path.name
 
     content = (

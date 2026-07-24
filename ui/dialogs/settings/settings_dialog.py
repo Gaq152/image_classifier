@@ -13,17 +13,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QEvent
 
 from utils.app_config import get_app_config
-from utils.paths import get_cache_dir, get_update_dir
-from _version_ import compare_version, __version__, get_manifest_url
-from core.update_utils import load_ready_update
+from utils.paths import get_cache_dir
+from core.update_utils import normalize_update_proxy
 from ...components.toast import toast_info, toast_success, toast_warning, toast_error
 from ...components.styles.theme import default_theme
 from ...components.styles import ButtonStyles
 from ...components.dialog_utils import ThemedMessageBox, configure_dialog, style_button
 from ...components.widgets.switch import Switch
-from ...update_dialog import UpdateInfoDialog
-from ...update_download import get_update_download_controller
-from ..utils.update_checker import UpdateCheckerThread
 
 class SettingsDialog(QDialog):
     """设置对话框"""
@@ -41,19 +37,6 @@ class SettingsDialog(QDialog):
         self.zoom_save_timer = QTimer()
         self.zoom_save_timer.setSingleShot(True)
         self.zoom_save_timer.timeout.connect(self._save_zoom_config)
-
-        # 修复问题4：后台更新检查线程
-        self.update_checker_thread = None
-        self.check_update_btn = None
-        self._update_info_dialog = None
-        self._update_check_in_progress = False
-        self._update_check_animation_step = 0
-        self._update_check_animation_timer = QTimer(self)
-        self._update_check_animation_timer.setInterval(300)
-        self._update_check_animation_timer.timeout.connect(
-            self._advance_update_check_animation
-        )
-        self.update_download_controller = get_update_download_controller()
 
         self.initUI()
 
@@ -267,7 +250,6 @@ class SettingsDialog(QDialog):
         content_layout.addWidget(self.create_window_section())
         content_layout.addWidget(self.create_preview_section())
         content_layout.addWidget(self.create_tutorial_section())
-        content_layout.addWidget(self.create_basic_update_section())
         content_layout.addStretch()
 
         scroll_area.setWidget(scroll_content)
@@ -397,181 +379,40 @@ class SettingsDialog(QDialog):
 
         return group
 
-    def create_basic_update_section(self) -> QGroupBox:
-        """创建基本更新设置区域（仅包含开关和手动检查）"""
-
-        group = QGroupBox("🔄 更新设置")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(20)
-
-        # 更新检查设置组
-        update_group = QWidget()
-        update_layout = QVBoxLayout(update_group)
-        update_layout.setSpacing(10)
-
-        # 标题
-        update_title = QLabel("🔄 更新设置")
-        update_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        update_layout.addWidget(update_title)
-
-        # 描述
-        update_desc = QLabel("立即检查是否有新版本可用，启用自动检查更新（推荐开启）")
-        update_desc.setWordWrap(True)
-        update_layout.addWidget(update_desc)
-
-        # 检查更新按钮和自动更新开关（横向布局）
-        control_widget = QWidget()
-        control_layout = QHBoxLayout(control_widget)
-        control_layout.setContentsMargins(0, 0, 0, 0)
-        control_layout.setSpacing(15)
-
-        # 检查更新按钮
-        self.check_update_btn = QPushButton("检查更新")
-        self.check_update_btn.clicked.connect(self.check_for_updates)
-        self.check_update_btn.setMinimumHeight(36)
-        self.check_update_btn.setMinimumWidth(120)
-        control_layout.addWidget(self.check_update_btn)
-
-        control_layout.addStretch()
-
-        # 自动检查开关（辅助功能）
-        auto_check_label = QLabel("启用自动检查")
-        auto_check_label.setStyleSheet("font-size: 13px;")
-        control_layout.addWidget(auto_check_label)
-
-        self.auto_update_switch = Switch()
-        self.auto_update_switch.setChecked(self.app_config.auto_update_enabled)
-        control_layout.addWidget(self.auto_update_switch)
-
-        update_layout.addWidget(control_widget)
-
-        layout.addWidget(update_group)
-        layout.addStretch()
-        return group
-
     def create_advanced_update_section(self) -> QGroupBox:
-        """创建高级更新设置区域（包含更新地址和令牌）"""
-        group = QGroupBox("🔄 更新设置")
+        """创建更新代理设置区域。"""
+        group = QGroupBox("🚀 更新代理")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(20)
+        layout.setSpacing(10)
 
-        # 更新服务器设置
-        endpoint_group = QWidget()
-        endpoint_layout = QVBoxLayout(endpoint_group)
-        endpoint_layout.setSpacing(10)
+        description = QLabel(
+            "留空时直接连接 GitHub。支持本地 Clash HTTP 代理，"
+            "也支持 ghfast.top 这类 GitHub 加速地址。"
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
 
-        # 标题和按钮（横向布局）
-        endpoint_header = QWidget()
-        endpoint_header_layout = QHBoxLayout(endpoint_header)
-        endpoint_header_layout.setContentsMargins(0, 0, 0, 0)
-        endpoint_header_layout.setSpacing(10)
+        input_row = QHBoxLayout()
+        input_row.setSpacing(10)
+        self.update_proxy_input = QLineEdit()
+        self.update_proxy_input.setText(self.app_config.update_proxy)
+        self.update_proxy_input.setPlaceholderText(
+            "http://127.0.0.1:7890 或 https://ghfast.top"
+        )
+        self.update_proxy_input.setMinimumHeight(36)
+        self.update_proxy_input.returnPressed.connect(self.save_update_proxy)
+        input_row.addWidget(self.update_proxy_input, 1)
 
-        endpoint_title = QLabel("🌐 更新服务器")
-        endpoint_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        endpoint_header_layout.addWidget(endpoint_title)
+        save_button = QPushButton("保存")
+        save_button.setMinimumHeight(36)
+        save_button.clicked.connect(self.save_update_proxy)
+        input_row.addWidget(save_button)
+        layout.addLayout(input_row)
 
-        endpoint_header_layout.addStretch()
-
-        # 编辑按钮
-        self.endpoint_edit_btn = QPushButton("✏️ 编辑")
-        self.endpoint_edit_btn.setObjectName("iconButton")
-        self.endpoint_edit_btn.setToolTip("编辑更新服务器地址（通常无需修改）")
-        self.endpoint_edit_btn.clicked.connect(self.edit_endpoint)
-        endpoint_header_layout.addWidget(self.endpoint_edit_btn)
-
-        # 保存按钮（初始隐藏）
-        self.endpoint_save_btn = QPushButton("✓ 保存")
-        self.endpoint_save_btn.setObjectName("iconButton")
-        self.endpoint_save_btn.setToolTip("保存更新地址")
-        self.endpoint_save_btn.clicked.connect(self.save_endpoint)
-        self.endpoint_save_btn.hide()
-        endpoint_header_layout.addWidget(self.endpoint_save_btn)
-
-        # 取消按钮（初始隐藏）
-        self.endpoint_cancel_btn = QPushButton("✕ 取消")
-        self.endpoint_cancel_btn.setObjectName("iconButton")
-        self.endpoint_cancel_btn.setToolTip("取消编辑")
-        self.endpoint_cancel_btn.clicked.connect(self.cancel_endpoint_edit)
-        self.endpoint_cancel_btn.hide()
-        endpoint_header_layout.addWidget(self.endpoint_cancel_btn)
-
-        endpoint_layout.addWidget(endpoint_header)
-
-        # 输入框
-        self.endpoint_input = QLineEdit()
-        self.endpoint_input.setText(self.app_config.update_endpoint)
-        self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
-        self.endpoint_input.setPlaceholderText("https://...")
-        self.endpoint_input.setMinimumHeight(32)
-        self.endpoint_input.setReadOnly(True)  # 默认只读
-        endpoint_layout.addWidget(self.endpoint_input)
-
-        layout.addWidget(endpoint_group)
-
-        # 访问令牌设置
-        token_group = QWidget()
-        token_layout = QVBoxLayout(token_group)
-        token_layout.setSpacing(10)
-
-        # 标题和按钮（横向布局）
-        token_header = QWidget()
-        token_header_layout = QHBoxLayout(token_header)
-        token_header_layout.setContentsMargins(0, 0, 0, 0)
-        token_header_layout.setSpacing(8)
-
-        token_title = QLabel("🔑 访问令牌")
-        token_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        token_header_layout.addWidget(token_title)
-
-        token_header_layout.addStretch()
-
-        # 显示/隐藏按钮
-        self.show_token_btn = QPushButton("👁️ 显示")
-        self.show_token_btn.setCheckable(True)
-        self.show_token_btn.setObjectName("iconButton")
-        self.show_token_btn.setToolTip("显示/隐藏令牌内容")
-        self.show_token_btn.clicked.connect(self.toggle_token_visibility)
-        token_header_layout.addWidget(self.show_token_btn)
-
-        # 编辑按钮
-        self.token_edit_btn = QPushButton("✏️ 编辑")
-        self.token_edit_btn.setObjectName("iconButton")
-        self.token_edit_btn.setToolTip("编辑访问私有更新服务器的令牌（可选）")
-        self.token_edit_btn.clicked.connect(self.edit_token)
-        token_header_layout.addWidget(self.token_edit_btn)
-
-        # 保存按钮（初始隐藏）
-        self.token_save_btn = QPushButton("✓ 保存")
-        self.token_save_btn.setObjectName("iconButton")
-        self.token_save_btn.setToolTip("保存令牌")
-        self.token_save_btn.clicked.connect(self.save_token)
-        self.token_save_btn.hide()
-        token_header_layout.addWidget(self.token_save_btn)
-
-        # 取消按钮（初始隐藏）
-        self.token_cancel_btn = QPushButton("✕ 取消")
-        self.token_cancel_btn.setObjectName("iconButton")
-        self.token_cancel_btn.setToolTip("取消编辑")
-        self.token_cancel_btn.clicked.connect(self.cancel_token_edit)
-        self.token_cancel_btn.hide()
-        token_header_layout.addWidget(self.token_cancel_btn)
-
-        token_layout.addWidget(token_header)
-
-        # 输入框
-        self.token_input = QLineEdit()
-        self.token_input.setText(self.app_config.update_token)
-        self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
-        self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token_input.setPlaceholderText("留空表示不使用令牌")
-        self.token_input.setMinimumHeight(32)
-        self.token_input.setReadOnly(True)  # 默认只读
-        token_layout.addWidget(self.token_input)
-
-        layout.addWidget(token_group)
-        layout.addStretch()
+        hint = QLabel("该配置会同时用于检查更新和更新包下载。")
+        hint.setObjectName("secondaryText")
+        layout.addWidget(hint)
         return group
 
     def create_directory_section(self) -> QGroupBox:
@@ -873,301 +714,6 @@ class SettingsDialog(QDialog):
         info_layout.addWidget(self.config_path_label)
 
         layout.addWidget(info_group)
-
-        layout.addStretch()
-        return group
-
-    def create_update_section(self) -> QGroupBox:
-        """创建更新设置区域"""
-
-        group = QGroupBox("🔄 更新设置")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(20)
-
-        # 更新检查设置组
-        update_group = QWidget()
-        update_layout = QVBoxLayout(update_group)
-        update_layout.setSpacing(10)
-
-        # 标题
-        update_title = QLabel("🔄 更新设置")
-        update_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        update_layout.addWidget(update_title)
-
-        # 描述
-        update_desc = QLabel("立即检查是否有新版本可用，启用自动检查更新（推荐开启）")
-        update_desc.setWordWrap(True)
-        update_layout.addWidget(update_desc)
-
-        # 检查更新按钮和自动更新开关（横向布局）
-        control_widget = QWidget()
-        control_layout = QHBoxLayout(control_widget)
-        control_layout.setContentsMargins(0, 0, 0, 0)
-        control_layout.setSpacing(15)
-
-        # 检查更新按钮（主要功能）
-        check_update_btn = QPushButton("检查更新")
-        check_update_btn.clicked.connect(self.check_for_updates)
-        check_update_btn.setMinimumHeight(36)
-        check_update_btn.setMinimumWidth(120)
-        control_layout.addWidget(check_update_btn)
-
-        control_layout.addStretch()
-
-        # 自动检查开关（辅助功能）
-        auto_check_label = QLabel("启用自动检查")
-        auto_check_label.setStyleSheet("font-size: 13px;")
-        control_layout.addWidget(auto_check_label)
-
-        self.auto_update_switch = Switch()
-        self.auto_update_switch.setChecked(self.app_config.auto_update_enabled)
-        control_layout.addWidget(self.auto_update_switch)
-
-        update_layout.addWidget(control_widget)
-
-        layout.addWidget(update_group)
-
-        # 更新服务器设置
-        endpoint_group = QWidget()
-        endpoint_layout = QVBoxLayout(endpoint_group)
-        endpoint_layout.setSpacing(10)
-
-        # 标题和按钮（横向布局）
-        endpoint_header = QWidget()
-        endpoint_header_layout = QHBoxLayout(endpoint_header)
-        endpoint_header_layout.setContentsMargins(0, 0, 0, 0)
-        endpoint_header_layout.setSpacing(10)
-
-        endpoint_title = QLabel("🌐 更新服务器")
-        endpoint_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        endpoint_header_layout.addWidget(endpoint_title)
-
-        endpoint_header_layout.addStretch()
-
-        # 编辑按钮
-        self.endpoint_edit_btn = QPushButton("✏️ 编辑")
-        self.endpoint_edit_btn.setFixedHeight(28)
-        self.endpoint_edit_btn.setObjectName("iconButton")
-        self.endpoint_edit_btn.setToolTip("编辑更新服务器地址（通常无需修改）")
-        self.endpoint_edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6B7280;
-                color: white;
-                font-size: 12px;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-            }
-            QPushButton:pressed {
-                background-color: #374151;
-            }
-        """)
-        self.endpoint_edit_btn.clicked.connect(self.edit_endpoint)
-        endpoint_header_layout.addWidget(self.endpoint_edit_btn)
-
-        # 保存按钮（初始隐藏）
-        self.endpoint_save_btn = QPushButton("✓ 保存")
-        self.endpoint_save_btn.setFixedHeight(28)
-        self.endpoint_save_btn.setObjectName("iconButton")
-        self.endpoint_save_btn.setToolTip("保存更新地址")
-        self.endpoint_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-            QPushButton:pressed {
-                background-color: #047857;
-            }
-        """)
-        self.endpoint_save_btn.clicked.connect(self.save_endpoint)
-        self.endpoint_save_btn.hide()
-        endpoint_header_layout.addWidget(self.endpoint_save_btn)
-
-        # 取消按钮（初始隐藏）
-        self.endpoint_cancel_btn = QPushButton("✕ 取消")
-        self.endpoint_cancel_btn.setFixedHeight(28)
-        self.endpoint_cancel_btn.setObjectName("iconButton")
-        self.endpoint_cancel_btn.setToolTip("取消编辑")
-        self.endpoint_cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #EF4444;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #DC2626;
-            }
-            QPushButton:pressed {
-                background-color: #B91C1C;
-            }
-        """)
-        self.endpoint_cancel_btn.clicked.connect(self.cancel_endpoint_edit)
-        self.endpoint_cancel_btn.hide()
-        endpoint_header_layout.addWidget(self.endpoint_cancel_btn)
-
-        endpoint_layout.addWidget(endpoint_header)
-
-        # 输入框
-        self.endpoint_input = QLineEdit()
-        self.endpoint_input.setText(self.app_config.update_endpoint)
-        self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
-        self.endpoint_input.setPlaceholderText("https://...")
-        self.endpoint_input.setMinimumHeight(32)
-        self.endpoint_input.setReadOnly(True)  # 默认只读
-        endpoint_layout.addWidget(self.endpoint_input)
-
-        layout.addWidget(endpoint_group)
-
-        # 访问令牌设置
-        token_group = QWidget()
-        token_layout = QVBoxLayout(token_group)
-        token_layout.setSpacing(10)
-
-        # 标题和按钮（横向布局）
-        token_header = QWidget()
-        token_header_layout = QHBoxLayout(token_header)
-        token_header_layout.setContentsMargins(0, 0, 0, 0)
-        token_header_layout.setSpacing(8)
-
-        token_title = QLabel("🔑 访问令牌")
-        token_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        token_header_layout.addWidget(token_title)
-
-        token_header_layout.addStretch()
-
-        # 显示/隐藏按钮
-        self.show_token_btn = QPushButton("👁️ 显示")
-        self.show_token_btn.setFixedHeight(28)
-        self.show_token_btn.setCheckable(True)
-        self.show_token_btn.setObjectName("iconButton")
-        self.show_token_btn.setToolTip("显示/隐藏令牌内容")
-        self.show_token_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6B7280;
-                color: white;
-                font-size: 12px;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-            }
-            QPushButton:pressed {
-                background-color: #374151;
-            }
-            QPushButton:checked {
-                background-color: #3B82F6;
-            }
-        """)
-        self.show_token_btn.clicked.connect(self.toggle_token_visibility)
-        token_header_layout.addWidget(self.show_token_btn)
-
-        # 编辑按钮
-        self.token_edit_btn = QPushButton("✏️ 编辑")
-        self.token_edit_btn.setFixedHeight(28)
-        self.token_edit_btn.setObjectName("iconButton")
-        self.token_edit_btn.setToolTip("编辑访问私有更新服务器的令牌（可选）")
-        self.token_edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6B7280;
-                color: white;
-                font-size: 12px;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #4B5563;
-            }
-            QPushButton:pressed {
-                background-color: #374151;
-            }
-        """)
-        self.token_edit_btn.clicked.connect(self.edit_token)
-        token_header_layout.addWidget(self.token_edit_btn)
-
-        # 保存按钮（初始隐藏）
-        self.token_save_btn = QPushButton("✓ 保存")
-        self.token_save_btn.setFixedHeight(28)
-        self.token_save_btn.setObjectName("iconButton")
-        self.token_save_btn.setToolTip("保存令牌")
-        self.token_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #10B981;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-            QPushButton:pressed {
-                background-color: #047857;
-            }
-        """)
-        self.token_save_btn.clicked.connect(self.save_token)
-        self.token_save_btn.hide()
-        token_header_layout.addWidget(self.token_save_btn)
-
-        # 取消按钮（初始隐藏）
-        self.token_cancel_btn = QPushButton("✕ 取消")
-        self.token_cancel_btn.setFixedHeight(28)
-        self.token_cancel_btn.setObjectName("iconButton")
-        self.token_cancel_btn.setToolTip("取消编辑")
-        self.token_cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #EF4444;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                padding: 0 10px;
-            }
-            QPushButton:hover {
-                background-color: #DC2626;
-            }
-            QPushButton:pressed {
-                background-color: #B91C1C;
-            }
-        """)
-        self.token_cancel_btn.clicked.connect(self.cancel_token_edit)
-        self.token_cancel_btn.hide()
-        token_header_layout.addWidget(self.token_cancel_btn)
-
-        token_layout.addWidget(token_header)
-
-        # 输入框
-        self.token_input = QLineEdit()
-        self.token_input.setText(self.app_config.update_token)
-        self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
-        self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token_input.setPlaceholderText("留空表示不使用令牌")
-        self.token_input.setMinimumHeight(32)
-        self.token_input.setReadOnly(True)  # 默认只读
-        token_layout.addWidget(self.token_input)
-
-        layout.addWidget(token_group)
 
         layout.addStretch()
         return group
@@ -1553,105 +1099,21 @@ class SettingsDialog(QDialog):
         # 提示用户已应用
         toast_success(self, toast_message)
 
-    def toggle_token_visibility(self):
-        """切换令牌显示/隐藏"""
-        if self.token_input.echoMode() == QLineEdit.EchoMode.Password:
-            self.token_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.show_token_btn.setText("👁️ 隐藏")
-        else:
-            self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.show_token_btn.setText("👁️ 显示")
-
-    def edit_endpoint(self):
-        """进入更新地址编辑模式"""
-        # 保存当前值，以便取消时恢复
-        self._endpoint_backup = self.endpoint_input.text()
-
-        # 解锁输入框
-        self.endpoint_input.setReadOnly(False)
-        self.endpoint_input.setFocus()
-
-        # 切换按钮显示
-        self.endpoint_edit_btn.hide()
-        self.endpoint_save_btn.show()
-        self.endpoint_cancel_btn.show()
-
-    def save_endpoint(self):
-        """保存更新地址"""
-        endpoint = self.endpoint_input.text().strip()
-        if not endpoint:
-            toast_warning(self, "更新地址不能为空")
+    def save_update_proxy(self):
+        """校验并保存检查更新和下载共用的代理配置。"""
+        raw_value = self.update_proxy_input.text().strip()
+        try:
+            proxy = normalize_update_proxy(raw_value)
+        except ValueError as exc:
+            toast_warning(self, str(exc))
+            self.update_proxy_input.setFocus()
             return
-
-        # 保存到配置
-        self.app_config.update_endpoint = endpoint
-        toast_success(self, "更新地址已保存")
-
-        # 锁定输入框
-        self.endpoint_input.setReadOnly(True)
-
-        # 切换按钮显示
-        self.endpoint_save_btn.hide()
-        self.endpoint_cancel_btn.hide()
-        self.endpoint_edit_btn.show()
-
-    def cancel_endpoint_edit(self):
-        """取消更新地址编辑"""
-        # 恢复原值
-        self.endpoint_input.setText(self._endpoint_backup)
-        self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
-
-        # 锁定输入框
-        self.endpoint_input.setReadOnly(True)
-
-        # 切换按钮显示
-        self.endpoint_save_btn.hide()
-        self.endpoint_cancel_btn.hide()
-        self.endpoint_edit_btn.show()
-
-    def edit_token(self):
-        """进入访问令牌编辑模式"""
-        # 保存当前值，以便取消时恢复
-        self._token_backup = self.token_input.text()
-
-        # 解锁输入框
-        self.token_input.setReadOnly(False)
-        self.token_input.setFocus()
-
-        # 切换按钮显示
-        self.token_edit_btn.hide()
-        self.token_save_btn.show()
-        self.token_cancel_btn.show()
-
-    def save_token(self):
-        """保存访问令牌"""
-        token = self.token_input.text().strip()
-
-        # 保存到配置
-        self.app_config.update_token = token
-        toast_success(self, "访问令牌已保存")
-
-        # 锁定输入框
-        self.token_input.setReadOnly(True)
-
-        # 切换按钮显示
-        self.token_save_btn.hide()
-        self.token_cancel_btn.hide()
-        self.token_edit_btn.show()
-
-    def cancel_token_edit(self):
-        """取消访问令牌编辑"""
-        # 恢复原值
-        self.token_input.setText(self._token_backup)
-        self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
-
-        # 锁定输入框
-        self.token_input.setReadOnly(True)
-
-        # 切换按钮显示
-        self.token_save_btn.hide()
-        self.token_cancel_btn.hide()
-        self.token_edit_btn.show()
+        self.update_proxy_input.setText(proxy)
+        self.app_config.update_proxy = proxy
+        toast_success(
+            self,
+            "更新代理已保存" if proxy else "已恢复为直接连接 GitHub",
+        )
 
     def reset_tutorial(self):
         """重置教程状态"""
@@ -1708,202 +1170,6 @@ class SettingsDialog(QDialog):
             self.app_config.last_opened_directory = ""
             self.last_dir_label.setText("（无）")
             toast_success(self, "历史记录已清除")
-
-    def _begin_update_check_ui(self) -> bool:
-        """进入手动检查状态；正在检查时拒绝重复请求。"""
-        if self._update_check_in_progress:
-            return False
-        if self.update_checker_thread and self.update_checker_thread.isRunning():
-            return False
-
-        self._update_check_in_progress = True
-        self._update_check_animation_step = 0
-        if self.check_update_btn is not None:
-            self.check_update_btn.setText("检查更新·")
-            self.check_update_btn.setEnabled(False)
-        self._update_check_animation_timer.start()
-        return True
-
-    def _advance_update_check_animation(self):
-        """在禁用的检查按钮上循环显示点状加载动画。"""
-        if not self._update_check_in_progress:
-            self._update_check_animation_timer.stop()
-            return
-        self._update_check_animation_step = (
-            self._update_check_animation_step + 1
-        ) % 3
-        if self.check_update_btn is not None:
-            dots = "·" * (self._update_check_animation_step + 1)
-            self.check_update_btn.setText(f"检查更新{dots}")
-
-    def _finish_update_check_ui(self):
-        """恢复手动检查按钮，允许下一次检查。"""
-        self._update_check_in_progress = False
-        self._update_check_animation_timer.stop()
-        self._update_check_animation_step = 0
-        if self.check_update_btn is not None:
-            self.check_update_btn.setText("检查更新")
-            self.check_update_btn.setEnabled(True)
-
-    def check_for_updates(self):
-        """检查更新"""
-        if self.update_download_controller.has_download_task:
-            self.update_download_controller.show_progress_dialog(self.window())
-            return
-        if not self._begin_update_check_ui():
-            return
-
-        try:
-            # 1. 首先检查本地是否有待安装的更新包
-            local_pending_version = None
-            local_download_path = None
-            local_batch_path = None
-
-            try:
-                update_dir = get_update_dir()
-                self.logger.debug(f"检查本地更新目录: {update_dir}")
-
-                ready_update = load_ready_update(update_dir)
-                if ready_update:
-                    local_pending_version = str(ready_update['version'])
-                    local_download_path = ready_update['path']
-                    batch_path = update_dir / 'update.bat'
-                    local_batch_path = batch_path if batch_path.exists() else None
-
-                    self.logger.info(
-                        f"检测到已校验更新: version={local_pending_version}, "
-                        f"exe={local_download_path.name}"
-                    )
-
-                    # 检查本地更新包版本是否与当前版本相同
-                    if local_pending_version == __version__:
-                        self.logger.info(f"本地更新包v{local_pending_version}与当前版本相同，清理更新包")
-                        try:
-                            self.update_download_controller.discard_ready_update()
-                            self.logger.info(f"已删除同版本更新包: {local_download_path}")
-                            if local_batch_path and local_batch_path.exists():
-                                local_batch_path.unlink()
-                                self.logger.info(f"已删除批处理脚本: {local_batch_path}")
-                        except Exception as e:
-                            self.logger.warning(f"清理同版本更新包失败: {e}")
-                        # 跳过提示，继续检查线上更新
-                    else:
-                        # 本地更新包版本不同于当前版本，询问用户是否安装
-                        self._finish_update_check_ui()
-                        msg_box = ThemedMessageBox(self)
-                        msg_box.setWindowTitle("发现已下载更新")
-                        msg_box.setText(f"检测到待安装的更新 v{local_pending_version}，是否现在重启并完成更新？")
-                        msg_box.setIcon(QMessageBox.Icon.Question)
-
-                        yes_btn = msg_box.addButton("是", QMessageBox.ButtonRole.YesRole)
-                        msg_box.addButton("否", QMessageBox.ButtonRole.NoRole)
-                        msg_box.setDefaultButton(yes_btn)
-
-                        msg_box.exec()
-
-                        if msg_box.clickedButton() == yes_btn:
-                            if self.update_download_controller.install_ready_update():
-                                self.logger.info("用户选择立即重启安装更新")
-                            return
-                        self.logger.info("用户选择稍后安装本地更新包")
-                        return
-            except Exception as e:
-                self.logger.debug(f"检查本地更新目录失败: {e}")
-
-            # 2. 没有本地更新包，检查线上更新
-            toast_info(self, "正在检查更新...")
-
-            # 修复问题4：使用后台线程检查更新，避免阻塞UI
-            manifest_url = get_manifest_url(latest=True)
-            endpoint = self.app_config.update_endpoint or manifest_url
-            token = self.app_config.update_token
-
-            # 创建新的后台检查线程
-            self.update_checker_thread = UpdateCheckerThread(endpoint, token)
-            self.update_checker_thread.check_success.connect(self._on_update_check_success)
-            self.update_checker_thread.check_failed.connect(self._on_update_check_failed)
-            self.update_checker_thread.start()
-            self.logger.debug("后台更新检查线程已启动")
-
-        except Exception as e:
-            self._finish_update_check_ui()
-            self.logger.error(f"检查更新失败: {e}")
-            toast_error(self, f"检查更新失败: {str(e)}")
-
-    def _on_update_check_success(self, manifest, endpoint, token):
-        """修复问题4：后台更新检查成功的回调"""
-        self._finish_update_check_ui()
-        try:
-            new_ver = manifest.get('version')
-            if not new_ver:
-                toast_warning(self, "更新信息格式错误")
-                return
-
-            # 比较版本
-            cmp_result = compare_version(new_ver, __version__)
-
-            if cmp_result > 0:
-                # 有新版本 - 显示详细信息对话框
-                size_bytes = int(manifest.get('size_bytes', 0) or 0)
-                notes = str(manifest.get('notes', '')).strip()
-
-                self._show_update_info_dialog(
-                    new_ver,
-                    size_bytes,
-                    notes,
-                    manifest,
-                    token,
-                )
-            elif cmp_result == 0:
-                toast_success(self, f"当前已是最新版本 v{__version__}")
-            else:
-                toast_info(self, f"当前版本 v{__version__} 高于线上版本 v{new_ver}")
-        except Exception as e:
-            self.logger.error(f"处理更新检查结果失败: {e}")
-            toast_error(self, f"处理更新失败: {str(e)}")
-
-    def _show_update_info_dialog(
-        self,
-        version,
-        size_bytes,
-        notes,
-        manifest,
-        token,
-    ):
-        """更新详情窗保持单例，重复结果只置顶已有窗口。"""
-        existing_dialog = self._update_info_dialog
-        if existing_dialog is not None:
-            try:
-                if existing_dialog.isVisible():
-                    existing_dialog.raise_()
-                    existing_dialog.activateWindow()
-                    return
-            except RuntimeError:
-                self._update_info_dialog = None
-
-        update_dialog = UpdateInfoDialog(
-            new_version=version,
-            current_version=__version__,
-            size_bytes=size_bytes,
-            notes=notes,
-            manifest=manifest,
-            token=token,
-            parent=self,
-        )
-        self._update_info_dialog = update_dialog
-        try:
-            update_dialog.exec()
-        finally:
-            self._update_info_dialog = None
-            update_dialog.deleteLater()
-
-    def _on_update_check_failed(self, error_message):
-        """修复问题4：后台更新检查失败的回调"""
-        self._finish_update_check_ui()
-        self.logger.warning(
-            f"检查线上更新失败: endpoint={self.app_config.update_endpoint}, error={error_message}"
-        )
-        toast_warning(self, "无法获取更新信息")
 
     def clear_smb_cache(self):
         """清除SMB缓存"""
@@ -2047,11 +1313,7 @@ class SettingsDialog(QDialog):
             self.auto_theme_switch.setChecked(False)  # 默认关闭自动切换
             self.theme_combo.setEnabled(True)  # 确保下拉列表可用
 
-            self.auto_update_switch.setChecked(True)
-            self.endpoint_input.setText("https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json")
-            self.endpoint_input.setCursorPosition(0)  # 显示开头而不是结尾
-            self.token_input.setText("")
-            self.token_input.setCursorPosition(0)  # 显示开头而不是结尾
+            self.update_proxy_input.setText("")
 
             # 恢复日志级别和Toast级别到默认值（INFO）
             for i in range(self.log_level_combo.count()):
@@ -2064,9 +1326,7 @@ class SettingsDialog(QDialog):
                     break
 
             # 保存配置（实时保存）
-            self.app_config.auto_update_enabled = True
-            self.app_config.update_endpoint = "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json"
-            self.app_config.update_token = ""
+            self.app_config.update_proxy = ""
             self.app_config.log_level = "INFO"
             self.app_config.toast_level = "INFO"
 
@@ -2556,6 +1816,7 @@ class SettingsDialog(QDialog):
 
         # 重新加载配置以同步主窗口的主题变化
         self.app_config.reload_config()
+        self.update_proxy_input.setText(self.app_config.update_proxy)
 
         # 更新主题下拉框的值
         current_theme_mode = self.app_config.theme_mode

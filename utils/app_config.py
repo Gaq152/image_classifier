@@ -8,7 +8,6 @@
 import json
 import logging
 import threading
-from pathlib import Path
 from typing import Dict, Any
 from .paths import get_config_dir
 from _version_ import __version__
@@ -69,12 +68,8 @@ class AppConfig:
             "tutorial_completed": False,  # 是否完成教程
             "tutorial_skipped": False,  # 是否跳过教程
             "version": __version__,  # 配置文件版本（自动同步程序版本）
-            # 自动更新相关配置
-            "auto_update_enabled": True,  # 自动检查更新开关
-            "last_update_check_ts": 0,  # 最后检查更新的时间戳
-            "update_endpoint": "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json",  # 更新检查端点
-            "update_token": "",  # 更新令牌（可选）
-            "pending_update": {},  # 待处理的更新信息
+            # 更新固定使用官方 GitHub Releases，可选配置下载代理/加速地址
+            "update_proxy": "",
             # 工作目录相关配置
             "last_opened_directory": "",  # 最后打开的图片目录
             "last_opened_drive_is_network": False,  # 最后打开目录的盘符是否为网络路径
@@ -111,12 +106,29 @@ class AppConfig:
                         if key not in config:
                             config[key] = value
 
+                    # 旧版本允许关闭自动检查或修改更新源；这些入口已经移除。
+                    legacy_update_keys = {
+                        "auto_update_enabled",
+                        "last_update_check_ts",
+                        "update_endpoint",
+                        "update_token",
+                        "pending_update",
+                    }
+                    removed_legacy_keys = bool(
+                        legacy_update_keys.intersection(config)
+                    )
+                    for key in legacy_update_keys:
+                        config.pop(key, None)
+
                     # 检查并更新版本号
-                    if config.get('version') != __version__:
+                    version_changed = config.get('version') != __version__
+                    if version_changed:
                         old_version = config.get('version', '未知')
                         config['version'] = __version__
                         self.logger.info(f"配置文件版本已更新: {old_version} -> {__version__}")
-                        # 立即保存更新后的配置
+
+                    if version_changed or removed_legacy_keys:
+                        # 立即保存版本更新和旧配置清理结果
                         with open(self._config_file, 'w', encoding='utf-8') as f:
                             json.dump(config, f, ensure_ascii=False, indent=2)
 
@@ -280,64 +292,17 @@ class AppConfig:
         else:
             self.tutorial_skipped = True
 
-    # ==================== 自动更新配置 ====================
+    # ==================== 更新代理配置 ====================
 
     @property
-    def auto_update_enabled(self) -> bool:
-        """获取自动更新开关"""
-        return self._config.get("auto_update_enabled", True)
+    def update_proxy(self) -> str:
+        """获取更新检查和下载共用的代理或 GitHub 加速地址。"""
+        return str(self._config.get("update_proxy", "") or "")
 
-    @auto_update_enabled.setter
-    def auto_update_enabled(self, value: bool):
-        """设置自动更新开关"""
-        self._config["auto_update_enabled"] = value
-        self._save_config()
-        self.logger.info(f"自动更新已{'启用' if value else '禁用'}")
-
-    @property
-    def last_update_check_ts(self) -> int:
-        """获取最后检查更新的时间戳"""
-        return self._config.get("last_update_check_ts", 0)
-
-    @last_update_check_ts.setter
-    def last_update_check_ts(self, value: int):
-        """设置最后检查更新的时间戳"""
-        self._config["last_update_check_ts"] = value
-        self._save_config()
-
-    @property
-    def update_endpoint(self) -> str:
-        """获取更新检查端点"""
-        return self._config.get("update_endpoint",
-            "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json")
-
-    @update_endpoint.setter
-    def update_endpoint(self, value: str):
-        """设置更新检查端点"""
-        self._config["update_endpoint"] = value
-        self._save_config()
-        self.logger.info(f"更新端点已设置为: {value}")
-
-    @property
-    def update_token(self) -> str:
-        """获取更新令牌"""
-        return self._config.get("update_token", "")
-
-    @update_token.setter
-    def update_token(self, value: str):
-        """设置更新令牌"""
-        self._config["update_token"] = value
-        self._save_config()
-
-    @property
-    def pending_update(self) -> dict:
-        """获取待处理的更新信息"""
-        return self._config.get("pending_update", {})
-
-    @pending_update.setter
-    def pending_update(self, value: dict):
-        """设置待处理的更新信息"""
-        self._config["pending_update"] = value
+    @update_proxy.setter
+    def update_proxy(self, value: str):
+        """保存更新代理；空字符串表示直接连接 GitHub。"""
+        self._config["update_proxy"] = str(value or "").strip()
         self._save_config()
 
     # ==================== 工作目录配置 ====================

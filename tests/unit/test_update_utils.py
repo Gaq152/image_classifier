@@ -1,15 +1,31 @@
 """更新包完整性标记与持久化脚本测试。"""
 
 import hashlib
+import io
+import json
+from unittest.mock import Mock, patch
+
+import pytest
 
 from core.update_utils import (
     cleanup_incomplete_updates,
     ensure_persistent_updater,
+    fetch_manifest,
     load_pending_update,
     load_ready_update,
+    normalize_update_proxy,
+    resolve_update_url,
     save_pending_update,
     save_ready_update,
 )
+
+
+class JsonResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
 
 
 def test_ready_update_requires_marker_and_matching_size(tmp_path):
@@ -94,3 +110,52 @@ def test_persistent_updater_never_installs_arbitrary_partial_exe(tmp_path, monke
     assert "Move-Item -LiteralPath $partial" in content
     assert 'for %%F in ("%UPDATE_DIR%\\*' not in content
     assert 'if not exist "%NEW_FILE%"' in content
+
+
+def test_update_proxy_supports_clash_and_github_accelerator():
+    github_url = "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json"
+
+    clash = normalize_update_proxy("127.0.0.1:7890")
+    accelerator = normalize_update_proxy("ghfast.top")
+
+    assert clash == "http://127.0.0.1:7890"
+    assert accelerator == "https://ghfast.top"
+    assert resolve_update_url(github_url, clash) == github_url
+    assert resolve_update_url(github_url, accelerator) == (
+        f"https://ghfast.top/{github_url}"
+    )
+    with pytest.raises(ValueError):
+        normalize_update_proxy("file:///tmp/proxy")
+
+
+def test_manifest_check_uses_github_accelerator_prefix():
+    source_url = "https://github.com/example/app/releases/latest/download/manifest.json"
+    response = JsonResponse(json.dumps({"version": "9.9.9"}).encode())
+
+    with patch("core.update_utils.urlopen", return_value=response) as opener:
+        manifest = fetch_manifest(
+            source_url,
+            retries=0,
+            proxy="https://ghfast.top",
+        )
+
+    request = opener.call_args.args[0]
+    assert request.full_url == f"https://ghfast.top/{source_url}"
+    assert manifest["version"] == "9.9.9"
+
+
+def test_manifest_check_uses_local_forward_proxy():
+    response = JsonResponse(json.dumps({"version": "9.9.9"}).encode())
+    opener = Mock()
+    opener.open.return_value = response
+
+    with patch("core.update_utils.build_opener", return_value=opener) as factory:
+        manifest = fetch_manifest(
+            "https://github.com/example/app/manifest.json",
+            retries=0,
+            proxy="http://127.0.0.1:7890",
+        )
+
+    factory.assert_called_once()
+    opener.open.assert_called_once()
+    assert manifest["version"] == "9.9.9"

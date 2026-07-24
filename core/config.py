@@ -7,10 +7,8 @@
 import json
 import logging
 import threading
-import time
 from pathlib import Path
 from utils.exceptions import ConfigError
-from utils.app_config import get_app_config
 
 
 class Config:
@@ -134,8 +132,16 @@ class Config:
                     self.category_sort_mode = config_data.get('category_sort_mode', 'name')  # 类别排序模式
                     self.sort_ascending = config_data.get('sort_ascending', True)  # 排序方向
 
-                    # 迁移逻辑：如果旧配置中有更新相关字段，迁移到全局配置
-                    self._migrate_update_config(config_data)
+                    # 旧版目录配置中的更新字段已经废弃，保存时统一移除。
+                    legacy_update_fields = {
+                        'auto_update_enabled',
+                        'last_update_check_ts',
+                        'update_endpoint',
+                        'update_token',
+                        'pending_update',
+                    }
+                    if any(field in config_data for field in legacy_update_fields):
+                        self.save_config()
         except FileNotFoundError:
             # 配置文件不存在，初始化默认值并尝试保存
             with self._lock:
@@ -175,40 +181,6 @@ class Config:
             except (OSError, IOError) as e:
                 raise ConfigError(f"保存配置文件失败: {e}")
 
-    def _migrate_update_config(self, config_data):
-        """迁移更新相关配置到全局配置
-
-        Args:
-            config_data: 从 config.json 加载的配置数据
-        """
-        # 检查是否有需要迁移的字段
-        update_fields = ['auto_update_enabled', 'last_update_check_ts', 'update_endpoint', 'update_token', 'pending_update']
-        has_update_config = any(field in config_data for field in update_fields)
-
-        if has_update_config:
-            try:
-                # 获取全局配置实例
-                app_config = get_app_config()
-
-                # 迁移数据到全局配置
-                if 'auto_update_enabled' in config_data:
-                    app_config.auto_update_enabled = bool(config_data['auto_update_enabled'])
-                if 'last_update_check_ts' in config_data:
-                    app_config.last_update_check_ts = int(config_data['last_update_check_ts'])
-                if 'update_endpoint' in config_data:
-                    app_config.update_endpoint = config_data['update_endpoint']
-                if 'update_token' in config_data:
-                    app_config.update_token = config_data['update_token']
-                if 'pending_update' in config_data:
-                    app_config.pending_update = config_data['pending_update']
-
-                # 保存本地配置（不再包含更新相关字段）
-                self.save_config()
-
-                logging.getLogger(__name__).info(f"已将更新配置从 {self.config_file} 迁移到全局配置")
-            except Exception as e:
-                logging.getLogger(__name__).error(f"迁移更新配置失败: {e}")
-            
     def set_base_dir(self, base_dir):
         """设置基础目录并重新加载配置"""
         self.base_dir = base_dir

@@ -3,11 +3,8 @@
 import hashlib
 import threading
 import time
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 from urllib.error import URLError
-
-from PyQt6.QtCore import QObject, Qt, pyqtSignal
-from PyQt6.QtWidgets import QDialog
 
 from core.update_utils import (
     cleanup_incomplete_updates,
@@ -15,9 +12,7 @@ from core.update_utils import (
     download_with_progress,
     load_pending_update,
     load_ready_update,
-    save_pending_update,
 )
-from ui.update_dialog import DownloadProgressDialog, UpdateInfoDialog
 from ui.update_download import UpdateDownloadController, UpdateDownloadWorker
 
 
@@ -72,38 +67,6 @@ class InterruptingResponse(BytesResponse):
         if self.read_count > 1:
             raise URLError("connection reset")
         return super().read(size)
-
-
-class FakeDownloadController(QObject):
-    """进度窗口交互测试替身。"""
-
-    progress_changed = pyqtSignal(int, int)
-    state_changed = pyqtSignal(str, str)
-
-    def __init__(self):
-        super().__init__()
-        self.state = "downloading"
-        self.message = "正在下载更新包..."
-        self.downloaded = 10
-        self.total = 100
-        self.cancel = Mock()
-        self.pause = Mock()
-        self.resume = Mock(return_value=True)
-        self.install_ready_update = Mock(return_value=True)
-
-    @property
-    def is_active(self):
-        return self.state in {
-            "downloading",
-            "retrying",
-            "verifying",
-            "pausing",
-            "cancelling",
-        }
-
-    @property
-    def has_download_task(self):
-        return self.is_active or self.state == "paused"
 
 
 def build_manifest(payload: bytes):
@@ -168,6 +131,29 @@ def test_resume_falls_back_to_full_download_when_server_ignores_range(tmp_path):
         )
 
     assert requests[0].get_header("Range") == "bytes=1234-"
+    assert destination.read_bytes() == payload
+
+
+def test_download_uses_same_github_accelerator_as_manifest(tmp_path):
+    """GitHub 加速前缀必须同时应用到更新包下载。"""
+    payload = b"proxied-package"
+    destination = tmp_path / "update.exe.part"
+    response = BytesResponse(payload)
+
+    with patch("core.update_utils.urlopen", return_value=response) as opener:
+        download_with_progress(
+            "https://github.com/example/app/releases/download/v9/update.exe",
+            destination,
+            expected_size=len(payload),
+            retries=0,
+            proxy="https://ghfast.top",
+        )
+
+    request = opener.call_args.args[0]
+    assert request.full_url == (
+        "https://ghfast.top/"
+        "https://github.com/example/app/releases/download/v9/update.exe"
+    )
     assert destination.read_bytes() == payload
 
 
@@ -320,172 +306,3 @@ def test_controller_shutdown_pauses_and_releases_file(
     restored = UpdateDownloadController()
     assert restored.state == "paused"
     assert restored.downloaded == partial.stat().st_size
-
-
-def test_progress_dialog_background_and_close_have_distinct_behavior(qtbot):
-    """显式后台下载继续任务，窗口关闭选择取消后才真正取消。"""
-    controller = FakeDownloadController()
-    dialog = DownloadProgressDialog(controller)
-    qtbot.addWidget(dialog)
-    dialog.show()
-
-    dialog.background_btn.click()
-    assert not dialog.isVisible()
-    controller.cancel.assert_not_called()
-
-    dialog.show()
-    with patch.object(
-        dialog,
-        "_confirm_close_download",
-        return_value="cancel",
-    ) as confirm:
-        dialog.close()
-    confirm.assert_called_once_with()
-    controller.cancel.assert_called_once_with()
-
-
-def test_cancel_button_requires_confirmation(qtbot):
-    """点击取消下载时，拒绝确认应继续下载，确认后才调用取消。"""
-    controller = FakeDownloadController()
-    dialog = DownloadProgressDialog(controller)
-    qtbot.addWidget(dialog)
-    dialog.show()
-
-    with patch.object(dialog, "_confirm_cancel_download", return_value=False):
-        dialog.action_btn.click()
-    controller.cancel.assert_not_called()
-
-    with patch.object(dialog, "_confirm_cancel_download", return_value=True) as confirm:
-        dialog.action_btn.click()
-    confirm.assert_called_once_with()
-    controller.cancel.assert_called_once_with()
-    controller.state = "cancelled"
-    dialog.close()
-
-
-def test_progress_dialog_pauses_and_resumes_without_cancelling(qtbot):
-    """暂停按钮应保留任务，暂停状态下同一按钮用于继续下载。"""
-    controller = FakeDownloadController()
-    dialog = DownloadProgressDialog(controller)
-    qtbot.addWidget(dialog)
-    dialog.show()
-
-    dialog.pause_btn.click()
-    controller.pause.assert_called_once_with()
-    controller.cancel.assert_not_called()
-
-    controller.state = "paused"
-    controller.message = "更新下载已暂停"
-    controller.state_changed.emit(controller.state, controller.message)
-    assert dialog.pause_btn.text() == "继续下载"
-
-    dialog.pause_btn.click()
-    controller.resume.assert_called_once_with()
-    controller.cancel.assert_not_called()
-    controller.state = "cancelled"
-    dialog.close()
-
-
-def test_progress_dialog_uses_themed_ready_actions(qtbot):
-    """下载完成与后续重开应复用同一主题窗口和重启操作。"""
-    controller = FakeDownloadController()
-    dialog = DownloadProgressDialog(controller)
-    qtbot.addWidget(dialog)
-    dialog.show()
-
-    controller.state = "ready"
-    controller.message = "更新 v9.9.9 已下载"
-    controller.state_changed.emit(controller.state, controller.message)
-
-    assert dialog.isVisible()
-    assert dialog.background_btn.text() == "稍后安装"
-    assert dialog.action_btn.text() == "立即重启"
-
-    dialog.background_btn.click()
-    assert not dialog.isVisible()
-    controller.install_ready_update.assert_not_called()
-
-    dialog.show()
-    dialog.action_btn.click()
-    controller.install_ready_update.assert_called_once_with()
-    controller.state = "cancelled"
-    dialog.close()
-
-
-def test_cancel_from_paused_state_still_requires_confirmation(qtbot):
-    """暂停后明确取消仍需二次确认，并删除任务由控制器负责。"""
-    controller = FakeDownloadController()
-    controller.state = "paused"
-    controller.message = "更新下载已暂停"
-    dialog = DownloadProgressDialog(controller)
-    qtbot.addWidget(dialog)
-    dialog.show()
-
-    with patch.object(dialog, "_confirm_cancel_download", return_value=True):
-        dialog.action_btn.click()
-
-    controller.cancel.assert_called_once_with()
-    controller.state = "cancelled"
-    dialog.close()
-
-
-def test_window_close_moves_download_to_background_when_selected(qtbot):
-    """关闭窗口时选择后台下载，应隐藏窗口且不取消任务。"""
-    controller = FakeDownloadController()
-    dialog = DownloadProgressDialog(controller)
-    qtbot.addWidget(dialog)
-    dialog.show()
-
-    with patch.object(
-        dialog,
-        "_confirm_close_download",
-        return_value="background",
-    ):
-        dialog.close()
-
-    assert not dialog.isVisible()
-    controller.cancel.assert_not_called()
-    controller.state = "cancelled"
-    dialog.close()
-
-
-def test_update_info_keeps_progress_above_settings_dialog(qtbot):
-    """从设置页启动下载时，进度窗口必须以设置页为父窗口。"""
-    settings_dialog = QDialog()
-    qtbot.addWidget(settings_dialog)
-    controller = Mock()
-    controller.start.return_value = True
-    manifest = {
-        "url": "https://example.invalid/ImageClassifier.exe",
-        "sha256": "abc",
-        "size_bytes": 100,
-    }
-    update_dialog = UpdateInfoDialog(
-        "9.9.9",
-        "9.9.8",
-        100,
-        "测试更新",
-        manifest,
-        parent=settings_dialog,
-    )
-    qtbot.addWidget(update_dialog)
-
-    with patch(
-        "ui.update_dialog.get_update_download_controller",
-        return_value=controller,
-    ):
-        update_dialog.start_download()
-
-    controller.show_progress_dialog.assert_called_once_with(settings_dialog)
-
-
-def test_progress_dialog_is_window_modal_to_its_parent(qtbot):
-    """窗口级模态确保进度窗不会落到设置窗口后面。"""
-    settings_dialog = QDialog()
-    qtbot.addWidget(settings_dialog)
-    controller = FakeDownloadController()
-    dialog = DownloadProgressDialog(controller, settings_dialog)
-    qtbot.addWidget(dialog)
-
-    assert dialog.parentWidget() is settings_dialog
-    assert dialog.windowModality() == Qt.WindowModality.WindowModal

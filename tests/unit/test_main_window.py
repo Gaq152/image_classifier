@@ -23,10 +23,10 @@ class ToolbarHarness(ImageClassifier):
         self.config = None
         self.update_checker_thread = None
         self._main_update_state = "idle"
+        self._main_update_message = ""
         self._pending_update_version = None
         self._pending_update_manifest = None
-        self._pending_update_token = ""
-        self._update_info_dialog = None
+        self._latest_checked_version = ""
         self._update_check_manual = False
         self._update_check_animation_step = 0
         self._update_check_animation_timer = QTimer(self)
@@ -49,6 +49,14 @@ class ToolbarHarness(ImageClassifier):
 class DownloadControllerStub(QObject):
     """状态栏下载入口测试替身。"""
 
+    ACTIVE_STATES = {
+        "downloading",
+        "retrying",
+        "verifying",
+        "pausing",
+        "cancelling",
+    }
+
     progress_changed = pyqtSignal(int, int)
     state_changed = pyqtSignal(str, str)
     download_completed = pyqtSignal(dict)
@@ -59,10 +67,14 @@ class DownloadControllerStub(QObject):
         self.message = ""
         self.downloaded = 0
         self.total = 0
-        self.show_progress_dialog_calls = 0
         self.shutdown_calls = 0
         self.install_ready_update_calls = 0
         self.discard_ready_update_calls = 0
+        self.pause_calls = 0
+        self.resume_calls = 0
+        self.cancel_calls = 0
+        self.start_calls = []
+        self._version = ""
 
     @property
     def is_active(self):
@@ -78,8 +90,22 @@ class DownloadControllerStub(QObject):
     def has_download_task(self):
         return self.is_active or self.state == "paused"
 
-    def show_progress_dialog(self, _parent):
-        self.show_progress_dialog_calls += 1
+    def start(self, manifest, version, token="", proxy=None):
+        self.start_calls.append((manifest, version, token, proxy))
+        self._version = str(version)
+        self.state = "downloading"
+        self.message = "正在下载更新包..."
+        self.state_changed.emit(self.state, self.message)
+        return True
+
+    def pause(self):
+        self.pause_calls += 1
+
+    def resume(self):
+        self.resume_calls += 1
+
+    def cancel(self):
+        self.cancel_calls += 1
 
     def install_ready_update(self):
         self.install_ready_update_calls += 1
@@ -146,8 +172,8 @@ def test_image_filter_active_detection(
         window.deleteLater()
 
 
-def test_status_bar_exposes_background_update_progress(qapp):
-    """后台下载隐藏进度窗后，状态栏仍应提供可重新打开的进度入口。"""
+def test_status_bar_opens_popover_with_background_download_progress(qapp):
+    """下载进度应集成在版本按钮浮层中，不再打开独立进度窗。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     window.update_download_controller = controller
@@ -156,21 +182,24 @@ def test_status_bar_exposes_background_update_progress(qapp):
         window._connect_update_download_controller()
 
         controller.state = "downloading"
+        controller.downloaded = 25
+        controller.total = 100
         controller.state_changed.emit("downloading", "正在下载更新包...")
         controller.progress_changed.emit(25, 100)
 
         assert window.update_download_button.isVisibleTo(window)
-        assert window.update_download_button.text() == "更新 25%"
-
+        assert "25%" in window.update_download_button.text()
         window.update_download_button.click()
-        assert controller.show_progress_dialog_calls == 1
+        assert window.update_center_popover.isVisible()
+        assert window.update_center_popover.progress_bar.value() == 25
     finally:
+        window.update_center_popover.hide()
         window.close()
         window.deleteLater()
 
 
-def test_status_bar_exposes_paused_download_and_progress(qapp):
-    """暂停下载后右下角应显示断点进度，并可重新打开进度窗口。"""
+def test_paused_download_can_resume_from_popover(qapp):
+    """暂停状态应在浮层中展示断点进度并允许继续。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     controller.state = "paused"
@@ -181,18 +210,20 @@ def test_status_bar_exposes_paused_download_and_progress(qapp):
     try:
         window.create_status_bar()
         window._connect_update_download_controller()
-
-        assert window._main_update_state == "paused"
-        assert window.update_download_button.text() == "继续更新 25%"
         window.update_download_button.click()
-        assert controller.show_progress_dialog_calls == 1
+
+        assert "继续更新 25%" in window.update_download_button.text()
+        assert window.update_center_popover.primary_button.text() == "继续下载"
+        window.update_center_popover.primary_button.click()
+        assert controller.resume_calls == 1
     finally:
+        window.update_center_popover.hide()
         window.close()
         window.deleteLater()
 
 
-def test_idle_update_button_starts_manual_check_and_animation(qapp):
-    """空闲入口点击后应启动后台检查并进入点状加载状态。"""
+def test_version_button_opens_popover_before_manual_check(qapp):
+    """版本按钮只展开浮层，浮层内的检查按钮才启动手动检查。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     window.update_download_controller = controller
@@ -203,28 +234,40 @@ def test_idle_update_button_starts_manual_check_and_animation(qapp):
     try:
         window.create_status_bar()
         window._connect_update_download_controller()
+        window.update_download_button.click()
+        assert window.update_center_popover.isVisible()
+        assert checker.start.call_count == 0
 
+        config = Mock(update_proxy="http://127.0.0.1:7890")
         with (
             patch("ui.main_window.load_ready_update", return_value=None),
-            patch("ui.main_window.UpdateCheckerThread", return_value=checker),
+            patch("ui.main_window.UpdateCheckerThread", return_value=checker) as factory,
+            patch("ui.main_window.get_app_config", return_value=config),
             patch("ui.main_window.toast_info") as toast,
         ):
-            window.update_download_button.click()
+            window.update_center_popover.primary_button.click()
 
         assert window._main_update_state == "checking"
         assert window._update_check_animation_timer.isActive()
-        assert window.update_download_button.text().startswith("检查更新")
-        assert not window.update_download_button.isEnabled()
+        assert window.update_download_button.isEnabled()
+        assert window.update_center_popover.primary_button.text().startswith("正在检查")
+        assert not window.update_center_popover.primary_button.isEnabled()
+        factory.assert_called_once_with(
+            "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json",
+            "",
+            "http://127.0.0.1:7890",
+        )
         checker.start.assert_called_once_with()
         toast.assert_called_once_with(window, "正在检查更新...")
     finally:
         window._update_check_animation_timer.stop()
+        window.update_center_popover.hide()
         window.close()
         window.deleteLater()
 
 
-def test_auto_update_result_waits_for_status_button_click(qapp):
-    """自动检查发现新版本时只提醒，点击入口后才显示更新内容。"""
+def test_auto_update_result_populates_popover_without_release_notes(qapp):
+    """自动检查只写入版本号，更新说明不得进入更新浮层。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     window.update_download_controller = controller
@@ -232,7 +275,7 @@ def test_auto_update_result_waits_for_status_button_click(qapp):
         "version": "9.9.9",
         "url": "https://example.invalid/ImageClassifier.exe",
         "size_bytes": 123,
-        "notes": "测试更新",
+        "notes": "这段更新说明不应该显示",
     }
     window._local_update_info = {
         "version": None,
@@ -242,34 +285,32 @@ def test_auto_update_result_waits_for_status_button_click(qapp):
     try:
         window.create_status_bar()
         window._connect_update_download_controller()
-
-        with (
-            patch("ui.main_window.UpdateInfoDialog") as dialog_class,
-            patch("ui.main_window.toast_info") as toast,
-        ):
+        with patch("ui.main_window.toast_info") as toast:
             window._process_update_result(
                 "9.9.9",
                 manifest,
                 "https://example.invalid/latest.json",
-                "token",
+                "",
                 manual=False,
             )
-            dialog_class.assert_not_called()
-            toast.assert_called_once_with(window, "发现新版本 v9.9.9")
 
-            assert window._main_update_state == "available"
-            assert "9.9.9" in window.update_download_button.text()
-            window.update_download_button.click()
+        toast.assert_called_once_with(window, "发现新版本 v9.9.9")
+        assert window._main_update_state == "available"
+        window.update_download_button.click()
+        assert window.update_center_popover.current_version_value.text() == f"v{window.version}"
+        assert window.update_center_popover.latest_version_value.text() == "v9.9.9"
+        assert "这段更新说明" not in window.update_center_popover.status_label.text()
 
-        dialog_class.assert_called_once()
-        dialog_class.return_value.exec.assert_called_once_with()
+        window.update_center_popover.primary_button.click()
+        assert controller.start_calls == [(manifest, "9.9.9", "", None)]
     finally:
+        window.update_center_popover.hide()
         window.close()
         window.deleteLater()
 
 
-def test_manual_check_without_update_restores_idle_and_keeps_toast(qapp):
-    """手动检查没有新版本时恢复普通入口并保留原有 Toast。"""
+def test_manual_check_without_update_restores_version_button(qapp):
+    """手动检查已是最新版时恢复版本按钮并同步最新版本号。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     window.update_download_controller = controller
@@ -291,8 +332,8 @@ def test_manual_check_without_update_restores_idle_and_keeps_toast(qapp):
             )
 
         assert window._main_update_state == "idle"
-        assert window.update_download_button.text() == "检查更新"
-        assert window.update_download_button.isEnabled()
+        assert window.update_download_button.text() == f"v{window.version}"
+        assert window.update_center_popover.latest_version_value.text() == f"v{window.version}"
         toast.assert_called_once_with(
             window,
             f"当前已是最新版本 v{window.version}",
@@ -302,52 +343,115 @@ def test_manual_check_without_update_restores_idle_and_keeps_toast(qapp):
         window.deleteLater()
 
 
-def test_update_info_dialog_is_single_instance_during_reentrant_open(qapp):
-    """更新详情窗打开期间再次收到打开请求时只能置顶现有窗口。"""
+def test_automatic_check_failure_keeps_existing_update_state(qapp):
+    """自动检查网络失败不能覆盖用户当前看到的更新状态。"""
     window = ToolbarHarness()
-    window._pending_update_version = "9.9.9"
-    window._pending_update_manifest = {
-        "version": "9.9.9",
-        "url": "https://example.invalid/ImageClassifier.exe",
-    }
-    dialog = Mock()
-    dialog.isVisible.return_value = True
-    dialog.exec.side_effect = window._show_pending_update_dialog
+    controller = DownloadControllerStub()
+    window.update_download_controller = controller
     try:
-        with patch("ui.main_window.UpdateInfoDialog", return_value=dialog) as factory:
-            window._show_pending_update_dialog()
+        window.create_status_bar()
+        window._set_main_update_state("available", "9.9.9")
+        window._local_update_info = {
+            "version": None,
+            "path": None,
+            "batch_path": None,
+        }
+        with patch("ui.main_window.toast_warning") as toast:
+            window._process_update_result(
+                None,
+                None,
+                None,
+                None,
+                manual=False,
+                error_message="网络不可用",
+            )
 
-        factory.assert_called_once()
-        dialog.exec.assert_called_once_with()
-        dialog.raise_.assert_called_once_with()
-        dialog.activateWindow.assert_called_once_with()
+        assert window._main_update_state == "available"
+        assert window.update_center_popover.latest_version_value.text() == "v9.9.9"
+        toast.assert_not_called()
     finally:
         window.close()
         window.deleteLater()
 
 
-def test_ready_update_reopens_themed_progress_dialog(qapp):
-    """完整包入口应复用程序主题进度窗，不能打开原生消息框。"""
+def test_manual_check_failure_changes_popover_state(qapp):
+    """只有手动检查失败才在更新中心显示失败和重试入口。"""
+    window = ToolbarHarness()
+    controller = DownloadControllerStub()
+    window.update_download_controller = controller
+    window._local_update_info = {
+        "version": None,
+        "path": None,
+        "batch_path": None,
+    }
+    try:
+        window.create_status_bar()
+        with patch("ui.main_window.toast_warning"):
+            window._process_update_result(
+                None,
+                None,
+                None,
+                None,
+                manual=True,
+                error_message="网络不可用",
+            )
+
+        assert window._main_update_state == "failed"
+        assert window.update_center_popover.title_label.text() == "更新失败"
+        assert window.update_center_popover.primary_button.text() == "重新检查"
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_ready_update_requires_inline_restart_confirmation(qapp):
+    """重启安装确认必须集成在更新浮层内，不能打开大弹窗。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     controller.state = "ready"
     controller.message = "更新 v9.9.9 已下载"
+    controller._version = "9.9.9"
     window.update_download_controller = controller
     try:
         window.create_status_bar()
         window._connect_update_download_controller()
-
-        assert window._main_update_state == "ready"
-        assert window.update_download_button.text() == "重启更新"
         window.update_download_button.click()
-        assert controller.show_progress_dialog_calls == 1
+
+        assert window.update_center_popover.primary_button.text() == "重启更新"
+        window.update_center_popover.primary_button.click()
+        assert controller.install_ready_update_calls == 0
+        assert window.update_center_popover.primary_button.text() == "确认重启"
+        window.update_center_popover.primary_button.click()
+        assert controller.install_ready_update_calls == 1
     finally:
+        window.update_center_popover.hide()
         window.close()
         window.deleteLater()
 
 
-def test_download_completion_uses_status_entry_and_toast(qapp):
-    """完成下载后提示右下角入口，入口继续复用主题进度窗。"""
+def test_cancel_download_requires_inline_confirmation(qapp):
+    """取消下载必须在浮层内二次确认。"""
+    window = ToolbarHarness()
+    controller = DownloadControllerStub()
+    controller.state = "downloading"
+    window.update_download_controller = controller
+    try:
+        window.create_status_bar()
+        window._connect_update_download_controller()
+        window.update_download_button.click()
+
+        window.update_center_popover.secondary_button.click()
+        assert controller.cancel_calls == 0
+        assert window.update_center_popover.primary_button.text() == "确认取消"
+        window.update_center_popover.primary_button.click()
+        assert controller.cancel_calls == 1
+    finally:
+        window.update_center_popover.hide()
+        window.close()
+        window.deleteLater()
+
+
+def test_download_completion_uses_version_entry_and_toast(qapp):
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     window.update_download_controller = controller
@@ -356,13 +460,14 @@ def test_download_completion_uses_status_entry_and_toast(qapp):
         window._connect_update_download_controller()
         with patch("ui.main_window.toast_success") as toast:
             controller.state = "ready"
+            controller._version = "9.9.9"
             controller.state_changed.emit("ready", "更新 v9.9.9 已下载")
             controller.download_completed.emit({"version": "9.9.9"})
 
-        assert window.update_download_button.text() == "重启更新"
+        assert "重启更新" in window.update_download_button.text()
         toast.assert_called_once_with(
             window,
-            "更新 v9.9.9 已下载，可点击右下角“重启更新”完成安装",
+            "更新 v9.9.9 已下载，可点击右下角版本按钮完成安装",
         )
     finally:
         window.close()
@@ -370,7 +475,6 @@ def test_download_completion_uses_status_entry_and_toast(qapp):
 
 
 def test_cancelled_download_returns_to_available_update(qapp):
-    """下载取消后应保留线上版本信息，以便用户重新发起下载。"""
     window = ToolbarHarness()
     controller = DownloadControllerStub()
     window.update_download_controller = controller

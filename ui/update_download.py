@@ -11,8 +11,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtWidgets import QApplication
 
 from core.update_utils import (
     DownloadCancelled,
@@ -48,12 +48,14 @@ class UpdateDownloadWorker(QThread):
         version: str,
         token: str,
         destination: Path,
+        proxy: str = "",
         parent: Optional[QObject] = None,
     ):
         super().__init__(parent)
         self.manifest = dict(manifest)
         self.version = version
         self.token = token
+        self.proxy = proxy
         self.destination = destination
         self.partial_path = destination.with_suffix(destination.suffix + ".part")
         self._stop_event = threading.Event()
@@ -132,6 +134,7 @@ class UpdateDownloadWorker(QThread):
                 expected_size=expected_size,
                 retries=3,
                 retry_cb=self._emit_retry,
+                proxy=self.proxy,
             )
             if self._is_stopped():
                 raise DownloadCancelled("更新下载已停止")
@@ -211,14 +214,15 @@ class UpdateDownloadController(QObject):
         self.downloaded = 0
         self.total = 0
         self._worker: Optional[UpdateDownloadWorker] = None
-        self._progress_dialog = None
         self._manifest: Dict[str, Any] = {}
         self._version = ""
         self._token = ""
+        self._proxy = ""
         self._destination: Optional[Path] = None
         cleanup_incomplete_updates()
         ready = load_ready_update()
         if ready:
+            self._version = str(ready["version"])
             self.state = "ready"
             self.message = f"更新 v{ready['version']} 已下载"
             self.downloaded = int(ready.get("actual_size_bytes", 0) or 0)
@@ -238,7 +242,13 @@ class UpdateDownloadController(QObject):
     def has_download_task(self) -> bool:
         return self.is_active or self.state == "paused"
 
-    def start(self, manifest: Dict[str, Any], version: str, token: str = "") -> bool:
+    def start(
+        self,
+        manifest: Dict[str, Any],
+        version: str,
+        token: str = "",
+        proxy: Optional[str] = None,
+    ) -> bool:
         """启动新下载；同一任务存在临时文件时自动从断点继续。"""
         if self._worker is not None and self._worker.isRunning():
             return False
@@ -269,6 +279,12 @@ class UpdateDownloadController(QObject):
         self._manifest = dict(manifest)
         self._version = str(version)
         self._token = token or ""
+        if proxy is None:
+            try:
+                proxy = get_app_config().update_proxy
+            except Exception:
+                proxy = ""
+        self._proxy = str(proxy or "")
         partial_path = self._destination.with_suffix(
             self._destination.suffix + ".part"
         )
@@ -293,6 +309,7 @@ class UpdateDownloadController(QObject):
             self._version,
             self._token,
             self._destination,
+            self._proxy,
             self,
         )
         self._worker.progress_changed.connect(self._on_progress)
@@ -324,11 +341,10 @@ class UpdateDownloadController(QObject):
             self._set_state("failed", "未找到可继续的下载内容，请重新下载")
             return False
         self._restore_pending(pending)
-        if not self._token:
-            try:
-                self._token = get_app_config().update_token or ""
-            except Exception:
-                self._token = ""
+        try:
+            self._proxy = get_app_config().update_proxy
+        except Exception:
+            self._proxy = ""
         return self._start_worker()
 
     def pause(self) -> None:
@@ -362,22 +378,6 @@ class UpdateDownloadController(QObject):
         cleanup_incomplete_updates()
         return True
 
-    def show_progress_dialog(self, parent: Optional[QWidget] = None) -> None:
-        """显示或重新打开下载进度入口。"""
-        from .update_dialog import DownloadProgressDialog
-
-        if self._progress_dialog is None:
-            self._progress_dialog = DownloadProgressDialog(self, parent)
-            self._progress_dialog.destroyed.connect(self._clear_progress_dialog)
-        elif parent is not None and self._progress_dialog.parentWidget() is not parent:
-            # 从设置页启动时挂到设置页上方；从状态栏重开时再挂回主窗口。
-            self._progress_dialog.setParent(parent, Qt.WindowType.Dialog)
-            self._progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        self._progress_dialog.sync_from_controller()
-        self._progress_dialog.show()
-        self._progress_dialog.raise_()
-        self._progress_dialog.activateWindow()
-
     def install_ready_update(self) -> bool:
         """启动持久化更新脚本并退出应用。"""
         ready = load_ready_update()
@@ -401,9 +401,6 @@ class UpdateDownloadController(QObject):
     def discard_ready_update(self) -> None:
         discard_ready_update()
         self._set_state("idle", "")
-
-    def _clear_progress_dialog(self, *_args) -> None:
-        self._progress_dialog = None
 
     def _set_state(self, state: str, message: str) -> None:
         self.state = state
