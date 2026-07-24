@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QMessageBox,
     QPushButton,
+    QLabel,
 )
 
 from ui.components.dialog_utils import (
@@ -106,6 +107,31 @@ def test_themed_message_box_assigns_button_roles(qtbot):
     assert cancel.property("uiRole") == "danger"
     assert confirm.height() == 36
     assert cancel.height() == 36
+    box.close()
+
+
+def test_themed_message_box_does_not_expand_icon_column(qtbot):
+    """消息框图标不能继承正文最小宽度而制造大块左侧空白。"""
+    box = ThemedMessageBox()
+    qtbot.addWidget(box)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText("确定要清除SMB/NAS网络路径的图片缓存吗？")
+    box.setInformativeText("这将删除本地缓存目录中的所有文件。")
+    box.addButton("是", QMessageBox.ButtonRole.YesRole)
+    box.addButton("否", QMessageBox.ButtonRole.NoRole)
+
+    box.show()
+    qtbot.waitUntil(lambda: box.isVisible(), timeout=1000)
+
+    icon_label = box.findChild(QLabel, "qt_msgboxex_icon_label")
+    text_label = box.findChild(QLabel, "qt_msgbox_label")
+    assert icon_label is not None
+    assert text_label is not None
+    assert icon_label.minimumWidth() < 100
+    assert icon_label.width() < text_label.width()
+    assert icon_label.pixmap() is not None
+    assert icon_label.width() >= icon_label.pixmap().deviceIndependentSize().width()
+    assert text_label.x() - icon_label.geometry().right() < 40
     box.close()
 
 

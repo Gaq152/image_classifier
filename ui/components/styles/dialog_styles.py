@@ -282,7 +282,15 @@ class DialogStyles:
                 color: {c.TEXT_PRIMARY};
                 font-size: {default_theme.sizes.FONT_LG};
                 padding: 6px 4px;
+            }}
+            QMessageBox QLabel#qt_msgbox_label,
+            QMessageBox QLabel#qt_msgbox_informativelabel {{
                 min-width: 280px;
+            }}
+            QMessageBox QLabel#qt_msgboxex_icon_label {{
+                min-width: 48px;
+                max-width: 48px;
+                padding: 6px 0px;
             }}
             {ButtonStyles.get_dialog_button_style()}
         """
