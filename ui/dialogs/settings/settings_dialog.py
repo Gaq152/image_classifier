@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QMessageBox, QTabWidget,
     QWidget, QCheckBox, QGroupBox, QScrollArea, QComboBox,
-    QDoubleSpinBox, QSpinBox
+    QDoubleSpinBox, QSpinBox, QToolButton, QToolTip
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent
 
@@ -76,6 +76,25 @@ class SettingsDialog(QDialog):
         # 应用主题样式
         self._apply_theme()
 
+    def _add_info_button(self, layout, text: str) -> QToolButton:
+        """在功能项旁添加可悬浮、可点击的简短说明入口。"""
+        button = QToolButton(self)
+        button.setObjectName("infoButton")
+        button.setText("i")
+        button.setToolTip(text)
+        button.setAccessibleName("查看功能说明")
+        button.setFixedSize(18, 18)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(
+            lambda _checked=False, target=button, message=text: QToolTip.showText(
+                target.mapToGlobal(target.rect().bottomLeft()),
+                message,
+                target,
+            )
+        )
+        layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+        return button
+
     def create_appearance_section(self) -> QGroupBox:
         """创建外观设置区域"""
 
@@ -89,9 +108,14 @@ class SettingsDialog(QDialog):
         theme_layout = QVBoxLayout(theme_group)
         theme_layout.setSpacing(8)
 
+        theme_title_layout = QHBoxLayout()
+        theme_title_layout.setSpacing(6)
         theme_title = QLabel("🌓 主题模式")
         theme_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        theme_layout.addWidget(theme_title)
+        theme_title_layout.addWidget(theme_title)
+        self._add_info_button(theme_title_layout, "选择浅色、深色或跟随系统主题。")
+        theme_title_layout.addStretch()
+        theme_layout.addLayout(theme_title_layout)
 
         # 主题选择下拉列表和自动切换开关（横向布局）
         theme_select_layout = QHBoxLayout()
@@ -112,8 +136,8 @@ class SettingsDialog(QDialog):
         # 自动切换标签和Switch
         auto_label = QLabel("⏰ 自动切换")
         auto_label.setStyleSheet("font-size: 13px;")
-        auto_label.setToolTip("8:00-18:00亮色，其他时间暗色")
         theme_select_layout.addWidget(auto_label)
+        self._add_info_button(theme_select_layout, "每天 8:00-18:00 使用浅色，其余时间使用深色。")
 
         self.auto_theme_switch = Switch()
         self.auto_theme_switch.toggled.connect(self.on_auto_theme_toggled)
@@ -170,9 +194,14 @@ class SettingsDialog(QDialog):
         status_layout.setSpacing(10)
 
         # 标题
+        status_title_layout = QHBoxLayout()
+        status_title_layout.setSpacing(6)
         status_title = QLabel("📚 教程状态")
         status_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        status_layout.addWidget(status_title)
+        status_title_layout.addWidget(status_title)
+        self._add_info_button(status_title_layout, "查看教程状态，或重新启动交互式教程。")
+        status_title_layout.addStretch()
+        status_layout.addLayout(status_title_layout)
 
         # 确定当前状态
         if self.app_config.tutorial_completed:
@@ -314,6 +343,7 @@ class SettingsDialog(QDialog):
         log_title = QLabel("📋 日志保存级别")
         log_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         log_header_layout.addWidget(log_title)
+        self._add_info_button(log_header_layout, "控制写入日志文件的最低消息级别。")
 
         log_header_layout.addStretch()
 
@@ -353,6 +383,7 @@ class SettingsDialog(QDialog):
         toast_title = QLabel("💬 Toast提示级别")
         toast_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         toast_header_layout.addWidget(toast_title)
+        self._add_info_button(toast_header_layout, "控制界面右上角显示的最低提示级别。")
 
         toast_header_layout.addStretch()
 
@@ -386,20 +417,22 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
-        description = QLabel(
-            "留空时直接连接 GitHub。支持本地 Clash HTTP 代理，"
-            "也支持 ghfast.top 这类 GitHub 加速地址。"
+        proxy_header = QHBoxLayout()
+        proxy_header.setSpacing(6)
+        proxy_label = QLabel("代理地址")
+        proxy_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        proxy_header.addWidget(proxy_label)
+        self._add_info_button(
+            proxy_header,
+            "用于检查和下载更新；支持 HTTP 代理或 GitHub 加速地址，留空直连。",
         )
-        description.setWordWrap(True)
-        layout.addWidget(description)
+        proxy_header.addStretch()
+        layout.addLayout(proxy_header)
 
         input_row = QHBoxLayout()
         input_row.setSpacing(10)
         self.update_proxy_input = QLineEdit()
         self.update_proxy_input.setText(self.app_config.update_proxy)
-        self.update_proxy_input.setPlaceholderText(
-            "http://127.0.0.1:7890 或 https://ghfast.top"
-        )
         self.update_proxy_input.setMinimumHeight(36)
         self.update_proxy_input.returnPressed.connect(self.save_update_proxy)
         input_row.addWidget(self.update_proxy_input, 1)
@@ -409,10 +442,6 @@ class SettingsDialog(QDialog):
         save_button.clicked.connect(self.save_update_proxy)
         input_row.addWidget(save_button)
         layout.addLayout(input_row)
-
-        hint = QLabel("该配置会同时用于检查更新和更新包下载。")
-        hint.setObjectName("secondaryText")
-        layout.addWidget(hint)
         return group
 
     def create_directory_section(self) -> QGroupBox:
@@ -436,6 +465,7 @@ class SettingsDialog(QDialog):
         dir_title = QLabel("📁 最后打开的目录")
         dir_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         dir_header_layout.addWidget(dir_title)
+        self._add_info_button(dir_header_layout, "记录最近打开的工作目录，可随时清除记录。")
 
         dir_header_layout.addStretch()
 
@@ -501,6 +531,7 @@ class SettingsDialog(QDialog):
         smb_title = QLabel("🌐 SMB/NAS 缓存")
         smb_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         smb_header_layout.addWidget(smb_title)
+        self._add_info_button(smb_header_layout, "缓存网络图片以减少重复读取，可手动清理。")
 
         smb_header_layout.addStretch()
 
@@ -560,6 +591,7 @@ class SettingsDialog(QDialog):
         warmup_title = QLabel("🔥 缓存预热")
         warmup_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         warmup_header_layout.addWidget(warmup_title)
+        self._add_info_button(warmup_header_layout, "打开网络目录时预先缓存前几张图片。")
 
         warmup_header_layout.addStretch()
 
@@ -584,6 +616,7 @@ class SettingsDialog(QDialog):
         warmup_count_label = QLabel("预热图片数量：")
         warmup_count_label.setStyleSheet("font-size: 13px;")
         warmup_count_layout.addWidget(warmup_count_label)
+        self._add_info_button(warmup_count_layout, "设置打开网络目录时预先缓存的图片数量。")
 
         # 自定义SpinBox布局：输入框 + 上下按钮 + 单位
         spinbox_container = QWidget()
@@ -628,12 +661,6 @@ class SettingsDialog(QDialog):
 
         warmup_layout.addWidget(warmup_count_widget)
 
-        # 预热说明
-        warmup_desc = QLabel("💡 预热功能会在打开网络目录时，主动预加载前N张图片到缓存，加快首次浏览速度。")
-        warmup_desc.setWordWrap(True)
-        warmup_desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 5px 0;")
-        warmup_layout.addWidget(warmup_desc)
-
         layout.addWidget(warmup_group)
 
         # 循环翻页设置
@@ -642,9 +669,14 @@ class SettingsDialog(QDialog):
         loop_layout.setSpacing(10)
 
         # 标题
+        loop_title_layout = QHBoxLayout()
+        loop_title_layout.setSpacing(6)
         loop_title = QLabel("🔄 循环翻页")
         loop_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        loop_layout.addWidget(loop_title)
+        loop_title_layout.addWidget(loop_title)
+        self._add_info_button(loop_title_layout, "到达列表首尾时继续翻页会跳转到另一端。")
+        loop_title_layout.addStretch()
+        loop_layout.addLayout(loop_title_layout)
 
         # 本地路径循环开关
         local_loop_widget = QWidget()
@@ -655,6 +687,7 @@ class SettingsDialog(QDialog):
         local_loop_label = QLabel("本地路径循环：")
         local_loop_label.setStyleSheet("font-size: 13px;")
         local_loop_layout.addWidget(local_loop_label)
+        self._add_info_button(local_loop_layout, "控制本地目录是否循环翻页。")
 
         self.local_loop_switch = Switch()
         self.local_loop_switch.setChecked(self.app_config.local_loop_enabled)
@@ -663,12 +696,6 @@ class SettingsDialog(QDialog):
 
         local_loop_layout.addStretch()
         loop_layout.addWidget(local_loop_widget)
-
-        # 本地循环说明
-        local_loop_desc = QLabel("💡 本地文件读取速度快，建议开启循环翻页")
-        local_loop_desc.setWordWrap(True)
-        local_loop_desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 5px 0;")
-        loop_layout.addWidget(local_loop_desc)
 
         # 网络路径循环开关
         network_loop_widget = QWidget()
@@ -679,6 +706,7 @@ class SettingsDialog(QDialog):
         network_loop_label = QLabel("网络路径循环：")
         network_loop_label.setStyleSheet("font-size: 13px;")
         network_loop_layout.addWidget(network_loop_label)
+        self._add_info_button(network_loop_layout, "启用后会额外预热列表末尾，打开目录会稍慢。")
 
         self.network_loop_switch = Switch()
         self.network_loop_switch.setChecked(self.app_config.network_loop_enabled)
@@ -688,12 +716,6 @@ class SettingsDialog(QDialog):
         network_loop_layout.addStretch()
         loop_layout.addWidget(network_loop_widget)
 
-        # 网络循环说明
-        network_loop_desc = QLabel("⚠️ 开启后将额外预热末尾图片（约增加预热时间50%），建议按需开启")
-        network_loop_desc.setWordWrap(True)
-        network_loop_desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 5px 0;")
-        loop_layout.addWidget(network_loop_desc)
-
         layout.addWidget(loop_group)
 
         # 配置文件信息
@@ -701,9 +723,14 @@ class SettingsDialog(QDialog):
         info_layout = QVBoxLayout(info_group)
         info_layout.setSpacing(10)
 
+        info_title_layout = QHBoxLayout()
+        info_title_layout.setSpacing(6)
         info_title = QLabel("ℹ️ 配置信息")
         info_title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        info_layout.addWidget(info_title)
+        info_title_layout.addWidget(info_title)
+        self._add_info_button(info_title_layout, "显示当前配置格式版本和配置文件位置。")
+        info_title_layout.addStretch()
+        info_layout.addLayout(info_title_layout)
 
         version_label = QLabel(f"配置文件版本：{self.app_config._config.get('version', '未知')}")
         info_layout.addWidget(version_label)
@@ -720,8 +747,6 @@ class SettingsDialog(QDialog):
 
     def create_window_section(self) -> QGroupBox:
         """创建窗口行为设置区域"""
-        c = default_theme.colors
-
         group = QGroupBox("🖥️ 窗口")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(15, 15, 15, 15)
@@ -736,6 +761,7 @@ class SettingsDialog(QDialog):
         geo_label = QLabel("📐 记住窗口位置和大小")
         geo_label.setStyleSheet("font-size: 13px; font-weight: bold;")
         geo_layout.addWidget(geo_label)
+        self._add_info_button(geo_layout, "退出时保存窗口位置、大小和最大化状态。")
 
         geo_layout.addStretch()
 
@@ -749,12 +775,6 @@ class SettingsDialog(QDialog):
         geo_layout.addWidget(self.remember_geometry_switch)
 
         layout.addWidget(geo_widget)
-
-        # 说明
-        desc = QLabel("💡 关闭程序时保存窗口位置和大小，下次启动原位还原。多显示器场景下，若原位置对应的显示器不存在会自动回退到主屏幕居中。")
-        desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {c.TEXT_SECONDARY}; font-size: 12px; padding: 0 0 5px 0;")
-        layout.addWidget(desc)
 
         return group
 
@@ -781,16 +801,17 @@ class SettingsDialog(QDialog):
         zoom_title = QLabel("🔍 缩放范围")
         zoom_title.setStyleSheet("font-size: 14px; font-weight: bold;")
         header_layout.addWidget(zoom_title)
+        self._add_info_button(header_layout, "限制图片可缩小和放大的范围。")
 
         header_layout.addStretch()
 
         # 全局应用缩放开关（横向布局）
         apply_label = QLabel("全局应用缩放倍数")
         header_layout.addWidget(apply_label)
+        self._add_info_button(header_layout, "启用后翻页会沿用当前缩放倍数。")
 
         self.remember_zoom_checkbox = Switch()
         self.remember_zoom_checkbox.setChecked(self.app_config.global_zoom_enabled)
-        self.remember_zoom_checkbox.setToolTip("启用后，当前的缩放倍数会应用到所有图片。关闭后，每次翻页都会恢复默认适应窗口模式")
         self.remember_zoom_checkbox.toggled.connect(self.on_remember_zoom_changed)
         header_layout.addWidget(self.remember_zoom_checkbox)
 
@@ -817,7 +838,6 @@ class SettingsDialog(QDialog):
         self.zoom_max_spinbox.setMinimumHeight(32)
         self.zoom_max_spinbox.setMinimumWidth(80)  # 增加宽度以完整显示数字
         self.zoom_max_spinbox.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)  # 隐藏内置按钮
-        self.zoom_max_spinbox.setToolTip("设置图片缩放的最大倍数（范围：1.0-20.0）")
         # 禁用滚轮调整
         self.zoom_max_spinbox.wheelEvent = lambda event: None
         self.zoom_max_spinbox.valueChanged.connect(self.on_zoom_max_changed)
@@ -853,7 +873,6 @@ class SettingsDialog(QDialog):
         self.zoom_min_spinbox.setMinimumHeight(32)
         self.zoom_min_spinbox.setMinimumWidth(80)  # 增加宽度以完整显示数字
         self.zoom_min_spinbox.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)  # 隐藏内置按钮
-        self.zoom_min_spinbox.setToolTip("设置图片缩放的最小倍数（范围：0.01-1.0）")
         # 禁用滚轮调整
         self.zoom_min_spinbox.wheelEvent = lambda event: None
         self.zoom_min_spinbox.valueChanged.connect(self.on_zoom_min_changed)
@@ -1377,6 +1396,21 @@ class SettingsDialog(QDialog):
             }}
             QLineEdit:focus {{
                 border: 1px solid {c.PRIMARY};
+            }}
+            QToolButton#infoButton {{
+                color: {c.TEXT_SECONDARY};
+                background-color: transparent;
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: 9px;
+                padding: 0;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QToolButton#infoButton:hover,
+            QToolButton#infoButton:pressed {{
+                color: {c.PRIMARY};
+                background-color: {c.PRIMARY_LIGHT};
+                border-color: {c.PRIMARY};
             }}
             QCheckBox {{
                 color: {c.TEXT_PRIMARY};

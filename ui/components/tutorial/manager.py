@@ -321,7 +321,7 @@ class TutorialManager:
                         '• <b>使用指南</b>：详细功能说明<br>'
                         '• <b>高级功能</b>：进阶使用技巧<br>'
                         '• <b>常见问题</b>：常见问题解答<br>'
-                        '• <b>关于</b>：版本信息和更新日志<br><br>'
+                        '• <b>关于</b>：版本信息和联系方式<br><br>'
                         '如需重新学习教程，请到<b>设置面板</b>中操作。',
                 target_widget_name="help_button",
                 arrow_position=ArrowPosition.TOP,
@@ -468,16 +468,7 @@ class TutorialManager:
                 menu_width = 200
                 spacing = 20  # 气泡和菜单之间的间距
 
-                # 计算虚拟菜单的位置
-                target_pos = target_widget.mapTo(self.main_window, target_widget.rect().topLeft())
-                target_rect = target_widget.rect()
-
-                # 虚拟菜单右对齐：菜单右边缘 = 按钮右边缘
-                menu_right = target_pos.x() + target_rect.width()
-                menu_left = menu_right - menu_width
-
                 # 气泡应该在虚拟菜单左侧
-                # adjusted_offset_x应该让气泡显示在menu_left左侧
                 # 计算需要的偏移量：从按钮位置算起，要移动到菜单左侧再减去气泡宽度和间距
                 # 简化：直接使用负的偏移量
                 adjusted_offset_x = -(menu_width + spacing)
@@ -743,7 +734,7 @@ class TutorialManager:
         """
         # 特殊处理：如果要查找整个主窗口
         if widget_name == "main_window":
-            self.logger.debug(f"[OK] 返回主窗口: main_window")
+            self.logger.debug("[OK] 返回主窗口: main_window")
             return self.main_window
 
         # 优先尝试直接通过属性访问（更可靠）

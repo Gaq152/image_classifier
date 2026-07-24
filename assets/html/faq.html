@@ -20,17 +20,17 @@
 <p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> <b>单分类模式</b>：再次点击已分类的类别按钮可以撤销分类（复制模式移除该文件，移动模式文件返回原目录）。<b>多分类模式</b>：再次点击已分类的类别按钮可以移除该分类。<b>撤销删除</b>：再次按 Delete 键可以从 remove 目录恢复。</p>
 
 <h4 style="color: {{primary}}; margin-top: 15px;">Q: 如何重新开始新手教程？</h4>
-<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 在菜单栏点击"帮助" → "显示新手教程"即可重新启动交互式引导教程。</p>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 打开“设置” → “基本设置” → “教程设置”，点击“重新开始教程”。</p>
 
-<h4 style="color: {{primary}}; margin-top: 15px;">Q: 如何开启自动更新功能？</h4>
-<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 在菜单栏点击"设置"打开设置面板，在"更新"选项中开启"自动检查更新"。程序会定期检查新版本，下载完成后提示重启更新。也可以在帮助菜单中手动点击"检查更新"。</p>
+<h4 style="color: {{primary}}; margin-top: 15px;">Q: 如何检查和安装更新？</h4>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序默认在后台检查更新。点击右下角版本号可打开更新中心，手动检查、下载或安装新版本。</p>
 </div>
 
 <h3 style="color: {{text_primary}}; margin-top: 20px;">网络存储</h3>
 
 <div style="background-color: {{bg_hover}}; padding: 15px; border-left: 4px solid {{primary}}; margin: 15px 0;">
 <h4 style="color: {{primary}};">Q: 支持网络驱动器（NAS）吗？</h4>
-<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 支持，默认启用"网络路径优化"设置以提高性能。</p>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 支持，程序会自动对 SMB/NAS 路径启用缓存和预加载策略。</p>
 
 <h4 style="color: {{primary}}; margin-top: 15px;">Q: 网络断开后程序崩溃？</h4>
 <p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序有文件操作重试机制，网络操作失败时会自动重试3次。建议保持网络稳定以获得最佳性能。</p>
@@ -46,10 +46,10 @@
 <p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序会根据图片数量和系统性能自动调整优化策略，包括减少动画效果和智能预加载。</p>
 
 <h4 style="color: {{primary}}; margin-top: 15px;">Q: 内存占用过高？</h4>
-<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序会自动管理内存，也可以手动清理缓存（帮助对话框中的清理按钮）。</p>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 程序会自动管理图片缓存。网络缓存可在“设置” → “高级设置”中查看和清理。</p>
 
 <h4 style="color: {{primary}}; margin-top: 15px;">Q: 如何清理程序产生的缓存？</h4>
-<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 在帮助对话框中点击"清理SMB缓存"按钮，或手动删除用户目录下的 .image_classifier_cache 文件夹。</p>
+<p style="line-height: 1.6; color: {{text_primary}};"><b>A:</b> 打开“设置” → “高级设置” → “网络缓存”，点击“清除SMB缓存”。</p>
 </div>
 
 <h3 style="color: {{text_primary}}; margin-top: 20px;">故障排除</h3>

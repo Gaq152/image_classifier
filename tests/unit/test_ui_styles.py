@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QLineEdit,
@@ -13,6 +14,11 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QLabel,
+    QTabWidget,
+    QTextBrowser,
+    QToolButton,
+    QSizePolicy,
+    QWidget,
 )
 
 from ui.components.dialog_utils import (
@@ -212,6 +218,41 @@ def test_settings_only_exposes_update_proxy(qtbot):
     assert "检查更新" not in button_texts
 
 
+def test_settings_uses_compact_info_buttons_for_feature_help(qtbot):
+    from ui.dialogs.settings.settings_dialog import SettingsDialog
+
+    dialog = SettingsDialog()
+    qtbot.addWidget(dialog)
+
+    info_buttons = dialog.findChildren(QToolButton, "infoButton")
+    assert len(info_buttons) >= 15
+    assert all(button.toolTip() for button in info_buttons)
+    assert all(len(button.toolTip()) <= 50 for button in info_buttons)
+    assert all((button.width(), button.height()) == (18, 18) for button in info_buttons)
+
+    with patch(
+        "ui.dialogs.settings.settings_dialog.QToolTip.showText"
+    ) as show_tooltip:
+        info_buttons[0].click()
+
+    show_tooltip.assert_called_once()
+
+
+def test_settings_hides_inline_descriptions_and_proxy_placeholder(qtbot):
+    from ui.dialogs.settings.settings_dialog import SettingsDialog
+
+    dialog = SettingsDialog()
+    qtbot.addWidget(dialog)
+
+    visible_text = "\n".join(label.text() for label in dialog.findChildren(QLabel))
+    assert dialog.update_proxy_input.placeholderText() == ""
+    assert "留空时直接连接 GitHub" not in visible_text
+    assert "预热功能会在打开网络目录时" not in visible_text
+    assert "建议开启循环翻页" not in visible_text
+    assert "约增加预热时间" not in visible_text
+    assert "关闭程序时保存窗口位置和大小" not in visible_text
+
+
 def test_settings_normalizes_and_saves_clash_proxy(qtbot):
     from ui.dialogs.settings.settings_dialog import SettingsDialog
 
@@ -255,3 +296,40 @@ def test_help_contact_metadata_uses_current_brand():
         "company": "anlife",
         "copyright_year": "2024",
     }
+
+
+def test_help_dialog_has_compact_about_page_without_version_history(qtbot):
+    from ui.dialogs.help_dialog import TabbedHelpDialog
+
+    dialog = TabbedHelpDialog("7.2.1")
+    qtbot.addWidget(dialog)
+
+    tab_widget = dialog.findChild(QTabWidget)
+    about_tab = tab_widget.widget(3)
+    about_text = about_tab.findChild(QTextBrowser).toPlainText()
+    hero = about_tab.findChild(QWidget, "aboutHero")
+    logo = about_tab.findChild(QLabel, "aboutLogo")
+    app_name = about_tab.findChild(QLabel, "aboutAppName")
+
+    assert dialog.layout().count() == 1
+    assert hero.height() == 164
+    assert hero.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Fixed
+    assert app_name.text() == "图片分类工具"
+    assert app_name.alignment() == Qt.AlignmentFlag.AlignCenter
+    assert logo.pixmap() is not None
+    assert logo.pixmap().width() == 52
+    assert "主要功能" in about_text
+    assert "版本发展历程" not in about_text
+    assert "更新日志" not in about_text
+
+
+def test_help_templates_use_current_feature_names():
+    html_root = Path(__file__).resolve().parents[2] / "assets" / "html"
+    rendered_help = "\n".join(
+        (html_root / name).read_text(encoding="utf-8")
+        for name in ("quick_start.html", "user_guide.html", "faq.html", "about.html")
+    )
+
+    assert "新增类别" not in rendered_help
+    assert "点击右下角版本号可打开更新中心" in rendered_help
+    assert "版本发展历程" not in rendered_help

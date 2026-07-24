@@ -2,21 +2,21 @@
 
 import logging
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QTabWidget, QWidget, QTextBrowser, QApplication
+    QDialog, QVBoxLayout, QLabel,
+    QTabWidget, QWidget, QTextBrowser, QApplication, QSizePolicy
 )
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QDesktopServices, QPixmap
 
 from ..components.toast import toast_success, toast_error
 from ..components.styles.theme import default_theme
 from ..components.styles import DialogStyles
 from ..components.dialog_utils import configure_dialog
-from _version_ import CONTACT_INFO, VERSION_HISTORY, get_about_info
+from _version_ import CONTACT_INFO, get_about_info
 
 
 class TabbedHelpDialog(QDialog):
@@ -75,7 +75,6 @@ class TabbedHelpDialog(QDialog):
             'support_email': CONTACT_INFO['support_email'],
             'company': CONTACT_INFO['company'],
             'copyright_year': CONTACT_INFO['copyright_year'],
-            'version_history': self._generate_version_history_html(),
         }
 
     def _load_html_template(self, template_name):
@@ -104,23 +103,6 @@ class TabbedHelpDialog(QDialog):
         except Exception as e:
             self.logger.error(f"加载HTML模板失败: {template_name}, 错误: {e}")
             return f"<p>加载失败: {e}</p>"
-
-    def _get_git_branch(self):
-        """获取当前 git 分支名称"""
-        try:
-            result = subprocess.run(
-                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                capture_output=True,
-                text=True,
-                timeout=3,
-                cwd=Path(__file__).parent.parent
-            )
-            if result.returncode == 0:
-                branch = result.stdout.strip()
-                return branch if branch else 'main'
-        except Exception as e:
-            self.logger.debug(f"获取 git 分支失败: {e}")
-        return 'main'
 
     def _get_dialog_style(self):
         """根据当前主题获取对话框样式"""
@@ -170,6 +152,25 @@ class TabbedHelpDialog(QDialog):
             }}
             QLabel {{
                 color: {c.TEXT_PRIMARY};
+            }}
+            QWidget#aboutHero {{
+                background-color: {c.BACKGROUND_HOVER};
+                border: 1px solid {c.BORDER_MEDIUM};
+                border-radius: 8px;
+            }}
+            QLabel#aboutAppName {{
+                color: {c.TEXT_PRIMARY};
+                font-size: 22px;
+                font-weight: bold;
+            }}
+            QLabel#aboutVersion {{
+                color: {c.PRIMARY};
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QLabel#aboutDescription {{
+                color: {c.TEXT_SECONDARY};
+                font-size: 13px;
             }}
         """
 
@@ -260,6 +261,58 @@ class TabbedHelpDialog(QDialog):
 
         return widget
 
+    def _create_about_tab(self):
+        """创建带应用标识的关于页。"""
+        widget = self._create_browser_tab('about.html', enable_links=True)
+        layout = widget.layout()
+
+        hero = QWidget()
+        hero.setObjectName("aboutHero")
+        hero.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        hero.setFixedHeight(164)
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(16, 12, 16, 12)
+        hero_layout.setSpacing(3)
+
+        icon_label = QLabel()
+        icon_label.setObjectName("aboutLogo")
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 关于页使用高分辨率 PNG；直接缩放 ICO 可能选中小尺寸帧而发糊。
+        icon_path = self._get_resource_path('assets/icon.png')
+        if icon_path:
+            pixmap = QPixmap(str(icon_path))
+            if not pixmap.isNull():
+                icon_label.setPixmap(
+                    pixmap.scaled(
+                        52,
+                        52,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+        hero_layout.addWidget(icon_label)
+
+        name_label = QLabel("图片分类工具")
+        name_label.setObjectName("aboutAppName")
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hero_layout.addWidget(name_label)
+
+        version_label = QLabel(f"版本 {self.version}")
+        version_label.setObjectName("aboutVersion")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hero_layout.addWidget(version_label)
+
+        description_label = QLabel("面向大量图片整理与分类的本地桌面工具")
+        description_label.setObjectName("aboutDescription")
+        description_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hero_layout.addWidget(description_label)
+
+        layout.insertWidget(0, hero)
+        return widget
+
     def initUI(self):
         """初始化UI"""
         try:
@@ -276,18 +329,9 @@ class TabbedHelpDialog(QDialog):
             tab_widget.addTab(self._create_browser_tab('quick_start.html'), '快速入门')
             tab_widget.addTab(self._create_browser_tab('user_guide.html'), '使用指南')
             tab_widget.addTab(self._create_browser_tab('faq.html', enable_links=True), '常见问题')
-            tab_widget.addTab(self._create_browser_tab('about.html', enable_links=True), '关于')
+            tab_widget.addTab(self._create_about_tab(), '关于')
 
             layout.addWidget(tab_widget)
-
-            # 提示信息
-            hint_layout = QHBoxLayout()
-            hint_layout.addStretch()
-            hint_label = QLabel("💡 提示：更多设置请点击工具栏的 ⚙️ 设置按钮")
-            hint_label.setStyleSheet("font-size: 12px; padding: 10px;")
-            hint_layout.addWidget(hint_label)
-            hint_layout.addStretch()
-            layout.addLayout(hint_layout)
 
             self._apply_theme()
 
@@ -309,69 +353,3 @@ class TabbedHelpDialog(QDialog):
         except Exception as e:
             self.logger.error(f"处理链接点击失败: {e}")
             toast_error(self, f'操作失败: {e}')
-
-    def _generate_version_history_html(self):
-        """生成版本历史HTML内容（动态内容，保留在Python中）"""
-        html_parts = []
-        c = default_theme.colors
-
-        # 根据主题选择版本样式配色
-        if default_theme.is_dark:
-            version_styles = [
-                {"bg": "#1e3a1e", "border": "#4caf50", "text": "#81c784", "emoji": "🎉", "label": "(当前版本)"},
-                {"bg": "#1a2a3a", "border": "#2196f3", "text": "#64b5f6", "emoji": "✨", "label": ""},
-                {"bg": "#2a2a2a", "border": "#6c757d", "text": "#b0b0b0", "emoji": "🚀", "label": ""},
-            ]
-        else:
-            version_styles = [
-                {"bg": "#e8f5e8", "border": "#4caf50", "text": "#2e7d32", "emoji": "🎉", "label": "(当前版本)"},
-                {"bg": "#f0f7ff", "border": "#2196f3", "text": "#1565c0", "emoji": "✨", "label": ""},
-                {"bg": "#f8f9fa", "border": "#6c757d", "text": "#495057", "emoji": "🚀", "label": ""},
-            ]
-
-        # 只展示最近的3个版本
-        recent_versions = VERSION_HISTORY[:3]
-
-        for i, version_info in enumerate(recent_versions):
-            style = version_styles[min(i, len(version_styles) - 1)]
-            version_label = style["label"] if i == 0 else ""
-
-            html_part = f'''
-            <div style="background-color: {style["bg"]}; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid {style["border"]};">
-            <h4 style="color: {style["text"]}; margin: 0 0 10px 0;">{style["emoji"]} v{version_info["version"]} {version_label} - {version_info["date"]}</h4>
-            '''
-
-            if version_info.get("title"):
-                html_part += f'<p style="margin: 0 0 10px 0; font-weight: bold; color: {style["text"]};">{version_info["title"]}</p>'
-
-            if version_info.get("highlights"):
-                html_part += f'<ul style="margin: 5px 0; padding-left: 20px; color: {c.TEXT_PRIMARY};">'
-                for highlight in version_info["highlights"]:
-                    html_part += f'<li>{highlight}</li>'
-                html_part += '</ul>'
-            elif version_info.get("details"):
-                html_part += f'<ul style="margin: 5px 0; padding-left: 20px; color: {c.TEXT_PRIMARY};">'
-                for detail in version_info["details"][:4]:
-                    html_part += f'<li>{detail}</li>'
-                html_part += '</ul>'
-
-            html_part += '</div>'
-            html_parts.append(html_part)
-
-        # 查看更多链接
-        if len(VERSION_HISTORY) > 3:
-            branch = self._get_git_branch()
-            changelog_url = f"https://github.com/Gaq152/image_classifier/blob/{branch}/CHANGELOG.md"
-            changelog_link = f'''
-            <div style="background-color: {c.BACKGROUND_HOVER}; padding: 15px; border-radius: 8px; margin: 10px 0; text-align: center; border: 1px dashed {c.BORDER_MEDIUM};">
-            <p style="margin: 0; color: {c.TEXT_SECONDARY};">
-            查看更多版本历史，请访问：<br>
-            <a href="{changelog_url}" style="color: {c.PRIMARY}; text-decoration: none; font-weight: bold; font-size: 14px;">
-            📋 完整更新日志 (CHANGELOG.md)
-            </a>
-            </p>
-            </div>
-            '''
-            html_parts.append(changelog_link)
-
-        return '\n'.join(html_parts)
