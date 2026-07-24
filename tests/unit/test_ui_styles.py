@@ -299,9 +299,10 @@ def test_help_contact_metadata_uses_current_brand():
 
 
 def test_help_dialog_has_compact_about_page_without_version_history(qtbot):
+    from _version_ import __version__
     from ui.dialogs.help_dialog import TabbedHelpDialog
 
-    dialog = TabbedHelpDialog("7.2.1")
+    dialog = TabbedHelpDialog(__version__)
     qtbot.addWidget(dialog)
 
     tab_widget = dialog.findChild(QTabWidget)
