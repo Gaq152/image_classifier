@@ -4,8 +4,7 @@ FileOperationManager 单元测试
 
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch, call
-import shutil
+from unittest.mock import Mock, patch
 
 from ui.managers.file_operation_manager import FileOperationManager
 
@@ -48,6 +47,7 @@ def mock_ui():
     ui.refresh_category_buttons_style = Mock()
     ui.apply_image_filter = Mock()
     ui.is_image_filter_active = Mock(return_value=False)
+    ui.refresh_image_filter_path = None
     ui.show_progress_dialog = Mock()
     ui.show_question = Mock(return_value=False)
     ui.show_toast = Mock()
@@ -131,7 +131,7 @@ class TestFileOperationManager:
         mock_state.classified_images = {}
         file_path = "/test/images/test.jpg"
 
-        with patch('shutil.copy2') as mock_copy:
+        with patch('shutil.copy2'):
             with qtbot.waitSignal(manager.file_moved, timeout=1000):
                 manager.move_to_category(file_path, "category1")
 
@@ -155,13 +155,13 @@ class TestFileOperationManager:
 
         mock_ui.apply_image_filter.assert_not_called()
 
-    def test_move_to_category_rebuilds_model_when_filter_is_active(
+    def test_move_to_category_falls_back_to_model_reset_for_legacy_ui_hook(
         self,
         manager,
         mock_state,
         mock_ui,
     ):
-        """筛选或搜索启用时，分类后仍需重新计算可见列表。"""
+        """旧 UIHooks 未提供增量接口时，筛选场景仍可回退完整刷新。"""
         mock_state.is_multi_category = False
         mock_ui.is_image_filter_active.return_value = True
 
@@ -169,6 +169,24 @@ class TestFileOperationManager:
             manager.move_to_category("/test/images/test.jpg", "category1")
 
         mock_ui.apply_image_filter.assert_called_once_with(suppress_show=True)
+
+    def test_move_to_category_prefers_incremental_filter_update(
+        self,
+        manager,
+        mock_state,
+        mock_ui,
+    ):
+        """新 UIHooks 应只更新受影响路径，不再重置图片列表模型。"""
+        mock_state.is_multi_category = False
+        mock_ui.is_image_filter_active.return_value = True
+        mock_ui.refresh_image_filter_path = Mock(return_value="removed")
+        file_path = "/test/images/test.jpg"
+
+        with patch.object(manager, '_execute_file_operation_with_check'):
+            manager.move_to_category(file_path, "category1")
+
+        mock_ui.refresh_image_filter_path.assert_called_once_with(file_path)
+        mock_ui.apply_image_filter.assert_not_called()
 
     def test_move_to_category_emits_logical_path_when_restoring_removed_image(
         self,
@@ -546,10 +564,7 @@ class TestFileOperationManager:
         # 验证：remove_readonly 被调用
         assert mock_remove_ro.called
 
-        # 验证：显示警告toast
-        warning_calls = [c for c in mock_ui.show_toast.call_args_list
-                        if c[0][0] == 'warning']
-        # 可能会有警告（取决于实现）
+        # 该兼容分支允许实现按实际文件状态决定是否提示警告。
 
     # ========== 新增测试：模式迁移流程 ==========
 

@@ -16,7 +16,7 @@ from pathlib import Path
 import shutil
 import hashlib
 import logging
-from typing import Optional, Union, List
+from typing import Optional, List
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -160,16 +160,39 @@ class FileOperationManager(QObject):
                     self._maybe_remove_copied_file(real_path, old_category)
 
             self._ui.save_state()
-            self._ui.schedule_ui_update('category_buttons', 'category_counts', 'statistics', 'ui_state')
+            self._ui.schedule_ui_update('category_counts', 'statistics', 'ui_state')
             self._ui.refresh_category_buttons_style()
 
-            # 默认全部显示且未搜索时，分类只改变单行状态，无需重置整个模型。
-            # 仅在筛选或搜索会改变列表内容时重新应用过滤。
-            is_filter_active = getattr(self._ui, 'is_image_filter_active', None)
-            if is_filter_active is None or is_filter_active():
-                self._ui.apply_image_filter(suppress_show=True)
+            # 先导航到下一张，再从筛选模型中移除上一张。QListView 使用
+            # Batched 布局时，反过来执行会让当前索引暂时没有 visualRect；
+            # 快速连续分类又会不断重启 50ms 校准定时器，列表便持续空白。
+            original_index = self._state.current_index
             if not self._state.is_multi_category:
                 self._navigator.next_image()
+
+            # 优先增量更新受影响的单行。旧 UIHooks 没有实现该接口时才
+            # 回退到完整过滤，避免万级列表在每次分类后 beginResetModel。
+            refresh_filter_path = getattr(
+                self._ui,
+                'refresh_image_filter_path',
+                None,
+            )
+            filter_action = None
+            if callable(refresh_filter_path):
+                filter_action = refresh_filter_path(file_path)
+            else:
+                is_filter_active = getattr(self._ui, 'is_image_filter_active', None)
+                if is_filter_active is None or is_filter_active():
+                    self._ui.apply_image_filter(suppress_show=True)
+
+            # 当前项是最后一张且未启用循环时，next_image 不会移动。
+            # 如果它随后被筛选移除，选择最近的剩余项，避免留下空视窗。
+            if (
+                filter_action == 'removed'
+                and not self._state.is_multi_category
+                and self._state.current_index == original_index
+            ):
+                self._navigator.select_after_removal(original_index)
 
             target_dir = self._get_parent_dir() / category_name
             # UI 模型始终以原始逻辑路径为键；从 remove/旧分类恢复时 real_path
@@ -285,7 +308,7 @@ class FileOperationManager(QObject):
                         except Exception as e:
                             # 副本删除失败，但仍然清除分类记录（原图还在原目录）
                             self._logger.warning("删除副本失败（文件可能被占用），但已清除分类记录: %s", e)
-                            self._ui.show_toast('warning', f"副本删除失败（文件被占用），但已清除分类记录\n建议：关闭占用文件的程序后手动删除")
+                            self._ui.show_toast('warning', "副本删除失败（文件被占用），但已清除分类记录\n建议：关闭占用文件的程序后手动删除")
             else:
                 # 移动模式：搬回原目录（兼容异常状态：多分类记录时找第一个存在的文件）
                 category_file = None
@@ -530,7 +553,6 @@ class FileOperationManager(QObject):
             op = "移动"
 
         self._logger.info("文件%s成功: %s -> %s", op, source_file.name, target_file)
-        self.file_moved.emit(str(source_file), str(target_file))
 
     def _move_from_category_to_remove(self, file_path: str, old_category: str) -> None:
         """

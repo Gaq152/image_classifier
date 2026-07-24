@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QListView
 
 from ui.managers.file_operation_manager import FileOperationManager
 from ui.managers.image_navigation_manager import ImageNavigationManager
+from ui.main_window import ImageClassifier
 from ui.models.image_list_model import ImageListModel
 
 
@@ -104,6 +105,36 @@ class LargeListUI:
         pass
 
 
+class IncrementalFilterUI(LargeListUI):
+    """复用主窗口真实增量筛选逻辑，避免测试替身掩盖模型重置。"""
+
+    def __init__(self, state, model):
+        super().__init__(state, model)
+        self.image_files = state.image_files
+        self.image_list_model = model
+        self.classified_images = state.classified_images
+        self.removed_images = state.removed_images
+        self.categories = state.categories
+        self.filter_unclassified = True
+        self.filter_classified = False
+        self.filter_removed = False
+        self._image_search_text = ""
+        self._visible_indices = list(range(len(state.image_files)))
+        self._original_to_filtered_index = {
+            index: index for index in self._visible_indices
+        }
+
+    @property
+    def current_index(self):
+        return self.state.current_index
+
+    def is_image_filter_active(self):
+        return ImageClassifier.is_image_filter_active(self)
+
+    def refresh_image_filter_path(self, path):
+        return ImageClassifier.refresh_image_filter_path(self, path)
+
+
 def create_scanner_mock():
     """创建带 Qt 风格信号接口的扫描器替身。"""
     scanner = Mock()
@@ -137,8 +168,7 @@ def test_rapid_classification_does_not_reset_or_lose_large_list_viewport(
     image_list = QListView()
     image_list.resize(360, 140)
     image_list.setUniformItemSizes(True)
-    image_list.setLayoutMode(QListView.LayoutMode.Batched)
-    image_list.setBatchSize(256)
+    image_list.setLayoutMode(QListView.LayoutMode.SinglePass)
     image_list_model = ImageListModel(
         [str(path) for path in image_files],
         {},
@@ -204,6 +234,126 @@ def test_rapid_classification_does_not_reset_or_lose_large_list_viewport(
             )
 
         qtbot.waitUntil(current_target_is_visible, timeout=3000)
+    finally:
+        image_list.close()
+        image_list.deleteLater()
+        file_ops.deleteLater()
+        navigator.deleteLater()
+
+
+@pytest.mark.parametrize(
+    "row_count",
+    [4000, 10000],
+    ids=["4000_rows_filtered", "10000_rows_filtered"],
+)
+def test_rapid_filtered_classification_updates_rows_without_blank_reset(
+    qapp,
+    qtbot,
+    tmp_path,
+    row_count,
+):
+    """只看未分类图片时，连续分类应逐行移除且保持视窗稳定。"""
+    image_dir = tmp_path / "images"
+    image_files = [
+        image_dir / f"image_{index:05d}.jpg"
+        for index in range(row_count)
+    ]
+    state = LargeListState(image_files)
+    mutator = LargeListMutator(state)
+
+    image_list = QListView()
+    image_list.resize(360, 180)
+    image_list.setUniformItemSizes(True)
+    image_list.setLayoutMode(QListView.LayoutMode.SinglePass)
+    image_list_model = ImageListModel(
+        [str(path) for path in image_files],
+        {},
+        set(),
+        set(),
+        image_list,
+    )
+    image_list.setModel(image_list_model)
+    image_list.show()
+
+    ui = IncrementalFilterUI(state, image_list_model)
+    loader = Mock()
+    loader.is_cached.return_value = False
+    navigator = ImageNavigationManager(
+        state=state,
+        mutator=mutator,
+        ui=ui,
+        loader=loader,
+        scanner=create_scanner_mock(),
+        image_list=image_list,
+        image_list_model=image_list_model,
+        get_visible_indices=lambda: ui._visible_indices,
+        get_original_to_filtered_index=lambda: ui._original_to_filtered_index,
+        is_network_path_callback=lambda _path: False,
+    )
+    file_ops = FileOperationManager(
+        state=state,
+        mutator=mutator,
+        ui=ui,
+        navigator=navigator,
+    )
+
+    reset_count = 0
+    removed_count = 0
+
+    def record_model_reset():
+        nonlocal reset_count
+        reset_count += 1
+
+    def record_row_removed(*_args):
+        nonlocal removed_count
+        removed_count += 1
+
+    image_list_model.modelReset.connect(record_model_reset)
+    image_list_model.rowsRemoved.connect(record_row_removed)
+    start_index = row_count // 2
+    state.current_index = start_index
+    navigator.sync_image_list_selection()
+
+    try:
+        qtbot.waitUntil(
+            lambda: (
+                image_list.currentIndex().isValid()
+                and image_list.viewport().rect().intersects(
+                    image_list.visualRect(image_list.currentIndex())
+                )
+            ),
+            timeout=3000,
+        )
+        scrollbar_values = []
+
+        with patch.object(file_ops, '_execute_file_operation_with_check'):
+            for iteration in range(40):
+                current_path = str(state.image_files[state.current_index])
+                file_ops.move_to_category(current_path, "category1")
+                qapp.processEvents()
+                scrollbar_values.append(image_list.verticalScrollBar().value())
+
+                current = image_list.currentIndex()
+                assert current.isValid()
+                assert (
+                    current.data(ImageListModel.ROLE_IMAGE_INDEX)
+                    == state.current_index
+                )
+                current_rect = image_list.visualRect(current)
+                assert image_list.viewport().rect().intersects(current_rect), (
+                    iteration,
+                    state.current_index,
+                    current.row(),
+                    image_list.verticalScrollBar().value(),
+                    current_rect,
+                )
+
+        assert state.current_index == start_index + 40
+        assert reset_count == 0
+        assert removed_count == 40
+        assert image_list_model.rowCount() == row_count - 40
+        assert ui.filter_apply_count == 0
+        assert min(scrollbar_values) > 0
     finally:
         image_list.close()
         image_list.deleteLater()

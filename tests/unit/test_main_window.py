@@ -584,3 +584,82 @@ def test_default_window_geometry_is_centered_and_starts_maximized(qapp):
     finally:
         window.close()
         window.deleteLater()
+
+
+def test_rapid_state_saves_are_coalesced_to_latest_snapshot(qtbot, tmp_path):
+    """快速分类不应在 UI 线程排队多次完整状态文件写入。"""
+    window = ToolbarHarness()
+    window.current_dir = tmp_path / "images"
+    window.classified_images = {}
+    window.removed_images = set()
+    window.current_index = 0
+    window.is_copy_mode = True
+    window.is_multi_category = False
+    window._pending_state_file = None
+    window._state_save_timer = QTimer(window)
+    window._state_save_timer.setSingleShot(True)
+    window._state_save_timer.setInterval(30)
+    window._state_save_timer.timeout.connect(window._flush_pending_state_save)
+    window._state_save_max_timer = QTimer(window)
+    window._state_save_max_timer.setSingleShot(True)
+    window._state_save_max_timer.setInterval(500)
+    window._state_save_max_timer.timeout.connect(window._flush_pending_state_save)
+    writer = Mock()
+    window._async_save_state = writer
+
+    try:
+        for index in range(50):
+            window.classified_images[f"image_{index}.jpg"] = "category1"
+            window.current_index = index
+            window.save_state()
+
+        assert writer.call_count == 0
+        qtbot.waitUntil(lambda: writer.call_count == 1, timeout=1000)
+
+        state_file, state_data = writer.call_args.args
+        assert state_file == tmp_path / "classification_state.json"
+        assert state_data["last_index"] == 49
+        assert len(state_data["classified_images"]) == 50
+        assert window._state_save_max_timer.isActive() is False
+    finally:
+        window._state_save_timer.stop()
+        window._state_save_max_timer.stop()
+        window.close()
+        window.deleteLater()
+
+
+def test_continuous_state_saves_flush_at_max_interval(qtbot, tmp_path):
+    """持续操作时也应周期性落盘，避免长时间只有内存状态。"""
+    window = ToolbarHarness()
+    window.current_dir = tmp_path / "images"
+    window.classified_images = {}
+    window.removed_images = set()
+    window.current_index = 0
+    window.is_copy_mode = True
+    window.is_multi_category = False
+    window._pending_state_file = None
+    window._state_save_timer = QTimer(window)
+    window._state_save_timer.setSingleShot(True)
+    window._state_save_timer.setInterval(1000)
+    window._state_save_timer.timeout.connect(window._flush_pending_state_save)
+    window._state_save_max_timer = QTimer(window)
+    window._state_save_max_timer.setSingleShot(True)
+    window._state_save_max_timer.setInterval(40)
+    window._state_save_max_timer.timeout.connect(window._flush_pending_state_save)
+    writer = Mock()
+    window._async_save_state = writer
+
+    try:
+        for index in range(20):
+            window.classified_images[f"image_{index}.jpg"] = "category1"
+            window.current_index = index
+            window.save_state()
+
+        qtbot.waitUntil(lambda: writer.call_count == 1, timeout=1000)
+        assert writer.call_args.args[1]["last_index"] == 19
+        assert window._state_save_timer.isActive() is False
+    finally:
+        window._state_save_timer.stop()
+        window._state_save_max_timer.stop()
+        window.close()
+        window.deleteLater()

@@ -200,6 +200,86 @@ class ImageListModel(QAbstractListModel):
             idx = self.index(row, 0)
             self.dataChanged.emit(idx, idx, [self.ROLE_STATUS_TYPE])
 
+    def update_filtered_item(
+        self,
+        path: str,
+        original_index: int,
+        should_be_visible: bool,
+        is_classified: bool,
+        is_removed: bool,
+        is_multi: bool,
+    ) -> str:
+        """增量更新筛选列表中的单个条目，避免重置整个模型。
+
+        Returns:
+            ``inserted``、``removed``、``updated`` 或 ``unchanged``。
+        """
+        path_str = str(path)
+        row = self._path_map.get(path_str)
+
+        if not should_be_visible:
+            if row is None:
+                return "unchanged"
+
+            self.beginRemoveRows(QModelIndex(), row, row)
+            removed_item = self._data.pop(row)
+            self._path_map.pop(removed_item.path, None)
+            self._index_map.pop(removed_item.index, None)
+            self._thumbnail_lru.pop(removed_item.path, None)
+            self._reindex_from(row)
+            self.endRemoveRows()
+            return "removed"
+
+        if row is not None:
+            item = self._data[row]
+            changed = (
+                item.status != is_classified
+                or item.is_removed != is_removed
+                or item.is_multi != is_multi
+            )
+            if changed:
+                self.update_status_by_path(
+                    path_str,
+                    is_classified,
+                    is_removed,
+                    is_multi,
+                )
+                return "updated"
+            return "unchanged"
+
+        # 按原始图片索引插入，保持筛选列表与源列表顺序一致。
+        low = 0
+        high = len(self._data)
+        while low < high:
+            middle = (low + high) // 2
+            if self._data[middle].index < original_index:
+                low = middle + 1
+            else:
+                high = middle
+        row = low
+
+        self.beginInsertRows(QModelIndex(), row, row)
+        self._data.insert(
+            row,
+            ImageItem(
+                path_str,
+                original_index,
+                is_classified,
+                is_removed,
+                is_multi,
+            ),
+        )
+        self._reindex_from(row)
+        self.endInsertRows()
+        return "inserted"
+
+    def _reindex_from(self, start_row: int) -> None:
+        """在单行插入或删除后修正受影响部分的快速查找映射。"""
+        for row in range(max(0, start_row), len(self._data)):
+            item = self._data[row]
+            self._index_map[item.index] = row
+            self._path_map[item.path] = row
+
     def set_thumbnail(self, path, icon: QIcon):
         """
         更新缩略图并管理 LRU 缓存

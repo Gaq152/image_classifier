@@ -83,6 +83,10 @@ class TestClassificationFlow:
             navigator=navigator,
             logger=None,
         )
+        moved_events = []
+        manager.file_moved.connect(
+            lambda source, target: moved_events.append((source, target))
+        )
 
         manager.move_to_category(str(image_path), "cat1")
 
@@ -93,3 +97,4 @@ class TestClassificationFlow:
         assert ui.saved is True
         assert "category_counts" in ui.updated_components
         navigator.next_image.assert_called_once_with()
+        assert moved_events == [(str(image_path), str(copied_path))]

@@ -19,15 +19,15 @@ Codex Review 修复（2025-12-04）：
 """
 
 from pathlib import Path
-from typing import List, Optional, Callable, Set, Dict, Union, TYPE_CHECKING
+from typing import List, Optional, Callable, Dict, TYPE_CHECKING
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 import logging
 
 from .._main_window.state.interfaces import StateView, StateMutator, UIHooks, ImageLoader
 
 if TYPE_CHECKING:
-    from PyQt6.QtWidgets import QListView, QAbstractItemView
-    from PyQt6.QtCore import QAbstractItemModel, QItemSelectionModel
+    from PyQt6.QtWidgets import QListView
+    from PyQt6.QtCore import QAbstractItemModel
 
 
 class ImageNavigationManager(QObject):
@@ -119,12 +119,18 @@ class ImageNavigationManager(QObject):
         self._background_loading = False
         self._current_requested_image: Optional[str] = None  # 当前请求加载的图片路径（用于异步加载验证）
 
-        # 列表选择立即同步，单一定时器在 Batched 布局完成后再校准一次。
+        # 列表选择立即同步，单一定时器在布局变化后再校准一次。
         # 重复 start() 会重启计时，避免快速翻页时堆积大量 singleShot 回调。
         self._selection_sync_timer = QTimer(self)
         self._selection_sync_timer.setSingleShot(True)
         self._selection_sync_timer.setInterval(50)
         self._selection_sync_timer.timeout.connect(self.sync_image_list_selection)
+
+        # 相邻图片预加载也必须合并。快速分类时每次翻页都创建 singleShot
+        # 会叠加多轮相同预加载，抢占磁盘和解码线程，造成主界面像网络卡顿。
+        self._preload_timer = QTimer(self)
+        self._preload_timer.setSingleShot(True)
+        self._preload_timer.timeout.connect(self.preload_adjacent_images)
         self._selection_sync_model = None
         self._selection_sync_scrollbar = None
         self.set_ui_components(image_list, image_list_model)
@@ -246,8 +252,6 @@ class ImageNavigationManager(QObject):
         self._ui.schedule_ui_update('image_list', 'statistics', 'ui_state')
 
         # 立即显示成功信息
-        current_dir = self._state.current_dir
-        path_str = str(current_dir) if current_dir else ""
         is_network_path = self._state.is_network_path
         location_type = "网络路径" if is_network_path else "本地路径"
 
@@ -426,11 +430,16 @@ class ImageNavigationManager(QObject):
             # 异步加载完整图片（使用真实路径）
             self._loader.load_image(Path(real_path), priority=True)
 
-            # 延迟预加载相邻图片，避免影响当前图片显示
-            is_network_current = self._is_network_path(img_path) if self._is_network_path else False
-            delay_time = 300 if is_network_current else 100
+            # 快速连续分类需要极短的前瞻缓存；只提交主方向3张，避免等待
+            # 250ms 防抖期间下一张反复缓存未命中。加载器会自动跳过已缓存
+            # 或正在加载的路径，因此不会重复解码。
+            self.preload_immediate_images()
 
-            QTimer.singleShot(delay_time, self.preload_adjacent_images)
+            # 防抖预加载：快速连续操作只为最终停留位置执行一轮。
+            is_network_current = self._is_network_path(img_path) if self._is_network_path else False
+            delay_time = 500 if is_network_current else 250
+            self._preload_timer.setInterval(delay_time)
+            self._preload_timer.start()
 
             # 立即同步业务索引与列表当前项，防止快捷键连续翻页时状态分叉。
             # 50ms 后使用可合并的单次定时器校准 Batched 布局滚动位置。
@@ -790,6 +799,50 @@ class ImageNavigationManager(QObject):
 
     # ========== 预加载 ==========
 
+    def preload_immediate_images(self):
+        """立即预取主导航方向的3张图片，保证快速分类的下一屏命中。"""
+        image_files = self._state.image_files
+        current_index = self._state.current_index
+        if not image_files or current_index < 0:
+            return
+
+        direction_history = self._user_behavior.get('direction_history', [])
+        primary_direction = -1 if direction_history and direction_history[-1] < 0 else 1
+        visible_indices = self._get_visible_indices()
+
+        candidate_indices = []
+        if visible_indices is not None and current_index in visible_indices:
+            current_position = visible_indices.index(current_index)
+            if primary_direction > 0:
+                candidate_indices = visible_indices[
+                    current_position + 1:current_position + 4
+                ]
+            else:
+                candidate_indices = list(reversed(
+                    visible_indices[max(0, current_position - 3):current_position]
+                ))
+        elif primary_direction > 0:
+            candidate_indices = list(range(
+                current_index + 1,
+                min(len(image_files), current_index + 4),
+            ))
+        else:
+            candidate_indices = list(range(
+                current_index - 1,
+                max(-1, current_index - 4),
+                -1,
+            ))
+
+        preload_paths = []
+        for index in candidate_indices:
+            if 0 <= index < len(image_files):
+                preload_paths.append(
+                    self._state.get_real_file_path(image_files[index])
+                )
+
+        if preload_paths:
+            self._loader.preload_images(preload_paths)
+
     def preload_adjacent_images(self):
         """预加载相邻图片（优化3：智能预加载范围）"""
         image_files = self._state.image_files
@@ -814,12 +867,13 @@ class ImageNavigationManager(QObject):
 
         if is_network:
             # 网络路径：保守策略
-            forward_range = 10  # 主方向10张
-            backward_range = 3  # 反方向3张
+            forward_range = 8   # 主方向8张
+            backward_range = 2  # 反方向2张
         else:
-            # 本地路径：激进策略（本地快，可多预加载）
-            forward_range = 30  # 主方向30张
-            backward_range = 10  # 反方向10张
+            # 缓存默认仅30项，预加载窗口必须小于容量，否则每次都会
+            # 淘汰下一轮仍需要的图片并反复解码。
+            forward_range = 20  # 主方向20张
+            backward_range = 5  # 反方向5张
 
         # 根据主方向调整范围
         if primary_direction == 1:  # 向前翻页

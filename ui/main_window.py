@@ -448,6 +448,18 @@ class ImageClassifier(QMainWindow):
         self.ui_update_timer = QTimer()
         self.ui_update_timer.setSingleShot(True)
         self.ui_update_timer.timeout.connect(self.perform_batch_ui_update)
+
+        # 高频分类只保留最后一次状态保存请求。旧实现用 singleShot(0)
+        # 在 UI 线程堆积完整 JSON 写入，会阻塞万级列表的布局和滚动。
+        self._pending_state_file = None
+        self._state_save_timer = QTimer(self)
+        self._state_save_timer.setSingleShot(True)
+        self._state_save_timer.setInterval(600)
+        self._state_save_timer.timeout.connect(self._flush_pending_state_save)
+        self._state_save_max_timer = QTimer(self)
+        self._state_save_max_timer.setSingleShot(True)
+        self._state_save_max_timer.setInterval(3000)
+        self._state_save_max_timer.timeout.connect(self._flush_pending_state_save)
         
         # 类别计数缓存
         self.category_counts = {}
@@ -976,12 +988,12 @@ class ImageClassifier(QMainWindow):
         self.image_list.setModel(self.image_list_model)
         self.image_list.setItemDelegate(ImageListDelegate(self))
 
-        # Phase 1.1 关键性能优化：防止主题切换时重新计算所有条目（Codex + Gemini 诊断）
-        # 问题：setStyleSheet() 触发 QListView 重新计算 24k 条目的几何，导致 6 秒卡顿
-        # 解决：开启 UniformItemSizes（列表项高度固定）+ Batched 布局模式
-        self.image_list.setUniformItemSizes(True)  # ← P0 修复：避免逐条测量 24k 项
-        self.image_list.setLayoutMode(QListView.LayoutMode.Batched)  # 批处理布局
-        self.image_list.setBatchSize(256)  # 每批 256 项
+        # 固定列表项尺寸后使用 SinglePass 一次计算稳定的滚动范围。
+        # Batched 在中间行增删后会暂时让 visualRect 为空，快速分类期间
+        # 50ms 校准又持续被重启，从而出现列表空白和滚动条来回跳动。
+        # 实测 25k 行 SinglePass 初始化约 74ms，可接受且视窗稳定。
+        self.image_list.setUniformItemSizes(True)
+        self.image_list.setLayoutMode(QListView.LayoutMode.SinglePass)
 
         # Phase 1.1: 配置滚动条行为 - 支持长文件名横向滚动
         self.image_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -2213,7 +2225,7 @@ class ImageClassifier(QMainWindow):
             is_multi = isinstance(self.classified_images.get(src), list) and len(self.classified_images.get(src, [])) > 1
             self.image_list_model.update_status_by_path(src, is_classified, is_removed=False, is_multi=is_multi)
         # 更新统计和计数（不包含 image_list，避免重建列表）
-        self.schedule_ui_update('statistics', 'category_counts', 'category_buttons')
+        self.schedule_ui_update('statistics', 'category_counts')
         self.statusBar.showMessage(f"✅ 已分类到 {Path(dst).parent.name}")
 
     def on_file_removed(self, path: str):
@@ -2304,9 +2316,6 @@ class ImageClassifier(QMainWindow):
         reapply_filter = False
 
         try:
-            # 暂时阻止重绘
-            self.setUpdatesEnabled(False)
-
             # 优化：如果包含current_image更新，只执行一次，并移除其他可能冲突的更新
             if 'current_image' in components_to_update:
                 self._show_current_image_internal()
@@ -2359,10 +2368,8 @@ class ImageClassifier(QMainWindow):
             if self._pending_reapply_filter and 'image_list' in components_to_update:
                 reapply_filter = True
 
-        finally:
-            # 恢复重绘
-            self.setUpdatesEnabled(True)
-            self.update()
+        except Exception as e:
+            self.logger.error(f"批量更新UI失败: {e}")
 
         # Codex方案：在批量更新完成后再应用过滤（避免被_update_image_list_internal覆盖）
         if reapply_filter:
@@ -3278,13 +3285,19 @@ class ImageClassifier(QMainWindow):
         # Codex+Gemini方案：根据最长文件名设置列表项宽度，保证横向滚动显示完整
         self._update_image_list_grid_width(max_text_width)
 
-        # 保存过滤索引映射（用于滚动定位等场景）
-        # original_index -> filtered_row
-        self._original_to_filtered_index = {v: k for k, v in enumerate(original_indices)}
-
-        # Codex Review修复：保存可见索引列表，用于next/prev导航
-        # 这是一个有序列表，包含所有过滤后可见图片的original_index
-        self._visible_indices = original_indices  # [0, 2, 5, 7, ...] 按顺序排列
+        if self.is_image_filter_active():
+            # original_index -> filtered_row
+            self._original_to_filtered_index = {
+                original: row
+                for row, original in enumerate(original_indices)
+            }
+            # 有筛选时保存可见索引，供 next/prev 跳过隐藏图片。
+            self._visible_indices = original_indices
+        else:
+            # 全部显示并且未搜索时必须保持 None，导航直接使用原始索引，
+            # 避免万级列表每次翻页都执行 list.index()。
+            self._original_to_filtered_index = None
+            self._visible_indices = None
 
         # 恢复选中
         # Codex优化：使用Model的_path_map进行O(1)查找而不是线性扫描
@@ -3330,6 +3343,83 @@ class ImageClassifier(QMainWindow):
         )
         search_active = bool(getattr(self, '_image_search_text', '').strip())
         return not all_statuses_visible or search_active
+
+    def refresh_image_filter_path(self, path: str) -> str:
+        """分类后只增量更新一个列表条目，不重建万级图片模型。"""
+        if not hasattr(self, 'image_list_model') or not self.image_list_model:
+            return "unchanged"
+
+        path_str = str(path)
+        original_index = None
+        if (
+            0 <= self.current_index < len(self.image_files)
+            and str(self.image_files[self.current_index]) == path_str
+        ):
+            original_index = self.current_index
+        else:
+            existing_row = self.image_list_model._path_map.get(path_str)
+            if existing_row is not None:
+                existing_index = self.image_list_model.index(existing_row, 0)
+                original_index = existing_index.data(ImageListModel.ROLE_IMAGE_INDEX)
+            else:
+                original_index = next(
+                    (
+                        index
+                        for index, image_path in enumerate(self.image_files)
+                        if str(image_path) == path_str
+                    ),
+                    None,
+                )
+
+        if original_index is None:
+            return "unchanged"
+
+        category = self.classified_images.get(path_str)
+        if isinstance(category, list):
+            valid_categories = [item for item in category if item in self.categories]
+            is_classified = bool(valid_categories)
+            is_multi = len(valid_categories) > 1
+        else:
+            is_classified = category in self.categories if category else False
+            is_multi = False
+
+        is_removed = path_str in self.removed_images
+        is_unclassified = not is_removed and not is_classified
+        search_keyword = getattr(self, '_image_search_text', '').strip().lower()
+        search_match = (
+            not search_keyword
+            or search_keyword in Path(path_str).name.lower()
+        )
+        should_be_visible = search_match and (
+            (is_unclassified and self.filter_unclassified)
+            or (is_classified and self.filter_classified)
+            or (is_removed and self.filter_removed)
+        )
+
+        action = self.image_list_model.update_filtered_item(
+            path_str,
+            int(original_index),
+            should_be_visible,
+            is_classified,
+            is_removed,
+            is_multi,
+        )
+
+        if self.is_image_filter_active():
+            self._visible_indices = [
+                item.index for item in self.image_list_model._data
+            ]
+            self._original_to_filtered_index = {
+                original: row
+                for row, original in enumerate(self._visible_indices)
+            }
+        else:
+            # “全部显示”应走真正的未过滤导航，避免每次 next_image
+            # 在线性列表中查找当前索引。
+            self._visible_indices = None
+            self._original_to_filtered_index = None
+
+        return action
 
     def get_filter_stats(self):
         """获取过滤统计信息"""
@@ -5731,30 +5821,51 @@ class ImageClassifier(QMainWindow):
         # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
     
     def save_state(self):
-        """异步保存当前状态到图片同级目录"""
+        """合并高频保存请求，在用户操作间隙写入一次最新状态。"""
         try:
             if not self.current_dir:
                 return
-                
-            # 准备状态数据
-            state_data = {
-                'classified_images': dict(self.classified_images),
-                'removed_images': list(self.removed_images),
-                'last_index': self.current_index,
-                'version': self.version,
-                'is_copy_mode': self.is_copy_mode,  # 保存操作模式状态
-                'is_multi_category': self.is_multi_category  # 保存分类模式状态
-            }
-            
+
             # 状态文件保存在图片目录的父目录（同级目录），而不是图片目录内
             parent_dir = self.current_dir.parent
-            state_file = parent_dir / 'classification_state.json'
-            
-            # 异步保存，避免阻塞UI
-            QTimer.singleShot(0, lambda: self._async_save_state(state_file, state_data))
-                
+            self._pending_state_file = parent_dir / 'classification_state.json'
+
+            timer = getattr(self, '_state_save_timer', None)
+            if timer is None:
+                self._flush_pending_state_save()
+            else:
+                # 重复 start 会重启单次定时器，只保留最后一次请求。
+                timer.start()
+                max_timer = getattr(self, '_state_save_max_timer', None)
+                if max_timer is not None and not max_timer.isActive():
+                    max_timer.start()
         except Exception as e:
             self.logger.error(f"准备保存状态失败: {e}")
+
+    def _build_state_data(self) -> dict:
+        """在真正写盘前创建一次最新状态快照。"""
+        return {
+            'classified_images': dict(self.classified_images),
+            'removed_images': list(self.removed_images),
+            'last_index': self.current_index,
+            'version': self.version,
+            'is_copy_mode': self.is_copy_mode,
+            'is_multi_category': self.is_multi_category,
+        }
+
+    def _flush_pending_state_save(self) -> None:
+        """写入合并后的最后一个状态保存请求。"""
+        state_file = getattr(self, '_pending_state_file', None)
+        if state_file is None:
+            return
+        timer = getattr(self, '_state_save_timer', None)
+        if timer is not None:
+            timer.stop()
+        max_timer = getattr(self, '_state_save_max_timer', None)
+        if max_timer is not None:
+            max_timer.stop()
+        self._pending_state_file = None
+        self._async_save_state(state_file, self._build_state_data())
 
     def _save_state_sync(self):
         """立即同步保存当前状态到图片同级目录（用于重要状态变化）"""
@@ -5762,15 +5873,14 @@ class ImageClassifier(QMainWindow):
             if not self.current_dir:
                 return
 
-            # 准备状态数据
-            state_data = {
-                'classified_images': dict(self.classified_images),
-                'removed_images': list(self.removed_images),
-                'last_index': self.current_index,
-                'version': self.version,
-                'is_copy_mode': self.is_copy_mode,  # 保存操作模式状态
-                'is_multi_category': self.is_multi_category  # 保存分类模式状态
-            }
+            timer = getattr(self, '_state_save_timer', None)
+            if timer is not None:
+                timer.stop()
+            max_timer = getattr(self, '_state_save_max_timer', None)
+            if max_timer is not None:
+                max_timer.stop()
+            self._pending_state_file = None
+            state_data = self._build_state_data()
 
             # 状态文件保存在图片目录的父目录（同级目录），而不是图片目录内
             parent_dir = self.current_dir.parent
@@ -5786,7 +5896,7 @@ class ImageClassifier(QMainWindow):
             self.logger.error(f"同步保存状态失败: {e}")
 
     def _async_save_state(self, state_file, state_data):
-        """异步执行状态保存"""
+        """执行合并后的状态写入。"""
         try:
             with open(state_file, 'w', encoding='utf-8') as f:
                 json.dump(state_data, f, ensure_ascii=False, indent=2)
@@ -5821,6 +5931,10 @@ class ImageClassifier(QMainWindow):
             # 停止定时器
             if hasattr(self, 'ui_update_timer'):
                 self.ui_update_timer.stop()
+            if hasattr(self, '_state_save_timer'):
+                self._state_save_timer.stop()
+            if hasattr(self, '_state_save_max_timer'):
+                self._state_save_max_timer.stop()
 
             # 停止后台线程
             if hasattr(self, 'file_scanner') and self.file_scanner:

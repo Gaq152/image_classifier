@@ -5,9 +5,7 @@ ImageNavigationManager 集成测试
 """
 
 import pytest
-from pathlib import Path
-from unittest.mock import Mock, MagicMock
-from PyQt6.QtCore import QTimer
+from unittest.mock import Mock
 
 from ui.managers.image_navigation_manager import ImageNavigationManager
 
@@ -135,7 +133,6 @@ class TestImageNavigationIntegration:
         setup = integration_setup
         manager = setup['manager']
         state = setup['state']
-        mutator = setup['mutator']
         ui = setup['ui']
         loader = setup['loader']
         scanner = setup['scanner']
@@ -191,7 +188,6 @@ class TestImageNavigationIntegration:
         setup = integration_setup
         manager = setup['manager']
         state = setup['state']
-        mutator = setup['mutator']
         scanner = setup['scanner']
         tmp_path = setup['tmp_path']
 
@@ -263,8 +259,8 @@ class TestImageNavigationIntegration:
         # 验证：load_image 被调用（当前图片）
         assert loader.load_image.called
 
-        # 验证：preload_images 被调用（mock_qtimer 让 QTimer 立即执行，不需要等待）
-        assert loader.preload_images.called
+        # 验证：防抖窗口结束后只为最终位置执行预加载。
+        qtbot.waitUntil(lambda: loader.preload_images.called, timeout=1500)
         # 本地路径应该预加载更多图片
         preload_args = loader.preload_images.call_args[0][0]
         assert len(preload_args) > 0  # 预加载了一些图片
@@ -289,7 +285,6 @@ class TestImageNavigationIntegration:
         setup = integration_setup
         manager = setup['manager']
         state = setup['state']
-        mutator = setup['mutator']
         ui = setup['ui']
 
         # 前置：设置 10 个图片，当前索引 5

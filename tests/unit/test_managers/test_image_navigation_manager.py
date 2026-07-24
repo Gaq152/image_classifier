@@ -4,8 +4,7 @@ ImageNavigationManager 单元测试
 
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
-from PyQt6.QtCore import QObject
+from unittest.mock import Mock, patch
 from PyQt6.QtWidgets import QListView
 
 from ui.managers.image_navigation_manager import ImageNavigationManager
@@ -287,6 +286,52 @@ class TestImageNavigationManager:
 
         assert manager._selection_sync_timer.isActive() is False
         assert timeout_observer.call_count == 1
+
+    def test_rapid_navigation_coalesces_adjacent_preload(
+        self,
+        manager,
+        mock_state,
+        mock_loader,
+        qtbot,
+    ):
+        """快速翻页只应为最后停留位置执行一次相邻图片预加载。"""
+        mock_state.image_files = [Path(f"test_{index}.jpg") for index in range(100)]
+        mock_state.current_index = 20
+        timeout_observer = Mock()
+        manager._preload_timer.timeout.connect(timeout_observer)
+
+        for index in range(10):
+            mock_state.current_index = 20 + index
+            manager.show_current_image()
+
+        assert manager._preload_timer.isActive()
+        assert timeout_observer.call_count == 0
+        # 即时短前瞻不属于延迟批次，清空后只观察防抖定时器。
+        mock_loader.preload_images.reset_mock()
+        qtbot.waitUntil(lambda: timeout_observer.call_count == 1, timeout=1500)
+
+        assert manager._preload_timer.isActive() is False
+        mock_loader.preload_images.assert_called_once()
+
+    def test_show_current_image_immediately_preloads_three_forward_images(
+        self,
+        manager,
+        mock_state,
+        mock_loader,
+    ):
+        """当前图加载后应立即短前瞻，避免快速分类时下一张缓存未命中。"""
+        mock_state.image_files = [Path(f"test_{index}.jpg") for index in range(20)]
+        mock_state.current_index = 5
+        manager._user_behavior['direction_history'] = [1, 1, 1]
+
+        manager.show_current_image()
+
+        mock_loader.preload_images.assert_called_once()
+        assert mock_loader.preload_images.call_args.args[0] == [
+            Path("test_6.jpg"),
+            Path("test_7.jpg"),
+            Path("test_8.jpg"),
+        ]
 
     @pytest.mark.parametrize(
         "row_count",
@@ -1079,6 +1124,8 @@ class TestImageNavigationManager:
         assert Path("test_10.jpg") not in call_args  # 不包含当前
         # 前向历史应该预加载更多后面的图片
         assert any(int(p.stem.split('_')[1]) > 10 for p in call_args)
+        # 默认缓存容量为30，单轮预加载必须留出当前图和后续空间。
+        assert len(call_args) <= 25
 
     def test_preload_adjacent_images_backward_network_range(
         self, manager, mock_state, mock_loader
@@ -1105,8 +1152,8 @@ class TestImageNavigationManager:
         assert Path("test_20.jpg") not in call_args
         # 后向历史应该预加载更多前面的图片
         assert any(int(p.stem.split('_')[1]) < 20 for p in call_args)
-        # 网络路径预加载数量应该较少（约10-13张）
-        assert len(call_args) < 20  # 网络路径预加载较少
+        # 网络路径预加载数量应该更少，避免占用带宽。
+        assert len(call_args) <= 10
 
     # ========== 新增测试：第五组 - 并发安全 ==========
 

@@ -32,7 +32,7 @@
 
 from typing import Protocol, runtime_checkable
 from pathlib import Path
-from typing import List, Dict, Set, Optional, Any, Union, TYPE_CHECKING
+from typing import List, Dict, Set, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PyQt6.QtGui import QPixmap
@@ -550,6 +550,11 @@ class UIHooks(Protocol):
 
     def is_image_filter_active(self) -> bool:
         """是否启用了会改变列表内容的状态筛选或图片搜索"""
+        pass
+
+
+    def refresh_image_filter_path(self, path: str) -> str:
+        """分类状态变化后增量刷新单个图片条目"""
         pass
 
     # ========== 通知提示 ==========
