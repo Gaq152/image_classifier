@@ -156,7 +156,7 @@ python run.py
 当前分支支持“固定视觉编码器 + 空间颜色特征 + 类别均衡 KNN”的半自动分类：
 
 - 每个项目第一次启用 AI 时，可选择从零开始、使用本目录已有人工标注，或导入其他 `classification_state.json`。
-- 内置速度优先（MobileNetV3）、均衡版本（ResNet18）和精度优先（DINOv2 ViT-S/14）三档基础模型。
+- 提供速度优先（MobileNetV3）、均衡版本（ResNet18）和精度优先（DINOv2 ViT-S/14）三档可按需下载的基础模型。
 - 每个类别达到 5 张有效人工样本后才开始试预测；建议每类达到 20 张以上。
 - 切换到未初始化的模型会重新建立该模型的项目特征库；已经初始化过的模型直接复用。
 - 工具栏可切换 `AI · 自动` 与 `AI · 手动`：自动模式停留 200ms 后预测，手动模式按 `Tab` 触发。
@@ -165,6 +165,7 @@ python run.py
 - 已移除图片作为独立反馈样本参与学习；模型只能显示“建议移除”，必须由用户按 `Delete` 确认，绝不自动移除。
 - 人工确认或纠正后立即更新样本库，不需要逐张重新训练神经网络。
 - 连续快速翻页时丢弃过期结果；项目训练结果与 `classification_state.json` 保存在同一目录。
+- 模型配置页分别显示运行时和基础模型的下载进度；下载支持断点续传、大小校验和 SHA-256 校验。
 
 模型包不会提交到仓库或塞进项目目录。开发机首次使用时执行：
 
@@ -189,16 +190,18 @@ python run.py
 
 本地文件默认位于：
 
-- 基础模型：`%USERPROFILE%\image_classifier\ai_models\<模型版本>\`
+- 基础模型：`%USERPROFILE%\image_classifier\config\ai_models\<模型版本>\`
+- 按需下载的推理运行时：`%USERPROFILE%\image_classifier\config\ai_runtimes\<cpu|gpu>\<版本>\`
 - 项目训练结果：`classification_state.json` 同目录下的 `ai_model_speed_v1.npz`、`ai_model_balanced_v1.npz` 或 `ai_model_accuracy_v1.npz`
 
-推理设备默认为自动选择：检测到 ONNX Runtime `CUDAExecutionProvider` 时，三档模型都会优先使用 NVIDIA GPU；CUDA DLL、驱动或会话加载失败时会自动回退 CPU，不影响人工分类。项目样本库格式与推理设备无关，因此 CPU/GPU 切换不需要重新初始化。
+正式 EXE 不再捆绑 ONNX Runtime 或基础模型。推理设备默认为自动选择：首次启用时按所选设备下载 CPU 或 NVIDIA GPU Runtime；CUDA DLL、驱动或会话加载失败时会自动回退 CPU，不影响人工分类。项目样本库格式与推理设备无关，因此 CPU/GPU 切换不需要重新初始化；若当前进程已经加载 CPU Runtime，切换 GPU 后重启一次软件即可生效。
 
-CPU 环境继续使用默认依赖；NVIDIA GPU 开发环境建议只安装 GPU 版 ONNX Runtime，避免两个发行包长期共存：
+源码开发环境可按设备安装一种 ONNX Runtime，避免两个发行包长期共存：
 
 ```bash
 # CPU
 pip install -r requirements.txt
+pip install onnxruntime==1.23.2
 
 # NVIDIA GPU（CUDA 12 系列，安装前清理同名 CPU/GPU 发行包）
 pip uninstall -y onnxruntime onnxruntime-gpu
@@ -297,7 +300,7 @@ AI 版本以 prerelease 发布，并同步覆盖 `ai-latest` 滚动资产，因�
 - 支持 Windows 10+ 系统
 - 自动版本号管理
 
-AI CI 使用 `onnxruntime-gpu` 构建单独的 GPU-capable EXE，模型文件仍保存在程序外。为避免每次自动更新都下载超大的 CUDA 运行库，CUDA 12 / cuDNN 9 不打入 EXE；程序会优先读取 `IMAGE_CLASSIFIER_CUDA_DIR`，也会识别当前用户已有的兼容 PyTorch `torch\\lib`，仍找不到时显示原因并自动回退 CPU。
+AI CI 不再把 `onnxruntime`、`onnxruntime-gpu` 或基础模型收集进 EXE。用户首次使用对应设备或模型时在模型配置页按需下载，资源独立保存在用户配置目录，可以断点续传并单独更新。CUDA 12 / cuDNN 9 同样不打入 EXE；程序会优先读取 `IMAGE_CLASSIFIER_CUDA_DIR`，也会识别当前用户已有的兼容 PyTorch `torch\\lib`，仍找不到时显示原因并自动回退 CPU。
 
 ### 本地构建（开发用）
 

@@ -114,7 +114,6 @@ def check_dependencies():
     required_deps = {
         'PyQt6': 'PyQt6',
         'cv2': 'opencv-python',
-        'onnxruntime': 'onnxruntime',
         'PIL': 'Pillow',
         'psutil': 'psutil'
     }
@@ -169,8 +168,6 @@ def build_executable(edition: str = "standard"):
         '--hidden-import', 'PyQt6.QtCore',
         '--hidden-import', 'PyQt6.QtGui',
         '--hidden-import', 'cv2',
-        '--hidden-import', 'onnxruntime',
-        '--collect-all', 'onnxruntime',
         '--hidden-import', 'PIL.Image',  # 只导入Image，不导入其他PIL子模块
         '--hidden-import', 'psutil',
         '--hidden-import', 'ssl',  # HTTPS 请求必需
@@ -190,6 +187,7 @@ def build_executable(edition: str = "standard"):
         '--exclude-module', 'PIL.ImageQt',  # 排除不需要的PIL模块
         '--exclude-module', 'PIL.ImageDraw',
         '--exclude-module', 'PIL.ImageFilter',
+        '--exclude-module', 'onnxruntime',  # AI运行时首次使用时下载
         '--exclude-module', 'test',  # 排除测试模块
         '--exclude-module', 'unittest',  # 排除单元测试
         '--exclude-module', 'doctest',  # 排除文档测试

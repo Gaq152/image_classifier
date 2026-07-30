@@ -16,6 +16,7 @@ class AIModelProfile:
     project_model_file: str
     expected_model_id: str
     cpu_note: str
+    cpu_backend: str = "opencv"
     recommended_gpu: bool = False
 
 
@@ -49,6 +50,7 @@ AI_MODEL_PROFILES: Dict[str, AIModelProfile] = {
         project_model_file="ai_model_accuracy_v1.npz",
         expected_model_id="dinov2-vits14-embedding-v1",
         cpu_note="CPU 运行可能较慢；建议后续在 NVIDIA GPU 上使用。",
+        cpu_backend="onnxruntime",
         recommended_gpu=True,
     ),
 }

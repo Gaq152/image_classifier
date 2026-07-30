@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
-          cache-dependency-path: requirements-gpu.txt
+          cache-dependency-path: requirements.txt
 
       - name: Resolve AI version
         shell: pwsh
@@ -53,14 +53,14 @@ jobs:
         shell: pwsh
         run: |
           pip uninstall -y onnxruntime onnxruntime-gpu
-          pip install -r requirements-gpu.txt pyinstaller pytest
+          pip install -r requirements.txt pyinstaller pytest
 
       - name: Verify AI build inputs
         shell: pwsh
         run: |
-          python -c "import onnxruntime as ort; print('ONNX Runtime:', ort.__version__, ort.get_available_providers())"
+          python -c "from core.ai.resource_manager import RUNTIME_RESOURCES; assert RUNTIME_RESOURCES['gpu'].size_bytes > 200_000_000"
           python -c "from _version_ import get_manifest_url; assert get_manifest_url(edition='ai').endswith('/ai-latest/manifest.json')"
-          python -m pytest tests/unit/test_product_channel.py tests/unit/test_ai_gpu_provider.py -q
+          python -m pytest tests/unit/test_product_channel.py tests/unit/test_ai_resources.py -q
 
       - name: Build AI executable
         shell: pwsh
@@ -132,7 +132,7 @@ jobs:
           This is the isolated AI preview edition. It does not replace the public edition and uses its own automatic-update channel.
 
           - CPU inference remains available as a safe fallback.
-          - NVIDIA CUDA inference is used when the compatible CUDA 12 / cuDNN 9 runtime is available.
+          - CPU/GPU ONNX Runtime and base models are downloaded on demand with visible progress and SHA-256 verification.
           - Base models remain outside the executable and project-trained data remains beside the project JSON.
 
           SHA256: $env:SHA256
@@ -150,6 +150,7 @@ jobs:
           generate_release_notes: false
           body_path: release-assets/release_body.md
           fail_on_unmatched_files: true
+          overwrite_files: true
           files: |
             release-assets/versioned/${{ env.VERSIONED_NAME }}
             release-assets/versioned/manifest.json
@@ -165,6 +166,7 @@ jobs:
           generate_release_notes: false
           body_path: release-assets/release_body.md
           fail_on_unmatched_files: true
+          overwrite_files: true
           files: |
             release-assets/latest/${{ env.ROLLING_NAME }}
             release-assets/latest/manifest.json

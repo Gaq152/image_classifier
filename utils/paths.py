@@ -59,7 +59,21 @@ def get_ai_cache_dir() -> Path:
 
 def get_ai_model_dir(model_dir_name: str = "resnet18_embedding_v1") -> Path:
     """获取指定的外置 AI 基础模型包目录。"""
-    return get_app_data_dir() / "ai_models" / model_dir_name
+    return get_config_dir() / "ai_models" / model_dir_name
+
+
+def get_ai_runtime_dir(
+    runtime_name: str = "cpu", version: str = "1.23.2"
+) -> Path:
+    """获取按需下载的 AI 推理运行时目录。"""
+    return get_config_dir() / "ai_runtimes" / runtime_name / version
+
+
+def get_ai_download_dir() -> Path:
+    """获取 AI 运行时和基础模型的断点续传目录。"""
+    download_dir = get_config_dir() / "ai_downloads"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    return download_dir
 
 
 def get_config_dir() -> Path:

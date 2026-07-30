@@ -11,6 +11,8 @@ from typing import Iterable, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from .resource_manager import load_onnxruntime
+
 
 class AIModelUnavailableError(RuntimeError):
     """Raised when the optional model runtime or model pack is unavailable."""
@@ -74,10 +76,17 @@ def find_cuda_runtime_directory() -> Optional[Path]:
     return None
 
 
+def _import_onnxruntime(runtime_kind: str):
+    """Use the developer environment in source runs and downloads when frozen."""
+    if getattr(sys, "frozen", False):
+        return load_onnxruntime(runtime_kind)
+    return importlib.import_module("onnxruntime")
+
+
 def is_cuda_execution_available() -> bool:
     """Return whether ONNX Runtime exposes the NVIDIA CUDA provider."""
     try:
-        ort = importlib.import_module("onnxruntime")
+        ort = _import_onnxruntime("gpu")
         return "CUDAExecutionProvider" in ort.get_available_providers()
     except (ImportError, OSError, RuntimeError):
         return False
@@ -237,10 +246,10 @@ class OnnxEmbeddingExtractor:
 
     def _load_onnx_runtime(self, model_path: Path, use_cuda: bool) -> None:
         try:
-            ort = importlib.import_module("onnxruntime")
-        except (ImportError, OSError) as error:
+            ort = _import_onnxruntime("gpu" if use_cuda else "cpu")
+        except (ImportError, OSError, RuntimeError) as error:
             raise AIModelUnavailableError(
-                "需要安装 ONNX Runtime 推理运行库"
+                str(error) or "需要下载 ONNX Runtime 推理运行库"
             ) from error
 
         if use_cuda and hasattr(ort, "preload_dlls"):
