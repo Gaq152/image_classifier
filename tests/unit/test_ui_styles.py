@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QLineEdit,
+    QMainWindow,
     QVBoxLayout,
     QMessageBox,
     QPushButton,
@@ -197,7 +198,43 @@ def test_themed_message_box_can_style_standard_yes_as_danger(qtbot):
 
     assert box.button(QMessageBox.StandardButton.Yes).property("uiRole") == "danger"
     assert box.button(QMessageBox.StandardButton.No).property("uiRole") == "secondary"
+    assert box.button(QMessageBox.StandardButton.Yes).height() == 36
+    assert box.button(QMessageBox.StandardButton.No).height() == 36
     box.close()
+
+
+def test_category_delete_confirmation_uses_top_level_parent(qtbot):
+    """类别按钮的局部 QSS 不应级联污染删除确认框。"""
+    from ui.components.widgets.category_button import CategoryButton
+
+    window = QMainWindow()
+    container = QWidget(window)
+    window.setCentralWidget(container)
+    button = CategoryButton(
+        "测试类别",
+        SimpleNamespace(category_shortcuts={}),
+        parent=container,
+    )
+    qtbot.addWidget(window)
+    captured = []
+
+    def create_box(parent):
+        box = ThemedMessageBox(parent)
+        captured.append(box)
+        return box
+
+    with patch(
+        "ui.components.widgets.category_button.ThemedMessageBox",
+        side_effect=create_box,
+    ), patch.object(
+        ThemedMessageBox,
+        "exec",
+        return_value=QMessageBox.StandardButton.No,
+    ):
+        button.delete_category()
+
+    assert len(captured) == 1
+    assert captured[0].parentWidget() is window
 
 
 def test_panel_header_buttons_share_compact_size(qtbot):

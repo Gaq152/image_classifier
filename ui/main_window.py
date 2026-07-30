@@ -470,6 +470,8 @@ class ImageClassifier(QMainWindow):
         self.filter_unclassified_state = False
         self.filter_classified_state = False
         self.filter_removed_state = False
+        self.focused_category = None
+        self._category_focus_previous_classified_filter = None
 
         # 排序状态（ViewState）
         self.sort_mode_state = 'name'
@@ -951,6 +953,22 @@ class ImageClassifier(QMainWindow):
 
         # 添加弹性空间，推送右侧按钮到最右边
         list_title_layout.addStretch()
+
+        # 类别聚焦属于图片列表筛选，因此状态展示在图片列表标题栏。
+        # 具体类别从类别按钮右键菜单选择，避免和“当前分类目标”混淆。
+        self.category_focus_button = QPushButton()
+        self.category_focus_button.setObjectName("category_focus_button")
+        self.category_focus_button.setFixedHeight(28)
+        self.category_focus_button.setMaximumWidth(180)
+        self.category_focus_button.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.category_focus_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.category_focus_button.clicked.connect(self.clear_category_focus)
+        self.category_focus_button.hide()
+        self._apply_category_focus_button_style()
+        list_title_layout.addWidget(self.category_focus_button)
 
         # 搜索组件 - 可展开的文件名搜索
         self.image_search_widget = ExpandableSearch()
@@ -1609,6 +1627,10 @@ class ImageClassifier(QMainWindow):
             # 记录窗口大小变化
             if hasattr(self, 'logger'):
                 self.logger.debug(f"窗口大小改变: {event.size().width()}x{event.size().height()}")
+
+            tutorial_manager = getattr(self, 'tutorial_manager', None)
+            if tutorial_manager is not None:
+                tutorial_manager.handle_parent_resized()
                
         except Exception as e:
             if hasattr(self, 'logger'):
@@ -1698,6 +1720,9 @@ class ImageClassifier(QMainWindow):
             self._image_search_text = ""
             if hasattr(self, 'image_search_widget'):
                 self.image_search_widget.clear_and_collapse()
+
+            # 类别聚焦只在当前目录内有效，切换任务时恢复显示全部类别。
+            self._deactivate_category_focus()
 
             # 先启动图片扫描，让UI立即响应
             self.load_images()
@@ -2277,6 +2302,11 @@ class ImageClassifier(QMainWindow):
 
     def on_categories_changed(self, categories: list):
         """类别列表变更"""
+        if (
+            getattr(self, 'focused_category', None)
+            and self.focused_category not in categories
+        ):
+            self._deactivate_category_focus()
         # Manager已更新状态，这里只需UI刷新
         self.update_category_buttons()
         self.schedule_ui_update('statistics', 'category_counts')
@@ -3195,6 +3225,11 @@ class ImageClassifier(QMainWindow):
                 self.filter_removed = True
             return
 
+        if filter_type == 'classified' and not self.filter_classified and self.focused_category:
+            # “只看某类别”天然属于已分类图片。用户主动隐藏已分类时，
+            # 同步退出类别聚焦，避免产生互相矛盾的筛选条件。
+            self._deactivate_category_focus(restore_classified_filter=False)
+
         # 应用过滤
         self.apply_image_filter()
 
@@ -3203,6 +3238,107 @@ class ImageClassifier(QMainWindow):
         self.filter_button.setProperty("active", is_filtering)
         self.filter_button.style().unpolish(self.filter_button)
         self.filter_button.style().polish(self.filter_button)
+
+    def _apply_category_focus_button_style(self):
+        """应用图片列表标题栏中的类别聚焦标签样式。"""
+        button = getattr(self, 'category_focus_button', None)
+        if button is None:
+            return
+        c = default_theme.colors
+        button.setStyleSheet(f"""
+            QPushButton#category_focus_button {{
+                color: {c.TEXT_PRIMARY};
+                background-color: {c.PRIMARY_LIGHT};
+                border: 1px solid {c.PRIMARY};
+                border-radius: 5px;
+                padding: 3px 8px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QPushButton#category_focus_button:hover {{
+                background-color: {c.BACKGROUND_HOVER};
+                border-color: {c.PRIMARY_DARK};
+            }}
+        """)
+
+    def _update_category_focus_button(self):
+        """同步类别聚焦标签的文本和可见性。"""
+        button = getattr(self, 'category_focus_button', None)
+        if button is None:
+            return
+
+        category_name = getattr(self, 'focused_category', None)
+        if not category_name:
+            button.hide()
+            button.setText("")
+            button.setToolTip("")
+            return
+
+        elided_name = button.fontMetrics().elidedText(
+            category_name,
+            Qt.TextElideMode.ElideRight,
+            100,
+        )
+        button.setText(f"🎯 {elided_name}  ×")
+        button.setToolTip(f"当前只显示类别“{category_name}”的图片，点击清除聚焦")
+        button.show()
+
+    def set_category_focus(self, category_name: str):
+        """让图片列表只显示一个指定类别，新的选择会替换旧选择。"""
+        category_name = str(category_name).strip()
+        if not category_name or category_name not in self.categories:
+            toast_warning(self, f"类别“{category_name}”不存在或已被忽略")
+            return
+
+        if not self.focused_category:
+            self._category_focus_previous_classified_filter = self.filter_classified
+        self.focused_category = category_name
+        self.filter_classified = True
+        self._update_category_focus_button()
+        self.apply_image_filter()
+
+        match_count = self.image_list_model.rowCount()
+        if match_count:
+            toast_info(self, f"已聚焦“{category_name}”：显示 {match_count} 张图片")
+
+    def clear_category_focus(self):
+        """清除类别聚焦，保留文件名搜索和图片状态筛选。"""
+        category_name = getattr(self, 'focused_category', None)
+        if not category_name:
+            return
+        self._deactivate_category_focus()
+        self.apply_image_filter()
+        toast_info(self, f"已取消类别“{category_name}”的聚焦")
+
+    def _deactivate_category_focus(self, restore_classified_filter: bool = True):
+        """退出类别聚焦，并按需恢复进入聚焦前的已分类筛选状态。"""
+        previous_filter = getattr(
+            self,
+            '_category_focus_previous_classified_filter',
+            None,
+        )
+        self.focused_category = None
+        self._category_focus_previous_classified_filter = None
+        if restore_classified_filter and previous_filter is not None:
+            self.filter_classified = previous_filter
+        self._update_category_focus_button()
+
+    def _matches_category_focus(self, classification) -> bool:
+        """判断一条分类记录是否符合当前的单类别聚焦条件。"""
+        focused_category = getattr(self, 'focused_category', None)
+        return ImageClassifier._classification_matches_focus(
+            classification,
+            focused_category,
+        )
+
+    @staticmethod
+    def _classification_matches_focus(classification, focused_category) -> bool:
+        """纯函数形式的类别匹配，供轻量 UIHooks 和测试替身复用。"""
+        if not focused_category:
+            return True
+        if isinstance(classification, (list, tuple, set)):
+            return focused_category in classification
+        return classification == focused_category
 
     def apply_image_filter(self, suppress_show: bool = False):
         """
@@ -3272,8 +3408,15 @@ class ImageClassifier(QMainWindow):
             # 检查搜索关键字匹配（大小写不敏感）
             search_match = (not search_keyword) or (search_keyword in file_name.lower())
 
-            # 同时满足状态过滤和搜索匹配
-            should_show = status_show and search_match
+            # 类别聚焦与状态筛选、文件名搜索取交集；多分类图片只要
+            # 包含目标类别就会显示。
+            category_match = ImageClassifier._classification_matches_focus(
+                valid_classified_images.get(img_path_str),
+                getattr(self, 'focused_category', None),
+            )
+
+            # 同时满足状态过滤、搜索和类别聚焦
+            should_show = status_show and search_match and category_match
 
             if should_show:
                 filtered_files.append(img_path)
@@ -3351,7 +3494,8 @@ class ImageClassifier(QMainWindow):
             and self.filter_removed
         )
         search_active = bool(getattr(self, '_image_search_text', '').strip())
-        return not all_statuses_visible or search_active
+        category_focus_active = bool(getattr(self, 'focused_category', None))
+        return not all_statuses_visible or search_active or category_focus_active
 
     def refresh_image_filter_path(self, path: str) -> str:
         """分类后只增量更新一个列表条目，不重建万级图片模型。"""
@@ -3399,7 +3543,11 @@ class ImageClassifier(QMainWindow):
             not search_keyword
             or search_keyword in Path(path_str).name.lower()
         )
-        should_be_visible = search_match and (
+        category_match = ImageClassifier._classification_matches_focus(
+            category,
+            getattr(self, 'focused_category', None),
+        )
+        should_be_visible = search_match and category_match and (
             (is_unclassified and self.filter_unclassified)
             or (is_classified and self.filter_classified)
             or (is_removed and self.filter_removed)
@@ -3509,6 +3657,10 @@ class ImageClassifier(QMainWindow):
             new_name = data.get('new_name')
             if old_name and new_name:
                 self.rename_category(old_name, new_name)
+        elif operation == 'focus_category':
+            category_name = data.get('category_name')
+            if category_name:
+                self.set_category_focus(category_name)
         elif operation == 'change_shortcut':
             # 修改快捷键
             category_name = data.get('category_name')
@@ -4880,6 +5032,9 @@ class ImageClassifier(QMainWindow):
             if hasattr(self, 'image_search_widget'):
                 self.image_search_widget.apply_theme()
 
+            if hasattr(self, 'category_focus_button'):
+                self._apply_category_focus_button_style()
+
             # 更新CategoryPanel主题
             if hasattr(self, 'category_panel'):
                 self.category_panel.apply_theme()
@@ -5772,7 +5927,15 @@ class ImageClassifier(QMainWindow):
         if not self._category_manager:
             self.logger.error("CategoryManager未初始化")
             return
-        self._category_manager.rename_category(old_name, new_name)
+        was_focused = self.focused_category == old_name
+        previous_filter = self._category_focus_previous_classified_filter
+        renamed = self._category_manager.rename_category(old_name, new_name)
+        if renamed and was_focused:
+            self.focused_category = new_name
+            self._category_focus_previous_classified_filter = previous_filter
+            self.filter_classified = True
+            self._update_category_focus_button()
+            self.apply_image_filter()
         # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
 
     def ignore_category(self, category_name):
@@ -5787,6 +5950,9 @@ class ImageClassifier(QMainWindow):
 
             # 添加到忽略列表
             if self.config.add_ignored_category(category_name):
+                if self.focused_category == category_name:
+                    self._deactivate_category_focus()
+
                 # 从快捷键配置中移除该类别
                 if category_name in self.config.category_shortcuts:
                     del self.config.category_shortcuts[category_name]
@@ -5798,6 +5964,7 @@ class ImageClassifier(QMainWindow):
                 self.load_categories()
 
                 # 刷新UI
+                self._pending_reapply_filter = self.is_image_filter_active()
                 self.schedule_ui_update('category_buttons', 'category_counts', 'image_list', 'statistics')
 
                 # 显示成功提示
@@ -5826,7 +5993,19 @@ class ImageClassifier(QMainWindow):
         if not self._category_manager:
             self.logger.error("CategoryManager未初始化")
             return
-        self._category_manager.delete_category(category_name)
+        was_focused = self.focused_category == category_name
+        previous_filter = self._category_focus_previous_classified_filter
+        if was_focused:
+            # CategoryManager 删除成功后会立即重算过滤列表，先临时退出聚焦，
+            # 避免它使用一个已不存在的类别得到空列表。
+            self._deactivate_category_focus()
+
+        deleted = self._category_manager.delete_category(category_name)
+        if not deleted and was_focused:
+            self.focused_category = category_name
+            self._category_focus_previous_classified_filter = previous_filter
+            self.filter_classified = True
+            self._update_category_focus_button()
         # Manager会触发categories_changed信号，UI刷新在on_categories_changed中处理
     
     def save_state(self):

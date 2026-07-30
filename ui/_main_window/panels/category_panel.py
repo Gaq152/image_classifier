@@ -345,6 +345,7 @@ class CategoryPanel(QWidget):
                 btn.clicked.connect(functools.partial(self._on_button_clicked, category_name))
 
                 # Phase 2.5: 连接 CategoryButton 的业务信号
+                btn.focus_requested.connect(self._on_focus_requested)
                 btn.rename_requested.connect(self._on_rename_requested)
                 btn.shortcut_change_requested.connect(self._on_shortcut_change_requested)
                 btn.ignore_requested.connect(self._on_ignore_requested)
@@ -499,6 +500,12 @@ class CategoryPanel(QWidget):
         return QIcon(pixmap)
 
     # ========== Phase 2.5: CategoryButton 信号处理 ==========
+
+    def _on_focus_requested(self, category_name: str):
+        """转发仅查看指定类别的请求。"""
+        self.operation_requested.emit('focus_category', {
+            'category_name': category_name
+        })
 
     def _on_rename_requested(self, old_name: str, new_name: str):
         """处理重命名请求 - 转发到 operation_requested"""
