@@ -1,0 +1,170 @@
+# Image Classifier AI - isolated build and rolling update channel
+# Version tags use ai-vX.Y.Z and never match the public v* workflow.
+
+name: Build and Release AI Edition
+
+on:
+  push:
+    tags:
+      - 'ai-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'AI version, for example 7.3.0 (without ai-v)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-ai:
+    name: Build Windows AI Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: requirements-gpu.txt
+
+      - name: Resolve AI version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}" -replace '^ai-v', ''
+          } else {
+            $version = "${{ inputs.version }}" -replace '^ai-v', ''
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "Invalid AI version: $version"
+            exit 1
+          }
+          (Get-Content _version_.py) -replace '__version__ = "[^"]*"', "__version__ = `"$version`"" | Set-Content _version_.py
+          Write-Output "VERSION=$version" >> $env:GITHUB_ENV
+          Write-Output "AI_TAG=ai-v$version" >> $env:GITHUB_ENV
+
+      - name: Install AI dependencies
+        shell: pwsh
+        run: |
+          pip uninstall -y onnxruntime onnxruntime-gpu
+          pip install -r requirements-gpu.txt pyinstaller pytest
+
+      - name: Verify AI build inputs
+        shell: pwsh
+        run: |
+          python -c "import onnxruntime as ort; print('ONNX Runtime:', ort.__version__, ort.get_available_providers())"
+          python -c "from _version_ import get_manifest_url; assert get_manifest_url(edition='ai').endswith('/ai-latest/manifest.json')"
+          python -m pytest tests/unit/test_product_channel.py tests/unit/test_ai_gpu_provider.py -q
+
+      - name: Build AI executable
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          chcp 65001
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+          python build.py --edition ai
+
+      - name: Prepare versioned and rolling assets
+        shell: pwsh
+        run: |
+          $version = $env:VERSION
+          $built = Get-ChildItem -Path "dist" -Filter "*.exe" | Select-Object -First 1
+          if (-not $built) {
+            Write-Error "No AI executable found in dist/"
+            exit 1
+          }
+
+          $versionedDir = "release-assets/versioned"
+          $latestDir = "release-assets/latest"
+          New-Item -ItemType Directory -Force -Path $versionedDir, $latestDir | Out-Null
+          $versionedName = "ImageClassifierAI_v${version}.exe"
+          $rollingName = "ImageClassifierAI_latest.exe"
+          $versionedPath = Join-Path $versionedDir $versionedName
+          $rollingPath = Join-Path $latestDir $rollingName
+          Copy-Item $built.FullName $versionedPath -Force
+          Copy-Item $built.FullName $rollingPath -Force
+
+          $hash = (Get-FileHash -Algorithm SHA256 $versionedPath).Hash.ToLower()
+          $size = (Get-Item $versionedPath).Length
+          Write-Output "SHA256=$hash" >> $env:GITHUB_ENV
+          Write-Output "SIZE_BYTES=$size" >> $env:GITHUB_ENV
+          Write-Output "VERSIONED_NAME=$versionedName" >> $env:GITHUB_ENV
+          Write-Output "ROLLING_NAME=$rollingName" >> $env:GITHUB_ENV
+
+      - name: Generate isolated AI manifests
+        shell: pwsh
+        run: |
+          $version = $env:VERSION
+          $date = Get-Date -Format "yyyy-MM-dd"
+          $common = @{
+            version = $version
+            edition = "ai"
+            channel = "ai"
+            date = $date
+            display_name = $env:VERSIONED_NAME
+            sha256 = $env:SHA256
+            size_bytes = [int64]$env:SIZE_BYTES
+            notes = "AI preview build with CPU fallback and NVIDIA CUDA support"
+          }
+
+          $versioned = $common.Clone()
+          $versioned.url = "https://github.com/Gaq152/image_classifier/releases/download/$env:AI_TAG/$env:VERSIONED_NAME"
+          $versioned | ConvertTo-Json -Depth 3 | Out-File "release-assets/versioned/manifest.json" -Encoding utf8NoBOM
+
+          $rolling = $common.Clone()
+          $rolling.url = "https://github.com/Gaq152/image_classifier/releases/download/ai-latest/$env:ROLLING_NAME"
+          $rolling | ConvertTo-Json -Depth 3 | Out-File "release-assets/latest/manifest.json" -Encoding utf8NoBOM
+
+      - name: Compose AI release notes
+        shell: pwsh
+        run: |
+          $body = @"
+          ## Image Classifier AI v$env:VERSION
+
+          This is the isolated AI preview edition. It does not replace the public edition and uses its own automatic-update channel.
+
+          - CPU inference remains available as a safe fallback.
+          - NVIDIA CUDA inference is used when the compatible CUDA 12 / cuDNN 9 runtime is available.
+          - Base models remain outside the executable and project-trained data remains beside the project JSON.
+
+          SHA256: $env:SHA256
+          "@
+          $body | Out-File "release-assets/release_body.md" -Encoding utf8NoBOM
+
+      - name: Publish versioned AI prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.AI_TAG }}
+          name: "Image Classifier AI v${{ env.VERSION }}"
+          draft: false
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          body_path: release-assets/release_body.md
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/versioned/${{ env.VERSIONED_NAME }}
+            release-assets/versioned/manifest.json
+
+      - name: Update rolling AI channel
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ai-latest
+          name: "Image Classifier AI - Latest Preview"
+          draft: false
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          body_path: release-assets/release_body.md
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/latest/${{ env.ROLLING_NAME }}
+            release-assets/latest/manifest.json

@@ -5,12 +5,38 @@
 版本信息由 _version_.py 统一管理
 """
 
+import argparse
 import os
 import sys
 import shutil
 import subprocess
 from pathlib import Path
 from _version_ import __version__, get_download_urls
+from product_channel import SUPPORTED_EDITIONS, get_product_info, normalize_edition
+
+
+BUILD_CHANNEL_FILE = Path("_build_channel_.py")
+
+
+def _build_channel_source(edition: str) -> str:
+    """Return the tiny module PyInstaller embeds into this executable."""
+    return (
+        '"""Build-time product channel embedded into the executable."""\n\n'
+        f'APP_EDITION = "{normalize_edition(edition)}"\n'
+    )
+
+
+def _write_build_channel(edition: str) -> str:
+    """Temporarily select an edition and return the original source."""
+    original = BUILD_CHANNEL_FILE.read_text(encoding="utf-8")
+    BUILD_CHANNEL_FILE.write_text(
+        _build_channel_source(edition), encoding="utf-8"
+    )
+    return original
+
+
+def _restore_build_channel(original: str) -> None:
+    BUILD_CHANNEL_FILE.write_text(original, encoding="utf-8")
 
 
 def check_pyinstaller():
@@ -119,13 +145,15 @@ def check_dependencies():
     return True
 
 
-def build_executable():
+def build_executable(edition: str = "standard"):
     """构建可执行文件 - 优化版本"""
-    print("开始构建可执行文件（优化版本）...")
+    edition = normalize_edition(edition)
+    product = get_product_info(edition)
+    print(f"开始构建可执行文件（{product['application_name']}）...")
     
     # 项目信息 - 使用英文名称避免编码问题
     version = __version__
-    final_name = f"ImageClassifier_v{version}"
+    final_name = f"{product['ascii_executable_base']}_v{version}"
     
     # 构建PyInstaller命令 - 精简版本
     cmd = [
@@ -195,6 +223,7 @@ def build_executable():
     print(f"执行命令: {' '.join(cmd[:10])}... (命令过长，已截断)")
     print("注意: 使用精简依赖配置以减小文件体积")
     
+    original_build_channel = _write_build_channel(edition)
     try:
         # 运行PyInstaller - 修复编码问题
         print("正在执行PyInstaller...")
@@ -206,49 +235,64 @@ def build_executable():
             errors='replace'  # 替换无法解码的字符
         )
         
-        if result.returncode == 0:
-            print("✓ 构建成功!")
-            
-            # 检查输出文件
-            exe_path = Path('dist') / f'{final_name}.exe'
-            if exe_path.exists():
-                size_mb = exe_path.stat().st_size / (1024 * 1024)
-                print(f"✓ 可执行文件已生成: {exe_path}")
-                print(f"✓ 文件大小: {size_mb:.1f} MB")
-                
-                # 重命名为中文名称
-                chinese_name = f"图像分类工具_v{version}.exe"
-                chinese_path = Path('dist') / chinese_name
-                try:
-                    exe_path.rename(chinese_path)
-                    print(f"✓ 文件已重命名为: {chinese_name}")
-                except Exception as e:
-                    print(f"重命名警告: {e}")
-                    print(f"请手动将 {exe_path.name} 重命名为 {chinese_name}")
-                
-                return True
-            else:
-                print("✗ 可执行文件生成失败")
-                return False
-        else:
-            print("✗ 构建失败")
-            if result.stderr:
-                print("错误输出:")
-                print(result.stderr)
-            if result.stdout:
-                print("标准输出:")
-                print(result.stdout)
-            return False
-            
     except Exception as e:
         print(f"✗ 构建过程中出现异常: {e}")
         return False
+    finally:
+        _restore_build_channel(original_build_channel)
+
+    if result.returncode == 0:
+        print("✓ 构建成功!")
+
+        # 检查输出文件
+        exe_path = Path('dist') / f'{final_name}.exe'
+        if exe_path.exists():
+            size_mb = exe_path.stat().st_size / (1024 * 1024)
+            print(f"✓ 可执行文件已生成: {exe_path}")
+            print(f"✓ 文件大小: {size_mb:.1f} MB")
+
+            # 重命名为中文名称
+            chinese_name = (
+                f"{product['chinese_executable_base']}_v{version}.exe"
+            )
+            chinese_path = Path('dist') / chinese_name
+            try:
+                exe_path.rename(chinese_path)
+                print(f"✓ 文件已重命名为: {chinese_name}")
+            except Exception as e:
+                print(f"重命名警告: {e}")
+                print(f"请手动将 {exe_path.name} 重命名为 {chinese_name}")
+
+            return True
+        print("✗ 可执行文件生成失败")
+        return False
+    print("✗ 构建失败")
+    if result.stderr:
+        print("错误输出:")
+        print(result.stderr)
+    if result.stdout:
+        print("标准输出:")
+        print(result.stdout)
+    return False
 
 
-def main():
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="构建图像分类工具 Windows EXE")
+    parser.add_argument(
+        "--edition",
+        choices=SUPPORTED_EDITIONS,
+        default="standard",
+        help="standard 为公开基础版，ai 为独立 AI 更新通道",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
     """主函数"""
+    args = _parse_args(argv)
+    product = get_product_info(args.edition)
     print("=" * 60)
-    print("图像分类工具 - 优化构建脚本")
+    print(f"{product['application_name']} - 优化构建脚本")
     print(f"版本: {__version__}")
     print("特点: 精简依赖 + 修复编码 + 最小体积")
     print("=" * 60)
@@ -277,7 +321,7 @@ def main():
     clean_build_dirs()
     
     # 构建可执行文件
-    if not build_executable():
+    if not build_executable(args.edition):
         print("✗ 构建失败")
         return 1
 
@@ -286,7 +330,7 @@ def main():
 
     print("\n" + "=" * 60)
     print("✅ 优化构建完成!")
-    download_urls = get_download_urls()
+    download_urls = get_download_urls(args.edition)
     print(f"📁 可执行文件: dist/{download_urls['exe_name_chinese']}")
     print("✨ 包含完整功能，去除冗余依赖")
     print("🧹 构建产物已清理，仅保留最终exe文件")

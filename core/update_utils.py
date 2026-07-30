@@ -27,6 +27,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
+from _version_ import get_manifest_url
+from product_channel import validate_manifest_edition
 from utils.paths import get_update_dir
 
 # Public GitHub Releases 默认无需令牌，保留可选令牌能力用于私有源
@@ -192,7 +194,14 @@ def fetch_manifest(
         try:
             with _open_update_request(req, timeout, proxy) as resp:
                 data = resp.read()
-                return json.loads(data.decode('utf-8'))
+                manifest = json.loads(data.decode('utf-8'))
+                if not isinstance(manifest, dict):
+                    raise RuntimeError("manifest 必须是 JSON 对象")
+                try:
+                    validate_manifest_edition(manifest)
+                except ValueError as error:
+                    raise RuntimeError(str(error)) from error
+                return manifest
         except HTTPError as e:
             # 对于临时性错误（502, 503, 504）进行重试
             if e.code in (502, 503, 504) and attempt < retries:
@@ -387,7 +396,15 @@ def save_pending_update(
     update_dir.mkdir(parents=True, exist_ok=True)
     safe_manifest = {
         key: manifest.get(key)
-        for key in ("version", "url", "size_bytes", "sha256", "notes")
+        for key in (
+            "version",
+            "url",
+            "size_bytes",
+            "sha256",
+            "notes",
+            "edition",
+            "channel",
+        )
         if key in manifest
     }
     metadata = {
@@ -571,7 +588,7 @@ def cleanup_incomplete_updates(update_dir: Optional[Path] = None) -> None:
     if ready is not None and pending is not None:
         discard_pending_update(update_dir)
     ready_path = ready.get("path") if ready else None
-    for package in update_dir.glob("ImageClassifier_v*.exe"):
+    for package in update_dir.glob("ImageClassifier*_v*.exe"):
         if ready_path is None or package.resolve() != ready_path:
             try:
                 package.unlink(missing_ok=True)
@@ -663,9 +680,7 @@ def ensure_persistent_updater(target_exe: Path) -> Path:
     update_dir.mkdir(parents=True, exist_ok=True)
     batch_path = update_dir / "update.bat"
 
-    manifest_url = (
-        "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json"
-    )
+    manifest_url = get_manifest_url(latest=True)
     escaped_target = _escape_win_path(str(exe_path))
     escaped_dir = _escape_win_path(str(exe_dir))
     exe_name = exe_path.name

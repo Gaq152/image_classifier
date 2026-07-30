@@ -150,6 +150,8 @@ jobs:
 
           $manifest = @{
             version = $version
+            edition = "standard"
+            channel = "stable"
             date = $date
             url = $download_url
             display_name = "ImageClassifier_v${version}.exe"

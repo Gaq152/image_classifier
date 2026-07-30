@@ -18,7 +18,7 @@ from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QLocale
-from _version_ import __version__
+from _version_ import RELEASE_NAME, __version__
 from utils.paths import get_logs_dir
 from .ui.main_window import ImageClassifier
 
@@ -139,7 +139,7 @@ def setup_logging():
 
         logger = logging.getLogger(__name__)
         logger.info("=" * 60)
-        logger.info("图像分类工具启动")
+        logger.info("%s启动", RELEASE_NAME)
         logger.info(f"日志目录: {log_dir}")
         logger.info("日志保留天数: 7天")
         logger.info("=" * 60)
@@ -186,7 +186,7 @@ def main():
 
         # 创建应用程序实例
         app = QApplication(sys.argv)
-        app.setApplicationName("图像分类工具")
+        app.setApplicationName(RELEASE_NAME)
         app.setApplicationVersion(__version__)
         app.setOrganizationName("ImageClassifier")
         

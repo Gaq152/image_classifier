@@ -7,6 +7,8 @@
 import datetime
 from typing import Dict
 
+from product_channel import get_product_info
+
 # ================================
 # 🎯 核心版本信息
 # ================================
@@ -17,7 +19,7 @@ __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
 RELEASE_DATE = "2026-07-30"
-RELEASE_NAME = "图像分类工具"
+RELEASE_NAME = str(get_product_info()["application_name"])
 
 # ================================
 # 📋 版本历史和更新信息
@@ -919,26 +921,53 @@ def get_version_badge_info() -> Dict:
         "label": "version"
     }
 
-def get_download_urls() -> Dict:
+def get_download_urls(edition: str = None) -> Dict:
     """获取下载链接信息"""
     version = __version__
     release_base = DOWNLOAD_INFO["releases_base"]
+    product = get_product_info(edition)
+    ascii_base = str(product["ascii_executable_base"])
+    chinese_base = str(product["chinese_executable_base"])
+    release_tag = f"{product['release_tag_prefix']}{version}"
+    rolling_tag = product["rolling_release_tag"]
+    versioned_name = f"{ascii_base}_v{version}.exe"
+    rolling_name = (
+        f"{ascii_base}_latest.exe" if rolling_tag else versioned_name
+    )
+    latest_url = (
+        f"{release_base}/download/{rolling_tag}/{rolling_name}"
+        if rolling_tag
+        else f"{release_base}/latest/download/{versioned_name}"
+    )
 
     return {
-        "specific_version": f"{release_base}/download/v{version}/ImageClassifier_v{version}.exe",
-        "latest": f"{release_base}/latest/download/ImageClassifier_v{version}.exe",
-        "exe_name": DOWNLOAD_INFO["exe_name_template"].format(version=version),
-        "exe_name_chinese": DOWNLOAD_INFO["exe_name_chinese_template"].format(version=version)
+        "specific_version": (
+            f"{release_base}/download/{release_tag}/{versioned_name}"
+        ),
+        "latest": latest_url,
+        "exe_name": versioned_name,
+        "rolling_exe_name": rolling_name,
+        "exe_name_chinese": f"{chinese_base}_v{version}.exe",
+        "release_tag": release_tag,
     }
 
-def get_manifest_url(latest: bool = True, version: str = None) -> str:
+def get_manifest_url(
+    latest: bool = True,
+    version: str = None,
+    edition: str = None,
+) -> str:
     """返回 manifest.json 的下载地址。
     latest=True 时返回 latest 路径，否则需要传入版本号。
     """
     release_base = DOWNLOAD_INFO["releases_base"]
+    product = get_product_info(edition)
     if latest or not version:
+        rolling_tag = product["rolling_release_tag"]
+        if rolling_tag:
+            return f"{release_base}/download/{rolling_tag}/manifest.json"
         return f"{release_base}/latest/download/manifest.json"
-    return f"{release_base}/download/v{version}/manifest.json"
+    release_tag = f"{product['release_tag_prefix']}{version}"
+    return f"{release_base}/download/{release_tag}/manifest.json"
 
 def get_latest_version_info() -> Dict:
     """获取最新版本的详细信息"""

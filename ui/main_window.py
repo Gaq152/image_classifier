@@ -71,7 +71,7 @@ from core.update_utils import (
 )
 from utils.performance import performance_monitor
 from utils.paths import get_update_dir
-from _version_ import __version__, get_manifest_url, compare_version
+from _version_ import RELEASE_NAME, __version__, compare_version, get_manifest_url
 
 
 class DisabledButtonEventFilter(QObject):
@@ -851,7 +851,7 @@ class ImageClassifier(QMainWindow):
     def init_ui(self):
         """初始化美化的用户界面"""
         try:
-            self.setWindowTitle(f"图像分类工具 v{self.version}")
+            self.setWindowTitle(f"{RELEASE_NAME} v{self.version}")
             # 普通窗口状态下也要完整容纳核心操作区。
             self.setMinimumSize(1024, 600)
             self._start_maximized = False
@@ -3352,7 +3352,7 @@ class ImageClassifier(QMainWindow):
         """内部UI状态更新方法"""
         # 更新窗口标题
         if self.current_dir and self.image_files:
-            title = f"图像分类工具 v{self.version} - {self.current_dir.name} ({self.current_index + 1}/{len(self.image_files)})"
+            title = f"{RELEASE_NAME} v{self.version} - {self.current_dir.name} ({self.current_index + 1}/{len(self.image_files)})"
             self.setWindowTitle(title)
     
     def _update_category_counts_internal(self):
@@ -3656,7 +3656,7 @@ class ImageClassifier(QMainWindow):
                 # 窗口标题：目录名 + 进度
                 dir_name = self.current_dir.name
                 progress = f"({self.current_index + 1}/{len(self.image_files)})"
-                title = f"图像分类工具 v{self.version} - {dir_name} {progress}"
+                title = f"{RELEASE_NAME} v{self.version} - {dir_name} {progress}"
                 self.setWindowTitle(title)
                 
                 # 状态栏：图片名称

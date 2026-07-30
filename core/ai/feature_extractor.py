@@ -3,6 +3,8 @@
 import importlib
 import json
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
@@ -12,6 +14,64 @@ import numpy as np
 
 class AIModelUnavailableError(RuntimeError):
     """Raised when the optional model runtime or model pack is unavailable."""
+
+
+CUDA_RUNTIME_DLLS = (
+    "cublasLt64_12.dll",
+    "cublas64_12.dll",
+    "cufft64_11.dll",
+    "cudart64_12.dll",
+    "cudnn64_9.dll",
+)
+
+
+def find_cuda_runtime_directory() -> Optional[Path]:
+    """Find a compatible external CUDA 12/cuDNN 9 runtime on Windows.
+
+    The AI executable intentionally does not bundle the very large NVIDIA
+    runtime. An explicit environment path wins; frozen builds can also reuse a
+    compatible PyTorch installation already present for the current user.
+    """
+    candidates = []
+    explicit = os.getenv("IMAGE_CLASSIFIER_CUDA_DIR", "").strip()
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+
+    candidates.append(
+        Path(sys.prefix) / "Lib" / "site-packages" / "torch" / "lib"
+    )
+    local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        python_root = Path(local_app_data) / "Programs" / "Python"
+        if python_root.is_dir():
+            candidates.extend(
+                sorted(
+                    python_root.glob("Python*/Lib/site-packages/torch/lib"),
+                    reverse=True,
+                )
+            )
+    candidates.extend(
+        sorted(
+            (Path.home() / ".conda" / "envs").glob(
+                "*/Lib/site-packages/torch/lib"
+            ),
+            reverse=True,
+        )
+    )
+
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        key = os.path.normcase(str(resolved))
+        if key in seen:
+            continue
+        seen.add(key)
+        if all((resolved / name).is_file() for name in CUDA_RUNTIME_DLLS):
+            return resolved
+    return None
 
 
 def is_cuda_execution_available() -> bool:
@@ -187,7 +247,14 @@ class OnnxEmbeddingExtractor:
             try:
                 # ONNX Runtime 1.21+ 可从 PyTorch 或 nvidia-* Python 包加载
                 # CUDA/cuDNN DLL，源码运行和打包环境都能复用同一逻辑。
-                ort.preload_dlls()
+                runtime_dir = find_cuda_runtime_directory()
+                if runtime_dir is None:
+                    ort.preload_dlls()
+                else:
+                    self.logger.info(
+                        "使用外部 CUDA 运行库: %s", runtime_dir
+                    )
+                    ort.preload_dlls(directory=str(runtime_dir))
             except Exception as error:
                 self.logger.debug("预加载 CUDA DLL 失败: %s", error)
 

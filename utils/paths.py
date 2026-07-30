@@ -6,6 +6,8 @@
 
 from pathlib import Path
 
+from product_channel import get_product_info
+
 
 def get_app_data_dir() -> Path:
     r"""获取应用程序数据目录
@@ -39,12 +41,13 @@ def get_logs_dir() -> Path:
 
 
 def get_update_dir() -> Path:
-    r"""获取更新目录（不自动创建，有更新时才创建）
+    r"""获取当前产品通道的更新目录（不自动创建）。
 
     Returns:
-        Path: C:\Users\<username>\image_classifier\update
+        标准版为 ``...\update``，AI 版为 ``...\update\ai``。
     """
-    return get_app_data_dir() / "update"
+    subdirectory = str(get_product_info()["update_subdirectory"])
+    return get_app_data_dir().joinpath(*subdirectory.split("/"))
 
 
 def get_ai_cache_dir() -> Path:

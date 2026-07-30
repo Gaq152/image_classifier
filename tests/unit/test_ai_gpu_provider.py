@@ -8,7 +8,9 @@ import pytest
 
 from core.ai.feature_extractor import (
     AIModelUnavailableError,
+    CUDA_RUNTIME_DLLS,
     OnnxEmbeddingExtractor,
+    find_cuda_runtime_directory,
     spatial_color_features,
 )
 
@@ -163,3 +165,13 @@ def test_vectorized_spatial_color_features_keep_historical_order():
         rtol=1e-6,
         atol=1e-6,
     )
+
+
+def test_explicit_cuda_runtime_directory_has_priority(monkeypatch, tmp_path):
+    runtime_dir = tmp_path / "cuda-runtime"
+    runtime_dir.mkdir()
+    for filename in CUDA_RUNTIME_DLLS:
+        (runtime_dir / filename).touch()
+    monkeypatch.setenv("IMAGE_CLASSIFIER_CUDA_DIR", str(runtime_dir))
+
+    assert find_cuda_runtime_directory() == runtime_dir.resolve()

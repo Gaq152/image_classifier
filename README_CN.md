@@ -281,20 +281,23 @@ Windows 下运行器使用 Job Object 设置进程树硬内存上限，同时监
 
 ### 自动化发布流程
 
-项目使用 GitHub Actions 实现自动化构建和发布：
+项目使用两个互不干扰的 GitHub Actions 发布通道：
 
-**发布流程**：
-1. 推送版本标签（如 `v6.6.0`）
-2. 自动触发 GitHub Actions 构建流程
-3. 生成优化的 EXE 文件
-4. 创建 GitHub Release 页面并上传资产
+| 版本 | 触发标签 | EXE | 自动更新 manifest |
+| --- | --- | --- | --- |
+| 基础版 | `vX.Y.Z` | `ImageClassifier_vX.Y.Z.exe` | `releases/latest/download/manifest.json` |
+| AI 版 | `ai-vX.Y.Z` | `ImageClassifierAI_vX.Y.Z.exe` | `releases/download/ai-latest/manifest.json` |
+
+AI 版本以 prerelease 发布，并同步覆盖 `ai-latest` 滚动资产，因此不会改变 GitHub 的基础版 `latest` Release。程序还会校验 manifest 中的 `edition` 和 `channel`，AI 版拒绝安装基础版更新；两个版本的断点下载分别保存在 `update` 和 `update/ai` 目录。
 
 **构建特性**：
-- 单文件 exe，无需额外依赖
+- 基础版为单文件 exe，无需额外依赖
 - 包含应用图标和资源文件
 - 优化文件体积（约86MB）
 - 支持 Windows 10+ 系统
 - 自动版本号管理
+
+AI CI 使用 `onnxruntime-gpu` 构建单独的 GPU-capable EXE，模型文件仍保存在程序外。为避免每次自动更新都下载超大的 CUDA 运行库，CUDA 12 / cuDNN 9 不打入 EXE；程序会优先读取 `IMAGE_CLASSIFIER_CUDA_DIR`，也会识别当前用户已有的兼容 PyTorch `torch\\lib`，仍找不到时显示原因并自动回退 CPU。
 
 ### 本地构建（开发用）
 
@@ -304,8 +307,11 @@ Windows 下运行器使用 Job Object 设置进程树硬内存上限，同时监
 # 安装构建依赖
 pip install pyinstaller
 
-# 运行构建脚本
+# 基础版
 python build.py
+
+# AI 版（内嵌 AI 产品标识和独立更新地址）
+python build.py --edition ai
 ```
 
 > 正式发布请使用 CI/CD 流程，确保构建一致性和版本管理。
