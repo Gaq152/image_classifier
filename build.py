@@ -10,7 +10,7 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
-from _version_ import __version__, get_full_version_string, get_download_urls, print_version_info
+from _version_ import __version__, get_download_urls
 
 
 def check_pyinstaller():
@@ -88,6 +88,7 @@ def check_dependencies():
     required_deps = {
         'PyQt6': 'PyQt6',
         'cv2': 'opencv-python',
+        'onnxruntime': 'onnxruntime',
         'PIL': 'Pillow',
         'psutil': 'psutil'
     }
@@ -123,7 +124,6 @@ def build_executable():
     print("开始构建可执行文件（优化版本）...")
     
     # 项目信息 - 使用英文名称避免编码问题
-    app_name = "ImageClassifier"
     version = __version__
     final_name = f"ImageClassifier_v{version}"
     
@@ -141,6 +141,8 @@ def build_executable():
         '--hidden-import', 'PyQt6.QtCore',
         '--hidden-import', 'PyQt6.QtGui',
         '--hidden-import', 'cv2',
+        '--hidden-import', 'onnxruntime',
+        '--collect-all', 'onnxruntime',
         '--hidden-import', 'PIL.Image',  # 只导入Image，不导入其他PIL子模块
         '--hidden-import', 'psutil',
         '--hidden-import', 'ssl',  # HTTPS 请求必需

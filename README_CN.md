@@ -135,6 +135,7 @@ python run.py
 | `←` `→` | 图片导航 | 在图片列表中前后浏览 |
 | `↑` `↓` | 类别导航 | 在类别列表中上下选择 |
 | `Enter` | 确认分类 | 将当前图片分类到选中类别 |
+| `Tab` | 手动模型预测 | 在“AI · 手动”模式分析当前图片 |
 | `1`-`9`, `A`-`Z` | 快速分类 | 使用数字或字母快捷键快速分类 |
 | `Delete` | 移出图片 | 将图片移动到remove目录 |
 | `F5` | 刷新 | 重新扫描当前目录 |
@@ -149,6 +150,51 @@ python run.py
 程序会在图片目录的同级目录下生成以下配置文件：
 - `config.json`: 类别记录和快捷键配置
 - `classification_state.json`: 工作状态以及分类信息保存
+
+### AI 辅助分类原型
+
+当前分支支持“固定视觉编码器 + 空间颜色特征 + 类别均衡 KNN”的半自动分类：
+
+- 每个项目第一次启用 AI 时，可选择从零开始、使用本目录已有人工标注，或导入其他 `classification_state.json`。
+- 内置速度优先（MobileNetV3）、均衡版本（ResNet18）和精度优先（DINOv2 ViT-S/14）三档基础模型。
+- 每个类别达到 5 张有效人工样本后才开始试预测；建议每类达到 20 张以上。
+- 切换到未初始化的模型会重新建立该模型的项目特征库；已经初始化过的模型直接复用。
+- 工具栏可切换 `AI · 自动` 与 `AI · 手动`：自动模式停留 200ms 后预测，手动模式按 `Tab` 触发。
+- 推理期间图片预览区显示加载动画并锁定翻页；完成后在图片上叠加建议结果，同时发送 Toast 通知。
+- 每张图显示 Top-3 相对匹配结果；高可信结果只预选类别，仍需按 `Enter` 确认。
+- 已移除图片作为独立反馈样本参与学习；模型只能显示“建议移除”，必须由用户按 `Delete` 确认，绝不自动移除。
+- 人工确认或纠正后立即更新样本库，不需要逐张重新训练神经网络。
+- 连续快速翻页时丢弃过期结果；项目训练结果与 `classification_state.json` 保存在同一目录。
+
+模型包不会提交到仓库或塞进项目目录。开发机首次使用时执行：
+
+```bash
+# 仅导出/评估模型需要，正式 CPU 推理仍使用项目已有的 OpenCV
+pip install torch torchvision onnx scikit-learn
+
+# 分别导出三档外置 ONNX 基础模型包
+python scripts/export_ai_model.py --profile speed
+python scripts/export_ai_model.py --profile balanced
+python scripts/export_ai_model.py --profile accuracy
+
+# 可选：用已有分类状态做随机留出、连续帧分组和逐视频留出评估
+python scripts/evaluate_ai_embeddings.py "D:\数据\classification_state.json"
+
+# 把 removed_images 作为第四类一并评估
+python scripts/evaluate_ai_embeddings.py "D:\数据\classification_state.json" --include-removed
+
+# 启动后打开原图片目录，程序会自动读取现有标注并建立索引
+python run.py
+```
+
+本地文件默认位于：
+
+- 基础模型：`%USERPROFILE%\image_classifier\ai_models\<模型版本>\`
+- 项目训练结果：`classification_state.json` 同目录下的 `ai_model_speed_v1.npz`、`ai_model_balanced_v1.npz` 或 `ai_model_accuracy_v1.npz`
+
+当前版本固定使用 CPU：速度/均衡模型使用 OpenCV DNN，精度模型使用 ONNX Runtime CPU。精度模型在 UI 中带有 CPU 性能提醒；GPU 后端将在 CPU 流程稳定后沿用同一模型协议接入。
+
+该方案是项目内的增量助手，不是跨摄像机的通用分类器。新视角、新倍率或新环境应先由人工完成一批覆盖各类情况的样本，再参考“逐视频留出”结果决定是否采用建议。
 
 ## 项目结构
 
