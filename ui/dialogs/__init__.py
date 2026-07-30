@@ -17,6 +17,7 @@ from .category_shortcut_dialog import CategoryShortcutDialog
 from .add_categories_dialog import AddCategoriesDialog
 from .ignored_categories_dialog import ManageIgnoredCategoriesDialog
 from .help_dialog import TabbedHelpDialog
+from .ai_setup_dialog import AIProjectSetupDialog
 
 # SettingsDialog 已拆分到 settings 子包
 from .settings import SettingsDialog
@@ -30,4 +31,5 @@ __all__ = [
     'ProgressDialog',
     'ManageIgnoredCategoriesDialog',
     'SettingsDialog',
+    'AIProjectSetupDialog',
 ]

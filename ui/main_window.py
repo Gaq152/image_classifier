@@ -12,6 +12,7 @@ import json
 import threading
 import shutil
 import traceback
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 import numpy as np
@@ -42,13 +43,22 @@ from .components.styles.theme import default_theme
 from .components.tutorial import TutorialManager
 from .dialogs import (CategoryShortcutDialog, AddCategoriesDialog,
                      TabbedHelpDialog, ProgressDialog, SettingsDialog, ManageIgnoredCategoriesDialog,
-                     UpdateCheckerThread)
+                     UpdateCheckerThread, AIProjectSetupDialog)
 from .managers import FileStateManager
 from .managers.image_navigation_manager import ImageNavigationManager
 from .managers.file_operation_manager import FileOperationManager as UIFileOperationManager
 from .managers.category_manager import CategoryManager
+from .managers.ai_classification_manager import AIClassificationManager
 from .update_download import get_update_download_controller
 from .update_popover import UpdateCenterPopover
+from core.ai import (
+    AI_PROJECT_STATE_KEY,
+    AI_REMOVAL_LABEL,
+    default_ai_project_state,
+    get_ai_model_profile,
+    is_project_model_initialized,
+    normalize_ai_project_state,
+)
 from core.config import Config
 from utils.app_config import get_app_config
 from core.scanner import FileScannerThread
@@ -116,6 +126,7 @@ class ImageClassifier(QMainWindow):
     # 信号定义
     file_moved = pyqtSignal(str, str)  # 文件移动信号(源路径, 目标路径)
     category_added = pyqtSignal(str)   # 类别添加信号
+    AI_PREDICTION_DEBOUNCE_MS = 200
     
     def __init__(self):
         super().__init__()
@@ -306,6 +317,17 @@ class ImageClassifier(QMainWindow):
                 logger=self.logger
             )
 
+            # 模型文件保持在程序外部；缺失或不可用时只关闭 AI，不影响人工分类。
+            self._ai_manager = AIClassificationManager(
+                preferred_provider="cpu",
+                logger=self.logger,
+                parent=self,
+            )
+            self._ai_manager.status_changed.connect(self._on_ai_status_changed)
+            self._ai_manager.index_progress.connect(self._on_ai_index_progress)
+            self._ai_manager.prediction_ready.connect(self._on_ai_prediction_ready)
+            self._ai_manager.model_state_changed.connect(self._on_ai_model_state_changed)
+
             self.logger.info("Manager初始化完成")
 
             # 连接 Manager 信号（替代 scanner 直连）
@@ -392,6 +414,24 @@ class ImageClassifier(QMainWindow):
         self.loading_in_progress = False
         self.initial_batch_loaded = False
         self.background_loading = False
+
+        # 模型预测状态：自动模式停留 200ms 后触发，手动模式由 Tab 触发。
+        self.ai_prediction_mode = self.app_config.ai_prediction_mode
+        self._ai_current_image_data = None
+        self._ai_current_image_path = None
+        self._ai_prediction_loading = False
+        self._ai_prediction_active_path = None
+        self._ai_prediction_active_request_id = -1
+        self._ai_navigation_notice_time = 0.0
+        self._ai_prediction_timer = QTimer(self)
+        self._ai_prediction_timer.setSingleShot(True)
+        self._ai_prediction_timer.setInterval(self.AI_PREDICTION_DEBOUNCE_MS)
+        self._ai_prediction_timer.timeout.connect(
+            lambda: self._trigger_ai_prediction("auto")
+        )
+        self._ai_project_state = default_ai_project_state()
+        self._ai_pending_initialization = {}
+        self._ai_configured_project_dir = None
         
         # 分类状态
         self.classified_images = {}  # 文件路径 -> 分类
@@ -766,6 +806,9 @@ class ImageClassifier(QMainWindow):
             else:
                 pixmap = self.convert_to_pixmap(image_data)
                 self.image_label.set_image(pixmap)
+            # 导航器命中内存缓存时加载器不会再次发 image_loaded 信号，
+            # 因此已显示的缓存图片必须在这里直接交给 AI。
+            self._on_ai_image_ready(image_data)
 
     # ==================== ImageLoader 接口实现 ====================
 
@@ -1084,6 +1127,9 @@ class ImageClassifier(QMainWindow):
         # 分类模式按钮（单分类/多分类）
         self.create_category_mode_button(self.toolbar)
 
+        # 模型预测模式（自动 / 手动Tab触发）
+        self.create_ai_prediction_mode_button(self.toolbar)
+
         self.toolbar.addSeparator()
 
         # 刷新按钮 - 使用统一样式
@@ -1160,6 +1206,101 @@ class ImageClassifier(QMainWindow):
         # 添加到工具栏
         toolbar.addWidget(self.mode_button)
         self.set_mode(self.is_copy_mode)
+
+    def create_ai_prediction_mode_button(self, toolbar):
+        """创建自动/手动模型预测模式切换按钮。"""
+        self.ai_prediction_mode_button = QPushButton()
+        self.ai_prediction_mode_button.setObjectName("ai_prediction_mode_button")
+        self.ai_prediction_mode_button.clicked.connect(
+            self._on_ai_prediction_button_clicked
+        )
+        toolbar.addWidget(self.ai_prediction_mode_button)
+
+        self.ai_model_button = QPushButton()
+        self.ai_model_button.setObjectName("ai_model_button")
+        self.ai_model_button.clicked.connect(self.show_ai_project_setup)
+        toolbar.addWidget(self.ai_model_button)
+        self._update_ai_prediction_mode_button()
+
+    def _update_ai_prediction_mode_button(self):
+        button = getattr(self, "ai_prediction_mode_button", None)
+        if button is None:
+            return
+        initialized = self._is_active_ai_model_initialized()
+        is_auto = getattr(self, "ai_prediction_mode", "auto") == "auto"
+        if initialized:
+            button.setText("AI · 自动" if is_auto else "AI · 手动")
+            button.setToolTip(
+                "自动预测：停止翻页 200ms 后触发，点击切换为手动模式"
+                if is_auto
+                else "手动预测：按 Tab 分析当前图片，点击切换为自动模式"
+            )
+        else:
+            button.setText("AI · 启用")
+            button.setToolTip("首次启用：选择基础模型以及从零开始或导入旧标注")
+        style_button(
+            button,
+            "primary" if initialized and is_auto else "secondary",
+            "compact",
+            min_width=92,
+        )
+
+        model_button = getattr(self, "ai_model_button", None)
+        if model_button is not None:
+            project_state = getattr(
+                self, "_ai_project_state", default_ai_project_state()
+            )
+            model_key = project_state.get("active_model", "balanced")
+            profile = get_ai_model_profile(model_key)
+            model_button.setText(f"模型 · {profile.short_name}")
+            model_button.setToolTip("项目 AI 设置：切换速度、均衡或精度模型")
+            style_button(model_button, "secondary", "compact", min_width=92)
+
+    def _on_ai_prediction_button_clicked(self):
+        if not self._is_active_ai_model_initialized():
+            self.show_ai_project_setup()
+            return
+        self._toggle_ai_prediction_mode()
+
+    def _toggle_ai_prediction_mode(self):
+        mode = (
+            "manual"
+            if getattr(self, "ai_prediction_mode", "auto") == "auto"
+            else "auto"
+        )
+        self.set_ai_prediction_mode(mode)
+
+    def set_ai_prediction_mode(self, mode: str, notify: bool = True):
+        """切换预测模式并刷新当前图片的预测调度。"""
+        if mode not in ("auto", "manual"):
+            return
+        if getattr(self, "_ai_prediction_loading", False):
+            self._notify_ai_navigation_locked()
+            return
+
+        self.ai_prediction_mode = mode
+        self.app_config.ai_prediction_mode = mode
+        self._ai_prediction_timer.stop()
+        if hasattr(self, "image_view_panel"):
+            self.image_view_panel.clear_prediction_overlay()
+        self._update_ai_prediction_mode_button()
+
+        if mode == "auto":
+            if self._ai_current_image_data is not None:
+                self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    "AI 自动预测 · 停止翻页 200ms 后分析", "ready"
+                )
+            if notify:
+                toast_info(self, "已开启自动模型预测：停止翻页 200ms 后分析")
+        else:
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    "AI 手动预测 · 按 Tab 分析当前图片", "ready"
+                )
+            if notify:
+                toast_info(self, "已切换手动模型预测：按 Tab 触发")
     
     def create_status_bar(self):
         """创建状态栏"""
@@ -1337,7 +1478,7 @@ class ImageClassifier(QMainWindow):
             # 基本快捷键列表
             basic_shortcuts = {
                 Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down,
-                Qt.Key.Key_Return, Qt.Key.Key_Delete, Qt.Key.Key_F5
+                Qt.Key.Key_Return, Qt.Key.Key_Delete, Qt.Key.Key_Tab, Qt.Key.Key_F5
             }
 
             # 检查基本快捷键
@@ -1619,8 +1760,14 @@ class ImageClassifier(QMainWindow):
     def open_directory(self):
         """打开图片目录"""
 
+        if self._ai_prediction_loading:
+            self._notify_ai_navigation_locked()
+            return
+
         dir_path = QFileDialog.getExistingDirectory(self, '选择图片目录')
         if dir_path:
+            if getattr(self, '_ai_manager', None):
+                self._ai_manager.clear_project()
             self.current_dir = Path(dir_path)
 
             # 检测微信目录并提醒（只提醒一次）
@@ -2202,6 +2349,8 @@ class ImageClassifier(QMainWindow):
 
     def jump_to_image(self, index):
         """跳转到指定索引的图片（委托给ImageNavigationManager）"""
+        if not self._prepare_ai_navigation():
+            return
         self.logger.info(f"[跳转] 请求跳转到索引 {index}, 当前文件数 {len(self.image_files)}")
 
         # 先设置当前请求的图片路径，用于回调时判断
@@ -2223,6 +2372,643 @@ class ImageClassifier(QMainWindow):
         """处理扫描进度"""
         self.statusBar.showMessage(message)
 
+    # ===== AI 辅助分类事件处理 =====
+
+    def _current_ai_project_dir(self) -> Optional[Path]:
+        current_dir = getattr(self, "current_dir", None)
+        return current_dir.parent if current_dir else None
+
+    def _is_active_ai_model_initialized(self) -> bool:
+        project_dir = self._current_ai_project_dir()
+        if project_dir is None:
+            return False
+        project_state = getattr(
+            self, "_ai_project_state", default_ai_project_state()
+        )
+        model_key = project_state.get("active_model", "balanced")
+        return is_project_model_initialized(
+            project_state, project_dir, model_key
+        )
+
+    def _collect_current_ai_samples(self, include_removed: Optional[bool] = None):
+        """Collect usable, human-confirmed samples from the active project."""
+        if include_removed is None:
+            include_removed = bool(
+                self._ai_project_state.get("learn_removed_images", False)
+            )
+        samples = []
+        for logical_path, category in getattr(
+            self, "classified_images", {}
+        ).items():
+            if not isinstance(category, str):
+                continue
+            actual_path = self.get_real_file_path(logical_path)
+            if Path(actual_path).is_file():
+                samples.append((str(logical_path), str(actual_path), category))
+        if include_removed:
+            samples.extend(self._collect_removed_ai_samples())
+        return samples
+
+    def _collect_removed_ai_samples(self):
+        """Collect readable removed images only when the user opts into learning them."""
+        samples = []
+        for logical_path in getattr(self, "removed_images", ()):
+            actual_path = self.get_real_file_path(logical_path)
+            if Path(actual_path).is_file():
+                samples.append(
+                    (str(logical_path), str(actual_path), AI_REMOVAL_LABEL)
+                )
+        return samples
+
+    @staticmethod
+    def _resolve_imported_ai_image(
+        state_dir: Path, logical_path: str, category: str
+    ) -> Optional[Path]:
+        logical = Path(logical_path)
+        candidates = [logical]
+        if category != AI_REMOVAL_LABEL:
+            candidates.extend(
+                [
+                    state_dir / category / logical.name,
+                    state_dir / "分类结果" / category / logical.name,
+                ]
+            )
+        else:
+            candidates.extend(
+                state_dir / folder / logical.name
+                for folder in ("已移除", "removed", "待删除")
+            )
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _load_imported_ai_samples(
+        self, state_file: Path, include_removed: bool = False
+    ):
+        """Read old human classifications without changing the current UI state."""
+        with open(state_file, "r", encoding="utf-8") as file:
+            imported = json.load(file)
+        samples = []
+        state_dir = state_file.parent
+        for logical_path, category in imported.get("classified_images", {}).items():
+            if not isinstance(category, str):
+                continue
+            actual_path = self._resolve_imported_ai_image(
+                state_dir, logical_path, category
+            )
+            if actual_path is not None:
+                samples.append((str(actual_path), str(actual_path), category))
+        if include_removed:
+            for logical_path in imported.get("removed_images", []):
+                actual_path = self._resolve_imported_ai_image(
+                    state_dir, logical_path, AI_REMOVAL_LABEL
+                )
+                if actual_path is not None:
+                    samples.append(
+                        (str(actual_path), str(actual_path), AI_REMOVAL_LABEL)
+                    )
+        return samples
+
+    def show_ai_project_setup(self):
+        """Show first-use setup or switch to another project model profile."""
+        project_dir = self._current_ai_project_dir()
+        if project_dir is None:
+            toast_warning(self, "请先打开图片目录")
+            return
+        classified_samples = self._collect_current_ai_samples(
+            include_removed=False
+        )
+        removed_samples = self._collect_removed_ai_samples()
+        dialog = AIProjectSetupDialog(
+            project_dir=project_dir,
+            ai_state=self._ai_project_state,
+            existing_sample_count=len(classified_samples),
+            removed_sample_count=len(removed_samples),
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        model_key = dialog.selected_model_key
+        if model_key is None:
+            return
+        learn_removed_images = dialog.selected_learn_removed_images
+        current_samples = list(classified_samples)
+        if learn_removed_images:
+            current_samples.extend(removed_samples)
+
+        profile = get_ai_model_profile(model_key)
+        already_initialized = is_project_model_initialized(
+            self._ai_project_state, project_dir, model_key
+        )
+        force_reinitialize = bool(
+            already_initialized and dialog.selected_reinitialize
+        )
+        needs_initialization = not already_initialized or force_reinitialize
+        if profile.recommended_gpu and needs_initialization:
+            if not self.show_question(
+                "CPU 性能提示",
+                "当前版本仅使用 CPU。\n"
+                "精度优先模型首次处理大量旧标注会比较慢。\n"
+                "完成后可直接复用，不需要重新建库。\n\n"
+                "是否继续初始化？",
+            ):
+                return
+
+        samples = []
+        source_kind = "reuse"
+        source_path = None
+        if needs_initialization:
+            source_kind = dialog.selected_source_kind
+            if source_kind == "existing":
+                samples = current_samples
+            elif source_kind == "import":
+                source_path = dialog.selected_import_path
+                try:
+                    samples = self._load_imported_ai_samples(
+                        source_path,
+                        include_removed=learn_removed_images,
+                    )
+                except Exception as error:
+                    self.logger.exception("导入旧 AI 样本失败")
+                    toast_error(self, f"无法导入旧标注：{error}")
+                    return
+                if not samples:
+                    toast_warning(self, "所选 JSON 中没有找到可读取的人工分类图片")
+                    return
+
+        models = self._ai_project_state.setdefault("models", {})
+        record = models.setdefault(model_key, {})
+        if needs_initialization:
+            record.update(
+                {
+                    "initialized": already_initialized,
+                    "rebuilding": force_reinitialize,
+                    "project_model_file": profile.project_model_file,
+                    "model_id": profile.expected_model_id,
+                    "source": source_kind,
+                    "source_state_file": str(source_path) if source_path else None,
+                    "requested_sample_count": len(samples),
+                }
+            )
+        self._ai_project_state["enabled"] = True
+        self._ai_project_state["active_model"] = model_key
+        self._ai_project_state["learn_removed_images"] = learn_removed_images
+        self._ai_pending_initialization = {
+            "project_dir": str(project_dir),
+            "model_key": model_key,
+        }
+        self._save_state_sync()
+        self._update_ai_prediction_mode_button()
+        self._configure_ai_for_current_project(
+            samples=samples,
+            model_key=model_key,
+            migrate_legacy=source_kind == "existing",
+            force_reinitialize=force_reinitialize,
+            merge_samples=(
+                removed_samples
+                if (
+                    already_initialized
+                    and not force_reinitialize
+                    and learn_removed_images
+                )
+                else ()
+            ),
+            excluded_labels=(
+                () if learn_removed_images else (AI_REMOVAL_LABEL,)
+            ),
+        )
+
+    def _configure_ai_for_current_project(
+        self,
+        samples=None,
+        model_key: Optional[str] = None,
+        migrate_legacy: bool = False,
+        force_reinitialize: bool = False,
+        merge_samples=None,
+        excluded_labels=None,
+    ):
+        """Load or initialize one project-local model store."""
+        manager = getattr(self, '_ai_manager', None)
+        if manager is None or not self.current_dir:
+            return
+        project_dir = self.current_dir.parent
+        model_key = model_key or self._ai_project_state.get(
+            "active_model", "balanced"
+        )
+        self._ai_configured_project_dir = (str(project_dir), model_key)
+        manager.configure_project(
+            project_dir,
+            samples or (),
+            model_key=model_key,
+            migrate_legacy=migrate_legacy,
+            force_reinitialize=force_reinitialize,
+            merge_samples=merge_samples or (),
+            excluded_labels=excluded_labels or (),
+        )
+
+    def _restore_ai_for_current_project(self):
+        """Reuse an initialized project model without rebuilding its sample bank."""
+        manager = getattr(self, '_ai_manager', None)
+        project_dir = self._current_ai_project_dir()
+        if manager is None or project_dir is None:
+            return
+        model_key = self._ai_project_state.get("active_model", "balanced")
+        if is_project_model_initialized(
+            self._ai_project_state, project_dir, model_key
+        ):
+            token = (str(project_dir), model_key)
+            if self._ai_configured_project_dir != token or not manager.is_ready:
+                self._configure_ai_for_current_project(
+                    model_key=model_key,
+                    excluded_labels=(
+                        ()
+                        if self._ai_project_state.get(
+                            "learn_removed_images", False
+                        )
+                        else (AI_REMOVAL_LABEL,)
+                    ),
+                )
+        else:
+            manager.clear_project()
+            self._ai_configured_project_dir = None
+            if hasattr(self, "category_panel"):
+                models = self._ai_project_state.get("models", {})
+                record = models.get(model_key, {})
+                if record.get("initialized"):
+                    message = "AI 项目模型文件缺失 · 点击模型按钮重新初始化"
+                else:
+                    message = "AI 未初始化 · 点击“AI · 启用”开始"
+                self.category_panel.set_ai_status(message, "warning")
+        self._update_ai_prediction_mode_button()
+
+    def _on_ai_model_state_changed(self, snapshot: dict):
+        """Persist initialization and incremental-learning metadata in project JSON."""
+        project_dir = self._current_ai_project_dir()
+        if project_dir is None or snapshot.get("project_dir") != str(project_dir):
+            return
+        model_key = snapshot.get("model_key")
+        if not model_key:
+            return
+        models = self._ai_project_state.setdefault("models", {})
+        record = models.setdefault(model_key, {})
+        first_initialization = not record.get("initialized")
+        model_event = snapshot.get("event", "updated")
+        record.update(
+            {
+                "initialized": True,
+                "model_id": snapshot.get("model_id"),
+                "project_model_file": snapshot.get("project_model_file"),
+                "sample_count": snapshot.get("sample_count", 0),
+                "class_counts": snapshot.get("class_counts", {}),
+                "provider": snapshot.get("provider", "CPU"),
+                "rebuilding": False,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        record.setdefault("initialized_at", record["updated_at"])
+        self._ai_project_state["enabled"] = True
+        is_active_model = (
+            self._ai_project_state.get("active_model") == model_key
+        )
+        pending = getattr(self, "_ai_pending_initialization", {})
+        if pending.get("model_key") == model_key:
+            self._ai_pending_initialization = {}
+        self._update_ai_prediction_mode_button()
+        if first_initialization:
+            self._save_state_sync()
+            toast_success(
+                self,
+                f"AI {get_ai_model_profile(model_key).display_name}初始化完成 · "
+                f"{record['sample_count']} 张样本",
+            )
+        elif model_event == "reinitialized":
+            self.save_state()
+            toast_success(
+                self,
+                f"AI {get_ai_model_profile(model_key).display_name}重新初始化完成 · "
+                f"{record['sample_count']} 张样本",
+            )
+        elif model_event == "reinitialize_failed":
+            self.save_state()
+            toast_warning(self, "AI 重新初始化失败，已继续使用旧模型")
+        else:
+            self.save_state()
+        if (
+            is_active_model
+            and
+            self.ai_prediction_mode == "auto"
+            and self._ai_current_image_data is not None
+            and not self._ai_prediction_loading
+        ):
+            self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
+
+    def _on_ai_status_changed(self, message: str, tone: str):
+        if hasattr(self, 'category_panel'):
+            self.category_panel.set_ai_status(message, tone)
+        if tone in ("disabled", "error"):
+            self._finish_ai_prediction_ui()
+            if tone == "error":
+                toast_error(self, message)
+            else:
+                toast_warning(self, message)
+        elif (
+            tone == "ready"
+            and self.ai_prediction_mode == "auto"
+            and self._ai_current_image_data is not None
+            and not self._ai_prediction_loading
+        ):
+            self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
+
+    def _on_ai_index_progress(self, current: int, total: int):
+        if total <= 0 or not hasattr(self, 'category_panel'):
+            return
+        self.category_panel.set_ai_status(
+            f"AI 正在学习现有标注 {current}/{total}…", "working"
+        )
+
+    def _on_ai_image_ready(self, image_data):
+        """记录当前图片，并依据模式调度预测。"""
+        self._ai_prediction_timer.stop()
+        current_path = self.get_current_image_path()
+        self._ai_current_image_path = str(current_path) if current_path else None
+        self._ai_current_image_data = self._coerce_ai_rgb_image(image_data)
+        if hasattr(self, "image_view_panel"):
+            self.image_view_panel.clear_prediction_overlay()
+
+        if self._ai_current_image_data is None:
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    "AI 无法读取当前图片数据", "warning"
+                )
+            return
+
+        if not self._is_active_ai_model_initialized():
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    "AI 未初始化 · 点击“AI · 启用”选择模型和样本来源",
+                    "warning",
+                )
+            return
+
+        if self.ai_prediction_mode == "auto":
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    "AI 自动预测 · 等待图片稳定 200ms…", "working"
+                )
+            self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
+        elif hasattr(self, "category_panel"):
+            self.category_panel.set_ai_status(
+                "AI 手动预测 · 按 Tab 分析当前图片", "ready"
+            )
+
+    def _coerce_ai_rgb_image(self, image_data):
+        """把加载器可能返回的 NumPy/PIL/QPixmap 数据统一为 RGB uint8。"""
+        if isinstance(image_data, np.ndarray):
+            if image_data.ndim != 3 or image_data.shape[2] < 3:
+                return None
+            rgb = image_data[..., :3]
+            if rgb.dtype != np.uint8:
+                rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+            return np.ascontiguousarray(rgb)
+
+        if isinstance(image_data, QPixmap):
+            if image_data.isNull():
+                return None
+            image_data = image_data.toImage()
+
+        if isinstance(image_data, QImage):
+            if image_data.isNull():
+                return None
+            rgb_image = image_data.convertToFormat(QImage.Format.Format_RGB888)
+            bits = rgb_image.bits()
+            bits.setsize(rgb_image.sizeInBytes())
+            rows = np.frombuffer(bits, dtype=np.uint8).reshape(
+                rgb_image.height(), rgb_image.bytesPerLine()
+            )
+            rgb = rows[:, : rgb_image.width() * 3].reshape(
+                rgb_image.height(), rgb_image.width(), 3
+            )
+            return np.ascontiguousarray(rgb.copy())
+
+        if hasattr(image_data, "convert"):
+            try:
+                return np.ascontiguousarray(
+                    np.asarray(image_data.convert("RGB"), dtype=np.uint8)
+                )
+            except Exception:
+                self.logger.debug(
+                    "AI 无法转换图片数据类型: %s", type(image_data).__name__
+                )
+        return None
+
+    def trigger_manual_ai_prediction(self):
+        """Tab 快捷键入口：仅在手动模式下预测当前图片。"""
+        if not self._is_active_ai_model_initialized():
+            self.show_ai_project_setup()
+            return
+        if self.ai_prediction_mode != "manual":
+            toast_info(self, "当前是自动预测模式，将在停止翻页 200ms 后分析")
+            return
+        self._trigger_ai_prediction("manual")
+
+    def _trigger_ai_prediction(self, source: str):
+        """提交当前图片预测，并在真正推理期间锁定导航。"""
+        if not self._is_active_ai_model_initialized():
+            return
+        manager = getattr(self, '_ai_manager', None)
+        current_path = self.get_current_image_path()
+        if manager is None or current_path is None or self._ai_prediction_loading:
+            if self._ai_prediction_loading and source == "manual":
+                self._notify_ai_navigation_locked()
+            return
+        if (
+            self._ai_current_image_path != str(current_path)
+            or not isinstance(self._ai_current_image_data, np.ndarray)
+        ):
+            if source == "manual":
+                toast_warning(self, "当前图片仍在加载，暂时无法预测")
+            return
+        if not manager.is_ready:
+            message = (
+                "AI 模型不可用"
+                if manager.is_disabled
+                else "AI 正在建立样本库，完成后即可预测"
+            )
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(message, "warning")
+            if source == "manual":
+                toast_warning(self, message)
+            return
+
+        prediction_categories = tuple(self.ordered_categories)
+        if self._ai_project_state.get("learn_removed_images", False):
+            prediction_categories += (AI_REMOVAL_LABEL,)
+        request_id = manager.submit_prediction(
+            str(current_path),
+            self._ai_current_image_data,
+            prediction_categories,
+        )
+        if request_id < 0:
+            toast_warning(self, "AI 模型当前不可用")
+            return
+        self._ai_prediction_active_path = str(current_path)
+        self._ai_prediction_active_request_id = request_id
+        self._set_ai_prediction_loading(True, source)
+
+    def _set_ai_prediction_loading(self, loading: bool, source: str = "auto"):
+        self._ai_prediction_loading = loading
+        if hasattr(self, "image_view_panel"):
+            if loading:
+                mode_text = "自动预测" if source == "auto" else "手动预测"
+                self.image_view_panel.show_prediction_loading(
+                    f"{mode_text}中，请稍候…"
+                )
+            else:
+                self.image_view_panel.hide_prediction_loading()
+            self.image_view_panel.delete_button.setEnabled(not loading)
+        locked_controls = (
+            "image_list",
+            "image_search_widget",
+            "filter_button",
+            "folder_button",
+            "open_directory_toolbar_button",
+            "refresh_button",
+            "ai_prediction_mode_button",
+        )
+        for control_name in locked_controls:
+            control = getattr(self, control_name, None)
+            if control is not None:
+                control.setEnabled(not loading)
+        if loading and hasattr(self, 'category_panel'):
+            self.category_panel.set_ai_status("AI 分析中…", "working")
+        if loading:
+            self.statusBar.showMessage("⏳ 模型正在预测，完成前暂时锁定翻页")
+
+    def _finish_ai_prediction_ui(self):
+        if not self._ai_prediction_loading:
+            return
+        self._set_ai_prediction_loading(False)
+        self._ai_prediction_active_path = None
+        self._ai_prediction_active_request_id = -1
+
+    def _notify_ai_navigation_locked(self):
+        now = time.monotonic()
+        self.statusBar.showMessage("⏳ 模型正在预测，暂时不能翻页")
+        if now - self._ai_navigation_notice_time >= 1.0:
+            self._ai_navigation_notice_time = now
+            toast_info(self, "模型正在预测，请等待当前结果")
+
+    def _prepare_ai_navigation(self) -> bool:
+        """返回是否允许导航，并清理尚未触发的旧图片预测。"""
+        if self._ai_prediction_loading:
+            self._notify_ai_navigation_locked()
+            return False
+        self._ai_prediction_timer.stop()
+        self._ai_current_image_data = None
+        self._ai_current_image_path = None
+        if hasattr(self, "image_view_panel"):
+            self.image_view_panel.clear_prediction_overlay()
+        if hasattr(self, "category_panel"):
+            if self.ai_prediction_mode == "auto":
+                self.category_panel.set_ai_status(
+                    "AI 自动预测 · 等待当前图片显示…", "working"
+                )
+            else:
+                self.category_panel.set_ai_status(
+                    "AI 手动预测 · 图片显示后按 Tab", "ready"
+                )
+        return True
+
+    def _on_ai_prediction_ready(self, result):
+        is_active_request = result.request_id == self._ai_prediction_active_request_id
+        if is_active_request:
+            self._finish_ai_prediction_ui()
+        current_path = self.get_current_image_path()
+        if current_path is None or str(current_path) != result.image_path:
+            return
+        if not hasattr(self, 'category_panel'):
+            return
+        if not result.suggestions:
+            reason = result.reason or "AI 样本不足"
+            self.category_panel.set_ai_status(reason, "warning")
+            if hasattr(self, "image_view_panel"):
+                self.image_view_panel.show_prediction_result(
+                    "AI 暂无建议", reason, [], "warning"
+                )
+            toast_warning(self, reason)
+            return
+
+        top = result.suggestions[0]
+
+        def display_category(category: str) -> str:
+            return "建议移除" if category == AI_REMOVAL_LABEL else category
+
+        alternatives = [
+            f"{index}. {display_category(suggestion.category)}"
+            f"（相对匹配 {suggestion.score * 100:.0f}%）"
+            for index, suggestion in enumerate(result.suggestions, start=1)
+        ]
+        self.category_panel.show_ai_prediction(
+            category=display_category(top.category),
+            score=top.score,
+            uncertain=result.uncertain,
+            latency_ms=result.latency_ms,
+            provider=result.provider,
+            alternatives=alternatives,
+            is_removal=top.category == AI_REMOVAL_LABEL,
+        )
+
+        is_removal = top.category == AI_REMOVAL_LABEL
+        display_top = display_category(top.category)
+        if is_removal:
+            title = "AI 建议移除" if not result.uncertain else "AI 可能建议移除"
+            confirmation = "Delete 确认" if not result.uncertain else "请人工判断"
+        else:
+            title = (
+                f"AI 建议 · {display_top}"
+                if not result.uncertain
+                else f"AI 不确定 · {display_top}"
+            )
+            confirmation = "Enter 确认" if not result.uncertain else "请人工判断"
+        other_suggestions = " · ".join(
+            f"{display_category(suggestion.category)} {suggestion.score * 100:.0f}%"
+            for suggestion in result.suggestions[1:]
+        )
+        detail = (
+            f"相对匹配 {top.score * 100:.0f}% · {result.provider} "
+            f"{result.latency_ms:.0f}ms · {confirmation}"
+        )
+        if other_suggestions:
+            detail += f"\n备选：{other_suggestions}"
+        overlay_tone = "warning" if result.uncertain or is_removal else "ready"
+        if hasattr(self, "image_view_panel"):
+            self.image_view_panel.show_prediction_result(
+                title, detail, alternatives, overlay_tone
+            )
+
+        if result.uncertain:
+            toast_warning(self, f"AI 预测不确定：{display_top}，请人工判断")
+        elif is_removal:
+            toast_warning(self, "AI 建议移除当前图片，请按 Delete 确认")
+        else:
+            toast_success(
+                self,
+                f"AI 建议：{display_top}（相对匹配 {top.score * 100:.0f}%）",
+                duration=1800,
+            )
+
+        # 高可信建议只预选，不执行文件操作；Enter/快捷键仍由用户确认。
+        if (
+            not result.uncertain
+            and result.image_path not in self.classified_images
+            and top.category in self.ordered_categories
+        ):
+            category_index = self.ordered_categories.index(top.category)
+            self.category_panel.update_selection(category_index)
+            self.current_category_index = category_index
+            self.selected_category = top.category
+
     # ===== 文件操作事件处理（来自FileOperationManager）=====
 
     def on_file_moved(self, src: str, dst: str):
@@ -2236,6 +3022,9 @@ class ImageClassifier(QMainWindow):
         # 更新统计和计数（不包含 image_list，避免重建列表）
         self.schedule_ui_update('statistics', 'category_counts')
         self.statusBar.showMessage(f"✅ 已分类到 {Path(dst).parent.name}")
+        category = self.classified_images.get(src)
+        if isinstance(category, str) and getattr(self, '_ai_manager', None):
+            self._ai_manager.learn(src, category, actual_path=dst)
 
     def on_file_removed(self, path: str):
         """文件移除完成"""
@@ -2245,6 +3034,14 @@ class ImageClassifier(QMainWindow):
         # 更新统计（不包含 image_list，避免重建列表）
         self.schedule_ui_update('statistics')
         self.statusBar.showMessage("✅ 已移除")
+        if getattr(self, '_ai_manager', None):
+            if self._ai_project_state.get("learn_removed_images", False):
+                actual_path = self.get_real_file_path(path)
+                self._ai_manager.learn(
+                    path, AI_REMOVAL_LABEL, actual_path=str(actual_path)
+                )
+            else:
+                self._ai_manager.forget(path)
 
     def on_file_restored(self, path: str):
         """文件恢复完成"""
@@ -2261,6 +3058,8 @@ class ImageClassifier(QMainWindow):
         # 刷新按钮样式（撤销分类后需要更新已分类状态显示）
         self.refresh_category_buttons_style()
         self.statusBar.showMessage("✅ 已撤销")
+        if path not in self.classified_images and getattr(self, '_ai_manager', None):
+            self._ai_manager.forget(path)
 
     def on_mode_changed(self, is_copy_mode: bool):
         """操作模式变更"""
@@ -2546,6 +3345,8 @@ class ImageClassifier(QMainWindow):
             if not self.current_dir:
                 return
 
+            self._ai_project_state = default_ai_project_state()
+
             # 从图片目录的父目录加载状态文件
             parent_dir = self.current_dir.parent
             state_file = parent_dir / 'classification_state.json'
@@ -2556,6 +3357,9 @@ class ImageClassifier(QMainWindow):
 
                 self.classified_images = state.get('classified_images', {})
                 self.removed_images = set(state.get('removed_images', []))
+                self._ai_project_state = normalize_ai_project_state(
+                    state.get(AI_PROJECT_STATE_KEY)
+                )
 
                 # 恢复上次的图片索引
                 self.saved_last_index = state.get('last_index', -1)
@@ -2590,6 +3394,8 @@ class ImageClassifier(QMainWindow):
                 # 确保按钮状态正确（默认单分类模式）
                 self.is_multi_category = False
                 QTimer.singleShot(10, lambda: self._update_category_mode_button_state())
+
+            self._restore_ai_for_current_project()
 
         except Exception as e:
             self.logger.error(f"加载状态失败: {e}")
@@ -2917,6 +3723,8 @@ class ImageClassifier(QMainWindow):
 
     def prev_image(self):
         """上一张图片（委托给ImageNavigationManager）"""
+        if not self._prepare_ai_navigation():
+            return
         if self._nav_manager:
             self._nav_manager.prev_image()
 
@@ -2930,6 +3738,8 @@ class ImageClassifier(QMainWindow):
 
     def next_image(self):
         """下一张图片（委托给ImageNavigationManager）"""
+        if not self._prepare_ai_navigation():
+            return
         if self._nav_manager:
             self._nav_manager.next_image()
 
@@ -2960,6 +3770,8 @@ class ImageClassifier(QMainWindow):
         Args:
             index: QModelIndex, 点击的列表项索引
         """
+        if not self._prepare_ai_navigation():
+            return
         # Phase 1.1 Migration: 适配 QListView 的 clicked 信号 (传递 QModelIndex)
         if index.isValid():
             # 从自定义数据角色获取原始图片索引
@@ -3093,6 +3905,8 @@ class ImageClassifier(QMainWindow):
         Args:
             text: 搜索关键字
         """
+        if not self._prepare_ai_navigation():
+            return
         self._image_search_text = text.strip()
         self.apply_image_filter()
 
@@ -3113,6 +3927,8 @@ class ImageClassifier(QMainWindow):
 
     def _on_image_search_cleared(self):
         """处理搜索清除/关闭"""
+        if not self._prepare_ai_navigation():
+            return
         if self._image_search_text:  # 仅在有搜索词时才需要刷新
             self._image_search_text = ""
             self.apply_image_filter()
@@ -3564,6 +4380,9 @@ class ImageClassifier(QMainWindow):
 
     def move_to_category(self, category_name):
         """分类当前图片到指定类别（通过FileOperationManager）"""
+        if self._ai_prediction_loading:
+            self._notify_ai_navigation_locked()
+            return
         if not self._file_ops_manager:
             self.logger.error("FileOperationManager未初始化")
             return
@@ -3604,6 +4423,9 @@ class ImageClassifier(QMainWindow):
     
     def move_to_remove(self):
         """移除当前图片（通过FileOperationManager）"""
+        if self._ai_prediction_loading:
+            self._notify_ai_navigation_locked()
+            return
         if not self._file_ops_manager:
             self.logger.error("FileOperationManager未初始化")
             return
@@ -4429,6 +5251,7 @@ class ImageClassifier(QMainWindow):
             if pixmap is not None and not pixmap.isNull():
                 self.display_pixmap(pixmap, image_path)
                 self.logger.info(f"当前图片显示完成: {Path(image_path).name}")
+                self._on_ai_image_ready(image_data)
             else:
                 self.logger.warning(f"无法显示图像: {image_path}")
                 
@@ -4998,6 +5821,8 @@ class ImageClassifier(QMainWindow):
                     button = getattr(self, attr_name)
                     if button:
                         style_icon_button(button)
+
+            self._update_ai_prediction_mode_button()
 
             # 强制重绘
             self.update()
@@ -5711,6 +6536,17 @@ class ImageClassifier(QMainWindow):
         except Exception as e:
             self.logger.error(f"键盘事件处理失败: {e}")
             super().keyPressEvent(event)
+
+    def focusNextPrevChild(self, next_child: bool) -> bool:
+        """手动预测模式占用 Tab；输入控件和 Shift+Tab 保留焦点导航。"""
+        if (
+            next_child
+            and getattr(self, "ai_prediction_mode", "auto") == "manual"
+            and not self._is_in_input_mode()
+        ):
+            self.trigger_manual_ai_prediction()
+            return True
+        return super().focusNextPrevChild(next_child)
     
     def select_previous_category(self):
         """选择上一个类别"""
@@ -5860,6 +6696,9 @@ class ImageClassifier(QMainWindow):
             'version': self.version,
             'is_copy_mode': self.is_copy_mode,
             'is_multi_category': self.is_multi_category,
+            AI_PROJECT_STATE_KEY: getattr(
+                self, "_ai_project_state", default_ai_project_state()
+            ),
         }
 
     def _flush_pending_state_save(self) -> None:
@@ -5944,6 +6783,9 @@ class ImageClassifier(QMainWindow):
                 self._state_save_timer.stop()
             if hasattr(self, '_state_save_max_timer'):
                 self._state_save_max_timer.stop()
+
+            if getattr(self, '_ai_manager', None):
+                self._ai_manager.shutdown()
 
             # 停止后台线程
             if hasattr(self, 'file_scanner') and self.file_scanner:

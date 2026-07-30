@@ -220,6 +220,59 @@ def test_panel_header_buttons_share_compact_size(qtbot):
     assert image_panel.delete_button.property("uiRole") == "danger"
 
 
+def test_ai_removal_suggestion_requires_delete_confirmation(qtbot):
+    from ui._main_window.panels.category_panel import CategoryPanel
+
+    category_panel = CategoryPanel(SimpleNamespace(sort_ascending=True))
+    qtbot.addWidget(category_panel)
+
+    category_panel.show_ai_prediction(
+        category="建议移除",
+        score=0.91,
+        uncertain=False,
+        latency_ms=25.0,
+        provider="CPU",
+        alternatives=["1. 建议移除（相对匹配 91%）"],
+        is_removal=True,
+    )
+
+    assert "Delete确认" in category_panel.ai_suggestion_label.text()
+    assert "Enter确认" not in category_panel.ai_suggestion_label.text()
+    assert category_panel.ai_suggestion_label.property("tone") == "warning"
+
+
+def test_image_preview_prediction_overlay_animates_and_renders_result(qtbot):
+    from ui._main_window.panels.image_view_panel import ImageViewPanel
+
+    panel = ImageViewPanel()
+    qtbot.addWidget(panel)
+    panel.resize(800, 600)
+    panel.show()
+
+    panel.show_prediction_loading("自动预测中，请稍候…")
+    qtbot.waitUntil(lambda: panel.prediction_loading, timeout=1000)
+    first_frame = panel.prediction_loading_icon.text()
+    qtbot.waitUntil(
+        lambda: panel.prediction_loading_icon.text() != first_frame,
+        timeout=1000,
+    )
+
+    panel.show_prediction_result(
+        "AI 建议 · 白色车位内",
+        "相对匹配 88% · CPU 35ms · Enter 确认",
+        ["1. 白色车位内（相对匹配 88%）"],
+        "ready",
+    )
+
+    assert not panel.prediction_loading
+    assert panel.prediction_result_card.isVisible()
+    assert "白色车位内" in panel.prediction_result_title.text()
+    assert "Enter 确认" in panel.prediction_result_detail.text()
+
+    panel.clear_prediction_overlay()
+    assert not panel.prediction_result_card.isVisible()
+
+
 def test_settings_only_styles_business_buttons(qtbot):
     from ui.dialogs.settings.settings_dialog import SettingsDialog
 

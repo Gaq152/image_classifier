@@ -61,6 +61,7 @@ class CategoryPanel(QWidget):
         self.sort_direction_button = None
         self.add_button = None
         self.category_title_label = None
+        self.ai_suggestion_label = None
 
         self._init_ui()
         self.apply_theme()  # 初始化时应用主题
@@ -73,6 +74,14 @@ class CategoryPanel(QWidget):
 
         # 创建标题栏和工具栏
         self._create_header(main_layout)
+
+        self.ai_suggestion_label = QLabel("✨ AI辅助：等待打开图片目录")
+        self.ai_suggestion_label.setObjectName("ai_suggestion_label")
+        self.ai_suggestion_label.setWordWrap(True)
+        self.ai_suggestion_label.setMinimumHeight(32)
+        self.ai_suggestion_label.setMaximumHeight(52)
+        self.ai_suggestion_label.setContentsMargins(8, 5, 8, 5)
+        main_layout.addWidget(self.ai_suggestion_label, 0)
 
         # 创建类别按钮滚动区域
         self.category_scroll = QScrollArea()
@@ -150,6 +159,46 @@ class CategoryPanel(QWidget):
         return btn
 
     # ========== Public API ==========
+
+    def set_ai_status(self, text: str, tone: str = "working") -> None:
+        """更新 AI 辅助状态，不影响人工类别选择。"""
+        if not self.ai_suggestion_label:
+            return
+        self.ai_suggestion_label.setText(f"✨ {text}")
+        self.ai_suggestion_label.setToolTip(text)
+        self.ai_suggestion_label.setProperty("tone", tone)
+        self.ai_suggestion_label.style().unpolish(self.ai_suggestion_label)
+        self.ai_suggestion_label.style().polish(self.ai_suggestion_label)
+
+    def show_ai_prediction(
+        self,
+        category: str,
+        score: float,
+        uncertain: bool,
+        latency_ms: float,
+        provider: str,
+        alternatives: List[str],
+        is_removal: bool = False,
+    ) -> None:
+        """显示统一预测结果；score 是相对匹配度，不冒充校准置信度。"""
+        match_text = f"{score * 100:.0f}%"
+        if is_removal and uncertain:
+            text = f"AI可能建议移除 · 相对匹配 {match_text} · 请人工判断"
+            tone = "warning"
+        elif is_removal:
+            text = f"AI建议移除 · 相对匹配 {match_text} · Delete确认"
+            tone = "warning"
+        elif uncertain:
+            text = f"AI不确定：{category} · 相对匹配 {match_text} · 请人工判断"
+            tone = "warning"
+        else:
+            text = f"AI建议：{category} · 相对匹配 {match_text} · Enter确认"
+            tone = "ready"
+        self.set_ai_status(text, tone)
+        details = "\n".join(alternatives)
+        self.ai_suggestion_label.setToolTip(
+            f"{details}\n推理：{provider}，{latency_ms:.1f} ms"
+        )
 
     def update_data(self, categories: List[str], counts: Dict[str, int],
                    current_index: int, categories_dict: Dict = None,
@@ -556,6 +605,32 @@ class CategoryPanel(QWidget):
                     font-weight: bold;
                     border: none;
                     background: transparent;
+                }}
+            """)
+
+        if self.ai_suggestion_label:
+            self.ai_suggestion_label.setStyleSheet(f"""
+                QLabel#ai_suggestion_label {{
+                    color: {c.TEXT_SECONDARY};
+                    background-color: {c.BACKGROUND_SECONDARY};
+                    border: 1px solid {c.BORDER_LIGHT};
+                    border-radius: 4px;
+                    font-size: 12px;
+                }}
+                QLabel#ai_suggestion_label[tone="ready"] {{
+                    color: {c.SUCCESS_DARK};
+                    background-color: {c.SUCCESS_LIGHT};
+                    border-color: {c.SUCCESS};
+                }}
+                QLabel#ai_suggestion_label[tone="warning"] {{
+                    color: {c.WARNING_DARK};
+                    background-color: {c.WARNING_LIGHT};
+                    border-color: {c.WARNING};
+                }}
+                QLabel#ai_suggestion_label[tone="error"] {{
+                    color: {c.ERROR_DARK};
+                    background-color: {c.ERROR_LIGHT};
+                    border-color: {c.ERROR};
                 }}
             """)
 

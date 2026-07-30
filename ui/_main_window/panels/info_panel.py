@@ -40,7 +40,7 @@ class InfoPanel(QWidget):
         main_layout.addWidget(self.statistics_panel, 0)
 
         # 提示文本 - 固定高度
-        self.tips_label = QLabel('💡 ↑↓选择类别 | Enter确认 | 双击快速分类 | 滚轮缩放')
+        self.tips_label = QLabel('💡 ↑↓选择类别 | Enter确认 | Tab模型预测 | 滚轮缩放')
         self.tips_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(self.tips_label, 0)
 

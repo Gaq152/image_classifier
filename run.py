@@ -7,6 +7,14 @@
 
 import sys
 import os
+from pathlib import Path
+
+# Windows 下 ONNX Runtime 与 Qt 可能加载同名运行库；必须在 PyQt6 之前
+# 预加载，精度优先模型才能稳定使用 CPUExecutionProvider。
+try:
+    import onnxruntime as _onnxruntime
+except ImportError:
+    _onnxruntime = None
 
 # PyInstaller --onefile 模式下，确保 _MEIPASS 目录在 DLL 搜索路径中
 # 保留句柄引用，避免被 GC 回收后目录注册失效
@@ -21,8 +29,6 @@ if getattr(sys, 'frozen', False):
     _path = os.environ.get('PATH', '')
     if _meipass not in _path:
         os.environ['PATH'] = _meipass + os.pathsep + _path
-
-from pathlib import Path
 
 def main():
     """启动图像分类工具"""

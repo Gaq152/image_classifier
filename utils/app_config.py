@@ -76,6 +76,7 @@ class AppConfig:
             # 日志和提示相关配置
             "log_level": "INFO",  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
             "toast_level": "INFO",  # Toast提示级别：DEBUG, INFO, WARNING, ERROR
+            "ai_prediction_mode": "auto",  # 模型预测：auto(自动) 或 manual(手动Tab触发)
             # 图像预览相关配置
             "image_zoom_max": 3.0,  # 最大缩放倍数（范围：1.0-20.0）
             "image_zoom_min": 0.1,  # 最小缩放倍数（范围：0.01-1.0）
@@ -396,6 +397,23 @@ class AppConfig:
             self.logger.info(f"Toast提示级别已设置为: {value.upper()}")
         else:
             self.logger.warning(f"无效的Toast级别: {value}，已忽略")
+
+    @property
+    def ai_prediction_mode(self) -> str:
+        """获取模型预测模式。"""
+        return self._config.get("ai_prediction_mode", "auto")
+
+    @ai_prediction_mode.setter
+    def ai_prediction_mode(self, value: str):
+        """设置模型预测模式。"""
+        if value not in ("auto", "manual"):
+            self.logger.warning(f"无效的模型预测模式: {value}，已忽略")
+            return
+        self._config["ai_prediction_mode"] = value
+        self._save_config()
+        self.logger.info(
+            "模型预测模式已设置为: %s", "自动" if value == "auto" else "手动"
+        )
 
     # ==================== 图像预览配置 ====================
 

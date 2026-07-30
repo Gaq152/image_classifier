@@ -47,6 +47,18 @@ def get_update_dir() -> Path:
     return get_app_data_dir() / "update"
 
 
+def get_ai_cache_dir() -> Path:
+    """获取本地 AI 特征缓存目录。"""
+    cache_dir = get_app_data_dir() / "ai_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def get_ai_model_dir(model_dir_name: str = "resnet18_embedding_v1") -> Path:
+    """获取指定的外置 AI 基础模型包目录。"""
+    return get_app_data_dir() / "ai_models" / model_dir_name
+
+
 def get_config_dir() -> Path:
     r"""获取配置目录
 

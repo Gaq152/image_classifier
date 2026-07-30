@@ -6,8 +6,9 @@ from unittest.mock import Mock, patch
 import pytest
 from PyQt6.QtCore import QObject, QRect, QTimer, pyqtSignal
 
-from PyQt6.QtWidgets import QMainWindow
+from PyQt6.QtWidgets import QDialog, QMainWindow
 
+from core.ai import default_ai_project_state
 from ui.main_window import ImageClassifier, __version__
 
 
@@ -136,6 +137,27 @@ def test_toolbar_add_category_action_opens_dialog(qapp):
 
         assert window.dialog_open_count == 1
         assert window.categories == set()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_accuracy_model_cpu_warning_uses_supported_question_dialog(qapp, tmp_path):
+    window = ToolbarHarness()
+    window.current_dir = tmp_path / "images"
+    window.current_dir.mkdir()
+    window._ai_project_state = default_ai_project_state()
+    window._collect_current_ai_samples = Mock(return_value=[])
+    window.show_question = Mock(return_value=False)
+    dialog = Mock()
+    dialog.exec.return_value = QDialog.DialogCode.Accepted
+    dialog.selected_model_key = "accuracy"
+
+    try:
+        with patch("ui.main_window.AIProjectSetupDialog", return_value=dialog):
+            window.show_ai_project_setup()
+
+        window.show_question.assert_called_once()
     finally:
         window.close()
         window.deleteLater()
