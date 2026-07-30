@@ -43,6 +43,7 @@ ENV/
 *.log
 *.txt
 !requirements-dev.txt
+!requirements-gpu.txt
 
 # 系统文件
 .DS_Store

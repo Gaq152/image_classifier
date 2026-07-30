@@ -62,6 +62,17 @@ def _wait_until(predicate, timeout=2):
     return False
 
 
+def test_execution_provider_can_be_changed_before_configuration():
+    manager = AIClassificationManager(preferred_provider="cpu")
+    try:
+        manager.set_preferred_provider("cuda")
+        assert manager.preferred_provider == "cuda"
+        manager.set_preferred_provider("invalid")
+        assert manager.preferred_provider == "auto"
+    finally:
+        manager.shutdown()
+
+
 def test_prediction_executor_is_not_queued_behind_learning(tmp_path):
     classifier = FakeConcurrentClassifier(block_learning=True)
     manager = _ready_manager(tmp_path, classifier)

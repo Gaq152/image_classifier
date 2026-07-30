@@ -192,7 +192,20 @@ python run.py
 - 基础模型：`%USERPROFILE%\image_classifier\ai_models\<模型版本>\`
 - 项目训练结果：`classification_state.json` 同目录下的 `ai_model_speed_v1.npz`、`ai_model_balanced_v1.npz` 或 `ai_model_accuracy_v1.npz`
 
-当前版本固定使用 CPU：速度/均衡模型使用 OpenCV DNN，精度模型使用 ONNX Runtime CPU。精度模型在 UI 中带有 CPU 性能提醒；GPU 后端将在 CPU 流程稳定后沿用同一模型协议接入。
+推理设备默认为自动选择：检测到 ONNX Runtime `CUDAExecutionProvider` 时，三档模型都会优先使用 NVIDIA GPU；CUDA DLL、驱动或会话加载失败时会自动回退 CPU，不影响人工分类。项目样本库格式与推理设备无关，因此 CPU/GPU 切换不需要重新初始化。
+
+CPU 环境继续使用默认依赖；NVIDIA GPU 开发环境建议只安装 GPU 版 ONNX Runtime，避免两个发行包长期共存：
+
+```bash
+# CPU
+pip install -r requirements.txt
+
+# NVIDIA GPU（CUDA 12 系列，安装前清理同名 CPU/GPU 发行包）
+pip uninstall -y onnxruntime onnxruntime-gpu
+pip install -r requirements-gpu.txt
+```
+
+本机 RTX 2060 SUPER、ONNX Runtime 1.21.1 的单张 720p 图片端到端实测（含缩放、归一化和空间颜色特征）：速度模型约 11.57ms、均衡模型约 10.46ms、精度模型约 15.88ms；相对同机 CPU 分别约快 2.5、3.7 和 6.5 倍。不同机器结果会随显卡占用和驱动变化。
 
 该方案是项目内的增量助手，不是跨摄像机的通用分类器。新视角、新倍率或新环境应先由人工完成一批覆盖各类情况的样本，再参考“逐视频留出”结果决定是否采用建议。
 

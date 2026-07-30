@@ -77,6 +77,7 @@ class AppConfig:
             "log_level": "INFO",  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
             "toast_level": "INFO",  # Toast提示级别：DEBUG, INFO, WARNING, ERROR
             "ai_prediction_mode": "auto",  # 模型预测：auto(自动) 或 manual(手动Tab触发)
+            "ai_execution_provider": "auto",  # auto/cuda/cpu
             # 图像预览相关配置
             "image_zoom_max": 3.0,  # 最大缩放倍数（范围：1.0-20.0）
             "image_zoom_min": 0.1,  # 最小缩放倍数（范围：0.01-1.0）
@@ -414,6 +415,22 @@ class AppConfig:
         self.logger.info(
             "模型预测模式已设置为: %s", "自动" if value == "auto" else "手动"
         )
+
+    @property
+    def ai_execution_provider(self) -> str:
+        """获取 AI 推理设备策略。"""
+        value = self._config.get("ai_execution_provider", "auto")
+        return value if value in ("auto", "cuda", "cpu") else "auto"
+
+    @ai_execution_provider.setter
+    def ai_execution_provider(self, value: str):
+        """保存 AI 推理设备策略。"""
+        if value not in ("auto", "cuda", "cpu"):
+            self.logger.warning("无效的 AI 推理设备: %s，已忽略", value)
+            return
+        self._config["ai_execution_provider"] = value
+        self._save_config()
+        self.logger.info("AI 推理设备策略已设置为: %s", value)
 
     # ==================== 图像预览配置 ====================
 

@@ -102,6 +102,12 @@ class AIClassificationManager(QObject):
         with self._lock:
             return self._disabled
 
+    def set_preferred_provider(self, provider: str) -> None:
+        """Select auto/CUDA/CPU for the next model configuration."""
+        normalized = provider if provider in ("auto", "cuda", "cpu") else "auto"
+        with self._lock:
+            self.preferred_provider = normalized
+
     def configure_project(
         self,
         project_dir: Path,
@@ -117,6 +123,7 @@ class AIClassificationManager(QObject):
         with self._lock:
             if self._closed:
                 return
+            preferred_provider = self.preferred_provider
             keep_current_model = bool(
                 force_reinitialize
                 and self._classifier is not None
@@ -152,6 +159,7 @@ class AIClassificationManager(QObject):
             force_reinitialize,
             tuple(merge_samples),
             tuple(excluded_labels),
+            preferred_provider,
         )
 
     def clear_project(self) -> None:
@@ -178,6 +186,7 @@ class AIClassificationManager(QObject):
         force_reinitialize: bool,
         merge_samples: Sequence[ProjectSample],
         excluded_labels: Sequence[str],
+        preferred_provider: str,
     ) -> None:
         rebuild_cache_path: Optional[Path] = None
         try:
@@ -204,7 +213,7 @@ class AIClassificationManager(QObject):
             classifier = IncrementalEmbeddingClassifier(
                 model_dir=get_ai_model_dir(profile.model_dir_name),
                 cache_path=cache_path,
-                preferred_provider=self.preferred_provider,
+                preferred_provider=preferred_provider,
                 logger=self.logger,
             )
             removed_count = sum(
@@ -277,9 +286,18 @@ class AIClassificationManager(QObject):
                 )
                 or "暂无人工样本"
             )
+            extractor = getattr(classifier, "extractor", None)
+            fallback_reason = getattr(
+                extractor, "provider_fallback_reason", None
+            )
+            fallback_text = (
+                f" · GPU 已回退 CPU：{fallback_reason}"
+                if fallback_reason
+                else ""
+            )
             self.status_changed.emit(
                 f"AI 已就绪 · {profile.short_name} · "
-                f"{classifier.provider_label} · {count_text}",
+                f"{classifier.provider_label} · {count_text}{fallback_text}",
                 "ready",
             )
             self._emit_model_state(
@@ -600,6 +618,16 @@ class AIClassificationManager(QObject):
                 "sample_count": classifier.sample_count,
                 "class_counts": classifier.class_counts,
                 "provider": classifier.provider_label,
+                "requested_provider": getattr(
+                    getattr(classifier, "extractor", None),
+                    "requested_provider",
+                    "auto",
+                ),
+                "provider_fallback_reason": getattr(
+                    getattr(classifier, "extractor", None),
+                    "provider_fallback_reason",
+                    None,
+                ),
                 "event": event,
             }
         )

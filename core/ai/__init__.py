@@ -1,6 +1,7 @@
 """Optional AI-assisted classification components."""
 
 from .contracts import AI_REMOVAL_LABEL, PredictionResult, PredictionSuggestion
+from .feature_extractor import is_cuda_execution_available
 from .incremental_classifier import IncrementalEmbeddingClassifier
 from .model_registry import (
     AI_MODEL_PROFILES,
@@ -29,6 +30,7 @@ __all__ = [
     "default_ai_project_state",
     "get_ai_model_profile",
     "is_project_model_initialized",
+    "is_cuda_execution_available",
     "iter_ai_model_profiles",
     "normalize_ai_project_state",
     "project_model_path",

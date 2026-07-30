@@ -76,6 +76,16 @@ class IncrementalEmbeddingClassifier:
         return self.extractor.provider_label
 
     @property
+    def uses_gpu(self) -> bool:
+        return bool(
+            getattr(
+                self.extractor,
+                "uses_gpu",
+                self.provider_label.startswith("NVIDIA GPU"),
+            )
+        )
+
+    @property
     def model_id(self) -> str:
         return self.extractor.model_id
 
@@ -187,7 +197,7 @@ class IncrementalEmbeddingClassifier:
         processed = 0
         extracted = 0
         total = len(missing)
-        batch_size = 64 if self.provider_label == "NVIDIA GPU" else 16
+        batch_size = 32 if self.uses_gpu else 16
         for start in range(0, total, batch_size):
             batch_samples = missing[start : start + batch_size]
             decoded_samples = []
@@ -244,7 +254,7 @@ class IncrementalEmbeddingClassifier:
         processed = 0
         extracted = 0
         total = len(missing)
-        batch_size = 64 if self.provider_label == "NVIDIA GPU" else 16
+        batch_size = 32 if self.uses_gpu else 16
         for start in range(0, total, batch_size):
             batch_samples = missing[start : start + batch_size]
             decoded_samples = []

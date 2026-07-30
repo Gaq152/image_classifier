@@ -319,7 +319,7 @@ class ImageClassifier(QMainWindow):
 
             # 模型文件保持在程序外部；缺失或不可用时只关闭 AI，不影响人工分类。
             self._ai_manager = AIClassificationManager(
-                preferred_provider="cpu",
+                preferred_provider=get_app_config().ai_execution_provider,
                 logger=self.logger,
                 parent=self,
             )
@@ -2517,6 +2517,7 @@ class ImageClassifier(QMainWindow):
         model_key = dialog.selected_model_key
         if model_key is None:
             return
+        execution_provider = dialog.selected_execution_provider
         learn_removed_images = dialog.selected_learn_removed_images
         current_samples = list(classified_samples)
         if learn_removed_images:
@@ -2530,15 +2531,23 @@ class ImageClassifier(QMainWindow):
             already_initialized and dialog.selected_reinitialize
         )
         needs_initialization = not already_initialized or force_reinitialize
-        if profile.recommended_gpu and needs_initialization:
+        if (
+            profile.recommended_gpu
+            and needs_initialization
+            and execution_provider == "cpu"
+        ):
             if not self.show_question(
                 "CPU 性能提示",
-                "当前版本仅使用 CPU。\n"
+                "当前选择仅使用 CPU。\n"
                 "精度优先模型首次处理大量旧标注会比较慢。\n"
                 "完成后可直接复用，不需要重新建库。\n\n"
                 "是否继续初始化？",
             ):
                 return
+
+        # 只有用户通过所有确认后才保存设备偏好，避免取消初始化时意外改动配置。
+        get_app_config().ai_execution_provider = execution_provider
+        self._ai_manager.set_preferred_provider(execution_provider)
 
         samples = []
         source_kind = "reuse"
@@ -2687,6 +2696,12 @@ class ImageClassifier(QMainWindow):
                 "sample_count": snapshot.get("sample_count", 0),
                 "class_counts": snapshot.get("class_counts", {}),
                 "provider": snapshot.get("provider", "CPU"),
+                "requested_provider": snapshot.get(
+                    "requested_provider", "auto"
+                ),
+                "provider_fallback_reason": snapshot.get(
+                    "provider_fallback_reason"
+                ),
                 "rebuilding": False,
                 "updated_at": datetime.now().isoformat(timespec="seconds"),
             }

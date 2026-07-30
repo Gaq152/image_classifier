@@ -57,3 +57,27 @@ def test_initialized_model_can_be_safely_reinitialized(qtbot, tmp_path):
     assert dialog.selected_reinitialize is True
     assert dialog.source_group_box.isEnabled()
     assert dialog.confirm_button.text() == "重新初始化 AI"
+
+
+def test_gpu_auto_selection_is_explained_without_blocking_model(qtbot, tmp_path):
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    with patch(
+        "ui.dialogs.ai_setup_dialog.get_ai_model_dir",
+        return_value=tmp_path,
+    ):
+        dialog = AIProjectSetupDialog(
+            project_dir=tmp_path,
+            ai_state=default_ai_project_state(),
+            existing_sample_count=6,
+        )
+    qtbot.addWidget(dialog)
+
+    assert dialog.model_buttons["balanced"].isEnabled()
+    assert "NVIDIA GPU" in dialog.warning_label.text()
+
+    dialog.provider_combo.setCurrentIndex(
+        dialog.provider_combo.findData("cpu")
+    )
+
+    assert dialog.selected_execution_provider == "cpu"
+    assert "CPU" in dialog.warning_label.text()

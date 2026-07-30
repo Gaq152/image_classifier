@@ -152,6 +152,7 @@ def test_accuracy_model_cpu_warning_uses_supported_question_dialog(qapp, tmp_pat
     dialog = Mock()
     dialog.exec.return_value = QDialog.DialogCode.Accepted
     dialog.selected_model_key = "accuracy"
+    dialog.selected_execution_provider = "cpu"
 
     try:
         with patch("ui.main_window.AIProjectSetupDialog", return_value=dialog):

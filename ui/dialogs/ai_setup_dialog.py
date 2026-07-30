@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QGroupBox,
@@ -17,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.ai import iter_ai_model_profiles
+from utils.app_config import get_app_config
 from utils.paths import get_ai_model_dir
 
 from ..components.dialog_utils import configure_dialog, style_button
@@ -68,7 +70,7 @@ class AIProjectSetupDialog(QDialog):
         layout.addWidget(description)
 
     def _build_model_options(self, layout: QVBoxLayout) -> None:
-        group = QGroupBox("1. 选择基础模型")
+        group = QGroupBox("1. 选择基础模型（自动优先 NVIDIA GPU）")
         group_layout = QVBoxLayout(group)
         self.model_group = QButtonGroup(self)
         active_model = self.ai_state.get("active_model", "balanced")
@@ -101,6 +103,21 @@ class AIProjectSetupDialog(QDialog):
             group_layout.addWidget(button)
             if profile.key == active_model and installed:
                 button.setChecked(True)
+
+        provider_row = QHBoxLayout()
+        provider_row.addWidget(QLabel("推理设备："))
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItem("自动（NVIDIA GPU 优先）", "auto")
+        self.provider_combo.addItem("NVIDIA GPU 优先（失败回退 CPU）", "cuda")
+        self.provider_combo.addItem("仅 CPU", "cpu")
+        current_provider = get_app_config().ai_execution_provider
+        current_index = self.provider_combo.findData(current_provider)
+        self.provider_combo.setCurrentIndex(max(0, current_index))
+        self.provider_combo.currentIndexChanged.connect(
+            self._refresh_selection_details
+        )
+        provider_row.addWidget(self.provider_combo, 1)
+        group_layout.addLayout(provider_row)
 
         if not any(button.isChecked() for button in self.model_buttons.values()):
             for button in self.model_buttons.values():
@@ -255,13 +272,26 @@ class AIProjectSetupDialog(QDialog):
         profile = next(
             profile for profile in iter_ai_model_profiles() if profile.key == key
         )
-        if profile.recommended_gpu:
+        provider = self.selected_execution_provider
+        if provider == "cpu" and profile.recommended_gpu:
             self.warning_label.setText(
-                "⚠ 当前版本仅使用 CPU。精度优先模型推理和首次建库可能明显较慢；"
-                "无 GPU 时不建议在大量图片上使用。"
+                "当前选择仅 CPU。精度优先模型推理和首次建库可能明显较慢。"
+            )
+            self.warning_label.setStyleSheet(
+                f"color: {default_theme.colors.WARNING}; font-weight: 600;"
+            )
+        elif provider == "cpu":
+            self.warning_label.setText(profile.cpu_note)
+            self.warning_label.setStyleSheet(
+                f"color: {default_theme.colors.WARNING}; font-weight: 600;"
             )
         else:
-            self.warning_label.setText(profile.cpu_note)
+            self.warning_label.setText(
+                "将优先使用 NVIDIA GPU，CUDA 会话加载失败时安全回退 CPU。"
+            )
+            self.warning_label.setStyleSheet(
+                f"color: {default_theme.colors.WARNING}; font-weight: 600;"
+            )
 
     @property
     def selected_model_key(self) -> Optional[str]:
@@ -288,6 +318,12 @@ class AIProjectSetupDialog(QDialog):
     def selected_reinitialize(self) -> bool:
         checkbox = getattr(self, "reinitialize_checkbox", None)
         return bool(checkbox and checkbox.isEnabled() and checkbox.isChecked())
+
+    @property
+    def selected_execution_provider(self) -> str:
+        combo = getattr(self, "provider_combo", None)
+        value = combo.currentData() if combo is not None else "auto"
+        return value if value in ("auto", "cuda", "cpu") else "auto"
 
     def accept(self) -> None:
         key = self.selected_model_key
