@@ -141,6 +141,65 @@ def test_themed_message_box_does_not_expand_icon_column(qtbot):
     box.close()
 
 
+def test_themed_message_box_wraps_long_text(qtbot):
+    box = ThemedMessageBox()
+    qtbot.addWidget(box)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(
+        "精度优先模型在当前 CPU 版本中首次处理大量旧标注时可能明显较慢，"
+        "完成初始化后可以直接复用项目模型。"
+    )
+
+    box.show()
+    qtbot.waitUntil(lambda: box.isVisible(), timeout=1000)
+
+    text_label = box.findChild(QLabel, "qt_msgbox_label")
+    assert text_label is not None
+    assert text_label.wordWrap()
+    assert box.minimumWidth() >= 560
+    assert text_label.maximumWidth() == 560
+    box.close()
+
+
+def test_themed_message_box_reserves_space_for_long_file_name(qtbot):
+    box = ThemedMessageBox()
+    qtbot.addWidget(box)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(
+        "085326ac-c47a-4764-846a-839edddb4982_340200000000000001.jpg\n\n"
+        "已存在且内容相同，是否覆盖？"
+    )
+
+    box.show()
+    qtbot.waitUntil(lambda: box.isVisible(), timeout=1000)
+
+    text_label = box.findChild(QLabel, "qt_msgbox_label")
+    assert text_label is not None
+    file_name_width = text_label.fontMetrics().horizontalAdvance(
+        text_label.text().splitlines()[0]
+    )
+    assert text_label.width() >= min(file_name_width, 560)
+    assert text_label.height() >= text_label.sizeHint().height()
+    box.close()
+
+
+def test_themed_message_box_can_style_standard_yes_as_danger(qtbot):
+    box = ThemedMessageBox()
+    qtbot.addWidget(box)
+    box.setText("确认永久删除这个类别目录吗？")
+    box.setStandardButtons(
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    )
+    box.set_destructive()
+
+    box.show()
+    qtbot.waitUntil(lambda: box.isVisible(), timeout=1000)
+
+    assert box.button(QMessageBox.StandardButton.Yes).property("uiRole") == "danger"
+    assert box.button(QMessageBox.StandardButton.No).property("uiRole") == "secondary"
+    box.close()
+
+
 def test_panel_header_buttons_share_compact_size(qtbot):
     from ui._main_window.panels.category_panel import CategoryPanel
     from ui._main_window.panels.image_view_panel import ImageViewPanel

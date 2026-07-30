@@ -7,10 +7,14 @@ from typing import Optional
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
+    QGridLayout,
+    QLabel,
     QLayout,
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QSizePolicy,
+    QSpacerItem,
     QWidget,
 )
 
@@ -129,12 +133,25 @@ class ThemedMessageBox(QMessageBox):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._destructive = False
+        self._width_spacer: Optional[QSpacerItem] = None
         self.setStyleSheet(DialogStyles.get_message_box_style())
+
+    def set_destructive(self, destructive: bool = True) -> None:
+        """Use the danger role for the affirmative button."""
+        self._destructive = destructive
 
     def _style_buttons(self) -> None:
         for button in self.buttons():
             role = self.buttonRole(button)
-            if role == QMessageBox.ButtonRole.DestructiveRole:
+            if role == QMessageBox.ButtonRole.DestructiveRole or (
+                self._destructive
+                and role
+                in {
+                    QMessageBox.ButtonRole.AcceptRole,
+                    QMessageBox.ButtonRole.YesRole,
+                }
+            ):
                 variant = "danger"
             elif role in {
                 QMessageBox.ButtonRole.AcceptRole,
@@ -152,10 +169,68 @@ class ThemedMessageBox(QMessageBox):
             if button is not None:
                 button.setText(text)
 
+    def _configure_text_layout(self) -> None:
+        labels = []
+        for object_name in ("qt_msgbox_label", "qt_msgbox_informativelabel"):
+            label = self.findChild(QLabel, object_name)
+            if label is not None:
+                labels.append(label)
+                label.setWordWrap(True)
+                label.setMaximumWidth(560)
+        if not labels:
+            return
+
+        widest_line = max(
+            (
+                label.fontMetrics().horizontalAdvance(line)
+                for label in labels
+                for line in label.text().splitlines()
+            ),
+            default=420,
+        )
+        content_width = min(560, max(420, widest_line))
+        for label in labels:
+            label.setMinimumWidth(content_width)
+            label.setMinimumHeight(0)
+            required_height = max(
+                label.sizeHint().height(),
+                label.heightForWidth(content_width),
+            )
+            if required_height > 0:
+                label.setMinimumHeight(required_height)
+
+        layout = self.layout()
+        if isinstance(layout, QGridLayout) and self._width_spacer is None:
+            self._width_spacer = QSpacerItem(
+                content_width + 96,
+                0,
+                QSizePolicy.Policy.Minimum,
+                QSizePolicy.Policy.Expanding,
+            )
+            layout.addItem(
+                self._width_spacer,
+                layout.rowCount(),
+                0,
+                1,
+                layout.columnCount(),
+            )
+        elif self._width_spacer is not None:
+            self._width_spacer.changeSize(
+                content_width + 96,
+                0,
+                QSizePolicy.Policy.Minimum,
+                QSizePolicy.Policy.Expanding,
+            )
+        layout.invalidate()
+        layout.activate()
+
     def showEvent(self, event) -> None:
         self.setStyleSheet(DialogStyles.get_message_box_style())
         self._style_buttons()
+        self._configure_text_layout()
         super().showEvent(event)
+        self._configure_text_layout()
+        self.adjustSize()
 
 
 class ThemedProgressDialog(QProgressDialog):

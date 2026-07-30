@@ -182,6 +182,9 @@ class TestCategoryManager:
                     result = manager.delete_category("test_cat")
 
         assert result is False
+        _, kwargs = mock_ui.show_question.call_args
+        assert kwargs["destructive"] is True
+        assert kwargs["informative_text"] == "警告：删除后无法撤销。"
 
     def test_delete_category_not_exists(self, manager, mock_state):
         """测试删除不存在的类别"""

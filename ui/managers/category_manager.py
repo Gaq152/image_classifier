@@ -148,11 +148,21 @@ class CategoryManager(QObject):
 
         # 确认对话框（根据图片数量显示不同消息）
         if image_count > 0:
-            msg = f"类别目录 '{name}' 中有 {image_count} 张图片文件。\n\n确认删除这个类别目录吗？\n这将永久删除目录及其中的所有文件！"
+            msg = (
+                f"类别目录 '{name}' 中有 {image_count} 张图片文件。\n"
+                "确认删除这个类别目录吗？"
+            )
+            warning = "警告：这将永久删除目录及其中的所有文件！"
         else:
             msg = f"确定要删除空的类别目录 '{name}' 吗？"
+            warning = "警告：删除后无法撤销。"
 
-        if not self._ui.show_question("删除类别", msg):
+        if not self._ui.show_question(
+            "🗑️ 再次确认删除",
+            msg,
+            destructive=True,
+            informative_text=warning,
+        ):
             return False
 
         try:

@@ -676,7 +676,10 @@ class FileOperationManager(QObject):
         target_file = Path(target_path)
 
         if source_hash and source_hash == target_hash:
-            overwrite = self._ui.show_question("文件已存在", f"{target_file.name} 已存在且内容相同，是否覆盖？")
+            overwrite = self._ui.show_question(
+                "文件已存在",
+                f"{target_file.name}\n\n已存在且内容相同，是否覆盖？",
+            )
             return target_path if overwrite else None
         else:
             renamed = self._get_renamed_target(target_path)

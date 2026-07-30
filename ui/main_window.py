@@ -725,7 +725,13 @@ class ImageClassifier(QMainWindow):
         box.setStandardButtons(QMessageBox.StandardButton.Ok)
         box.exec()
 
-    def show_question(self, title: str, message: str) -> bool:
+    def show_question(
+        self,
+        title: str,
+        message: str,
+        destructive: bool = False,
+        informative_text: str = "",
+    ) -> bool:
         """显示确认对话框（中文按钮）"""
         msgBox = self._create_styled_message_box(
             QMessageBox.Icon.Question,
@@ -733,6 +739,9 @@ class ImageClassifier(QMainWindow):
             message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
+        if informative_text:
+            msgBox.setInformativeText(informative_text)
+        msgBox.set_destructive(destructive)
         msgBox.setDefaultButton(QMessageBox.StandardButton.No)
         return msgBox.exec() == QMessageBox.StandardButton.Yes
 

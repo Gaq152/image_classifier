@@ -576,7 +576,13 @@ class UIHooks(Protocol):
         pass
 
 
-    def show_question(self, title: str, message: str) -> bool:
+    def show_question(
+        self,
+        title: str,
+        message: str,
+        destructive: bool = False,
+        informative_text: str = "",
+    ) -> bool:
         """显示确认对话框，返回是否确认"""
         pass
 
