@@ -26,6 +26,7 @@ class CategoryButton(QPushButton):
     """自定义类别按钮
 
     信号（Phase 2.5 重构）：
+        focus_requested: 请求仅查看该类别的图片 (category_name)
         rename_requested: 请求重命名类别 (old_name, new_name)
         shortcut_change_requested: 请求修改快捷键 (category_name)
         ignore_requested: 请求忽略类别 (category_name)
@@ -35,6 +36,7 @@ class CategoryButton(QPushButton):
     """
 
     # 信号定义
+    focus_requested = pyqtSignal(str)  # category_name
     rename_requested = pyqtSignal(str, str)  # old_name, new_name
     shortcut_change_requested = pyqtSignal(str)  # category_name
     ignore_requested = pyqtSignal(str)  # category_name
@@ -167,6 +169,12 @@ class CategoryButton(QPushButton):
             # 应用主题样式
             menu.setStyleSheet(WidgetStyles.get_context_menu_style())
 
+            # 聚焦类别图片。筛选作用在图片列表，但入口放在类别上下文中最直观。
+            focus_action = menu.addAction("🎯 只看此类别")
+            focus_action.triggered.connect(self.focus_category)
+
+            menu.addSeparator()
+
             # 修改类别名称
             rename_action = menu.addAction("🏷️ 修改类别名称")
             rename_action.triggered.connect(self.rename_category)
@@ -199,6 +207,10 @@ class CategoryButton(QPushButton):
         except Exception as e:
             self.logger.error(f"显示右键菜单失败: {e}")
             toast_error(self, f"显示菜单失败: {e}")
+
+    def focus_category(self):
+        """请求图片列表仅显示当前类别。"""
+        self.focus_requested.emit(self.category_name)
 
     def rename_category(self):
         """重命名类别 - 显示对话框并发射信号"""
@@ -279,28 +291,22 @@ class CategoryButton(QPushButton):
     def ignore_category(self):
         """忽略类别 - 显示确认对话框并发射信号"""
         try:
-            # 创建自定义消息框
-            msg_box = ThemedMessageBox(self)
+            # 标准 Yes/No 按钮与其他确认框保持完全一致的尺寸。
+            # 消息框必须挂到顶层窗口。若以 CategoryButton 自身为父对象，
+            # 类别按钮的局部 QSS 会继续级联到消息框按钮，导致它与后续由
+            # MainWindow 打开的二次确认框高度不同。
+            msg_box = ThemedMessageBox(self.window())
             msg_box.setWindowTitle("⊘ 确认忽略")
             msg_box.setText(f"确定要忽略类别 '{self.category_name}' 吗？")
             msg_box.setInformativeText("注意：忽略后该目录将不再显示在类别列表中，但目录和文件不会被删除！")
             msg_box.setIcon(QMessageBox.Icon.Question)
 
-            # 创建中文按钮
-            yes_button = QPushButton("是")
-            no_button = QPushButton("否")
+            msg_box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
 
-            msg_box.addButton(yes_button, QMessageBox.ButtonRole.YesRole)
-            msg_box.addButton(no_button, QMessageBox.ButtonRole.NoRole)
-
-            # 设置默认按钮为"否"
-            msg_box.setDefaultButton(no_button)
-
-            # 显示对话框并处理结果
-            msg_box.exec()
-            clicked_button = msg_box.clickedButton()
-
-            if clicked_button == yes_button:
+            if msg_box.exec() == QMessageBox.StandardButton.Yes:
                 # Phase 2.5: 使用信号通知父组件
                 self.ignore_requested.emit(self.category_name)
 
@@ -311,28 +317,23 @@ class CategoryButton(QPushButton):
     def delete_category(self):
         """删除类别 - 显示确认对话框并发射信号"""
         try:
-            # 创建自定义消息框
-            msg_box = ThemedMessageBox(self)
+            # 与 CategoryManager 的二次确认使用同一标准按钮路径，避免
+            # 手工按钮和标准按钮在高 DPI 下出现不同视觉高度。
+            # 与二次确认框使用相同的顶层父窗口，避免 CategoryButton 的
+            # 局部样式污染标准 Yes/No 按钮尺寸。
+            msg_box = ThemedMessageBox(self.window())
             msg_box.setWindowTitle("🗑️ 确认删除")
             msg_box.setText(f"确定要删除类别 '{self.category_name}' 吗？")
             msg_box.setInformativeText("注意：这将删除对应的文件夹及其中的所有文件！")
             msg_box.setIcon(QMessageBox.Icon.Question)
 
-            # 创建中文按钮
-            yes_button = QPushButton("是")
-            no_button = QPushButton("否")
+            msg_box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            msg_box.set_destructive()
+            msg_box.setDefaultButton(QMessageBox.StandardButton.No)
 
-            msg_box.addButton(yes_button, QMessageBox.ButtonRole.DestructiveRole)
-            msg_box.addButton(no_button, QMessageBox.ButtonRole.NoRole)
-
-            # 设置默认按钮为"否"
-            msg_box.setDefaultButton(no_button)
-
-            # 显示对话框并处理结果
-            msg_box.exec()
-            clicked_button = msg_box.clickedButton()
-
-            if clicked_button == yes_button:
+            if msg_box.exec() == QMessageBox.StandardButton.Yes:
                 # Phase 2.5: 使用信号通知父组件
                 self.delete_requested.emit(self.category_name)
 

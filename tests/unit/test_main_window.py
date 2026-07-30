@@ -164,18 +164,20 @@ def test_accuracy_model_cpu_warning_uses_supported_question_dialog(qapp, tmp_pat
 
 
 @pytest.mark.parametrize(
-    ("status_filters", "search_text", "expected"),
+    ("status_filters", "search_text", "focused_category", "expected"),
     [
-        ((True, True, True), "", False),
-        ((False, True, True), "", True),
-        ((True, False, True), "", True),
-        ((True, True, True), "sample", True),
+        ((True, True, True), "", None, False),
+        ((False, True, True), "", None, True),
+        ((True, False, True), "", None, True),
+        ((True, True, True), "sample", None, True),
+        ((True, True, True), "", "白色车位内", True),
     ],
 )
 def test_image_filter_active_detection(
     qapp,
     status_filters,
     search_text,
+    focused_category,
     expected,
 ):
     """只有筛选条件或搜索会改变列表内容时才视为过滤已启用。"""
@@ -187,8 +189,62 @@ def test_image_filter_active_detection(
             window.filter_removed,
         ) = status_filters
         window._image_search_text = search_text
+        window.focused_category = focused_category
 
         assert window.is_image_filter_active() is expected
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+@pytest.mark.parametrize(
+    ("focused_category", "classification", "expected"),
+    [
+        (None, None, True),
+        ("白色车位内", "白色车位内", True),
+        ("白色车位内", "黄色车位内", False),
+        ("白色车位内", ["黄色车位内", "白色车位内"], True),
+        ("白色车位内", ["黄色车位内", "车位外"], False),
+        ("白色车位内", None, False),
+    ],
+)
+def test_category_focus_matches_single_and_multi_classification(
+    qapp,
+    focused_category,
+    classification,
+    expected,
+):
+    """类别聚焦应支持单分类和多分类记录，并排除未分类图片。"""
+    window = ToolbarHarness()
+    try:
+        window.focused_category = focused_category
+        assert window._matches_category_focus(classification) is expected
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_category_focus_restores_previous_classified_filter(qapp):
+    """退出类别聚焦后应恢复用户原来的已分类图片筛选设置。"""
+    window = ToolbarHarness()
+    try:
+        window.categories = {"白色车位内"}
+        window.filter_classified = False
+        window.focused_category = None
+        window.apply_image_filter = Mock()
+        window.image_list_model = Mock()
+        window.image_list_model.rowCount.return_value = 0
+
+        window.set_category_focus("白色车位内")
+
+        assert window.focused_category == "白色车位内"
+        assert window.filter_classified is True
+        assert window._category_focus_previous_classified_filter is False
+
+        window._deactivate_category_focus()
+
+        assert window.focused_category is None
+        assert window.filter_classified is False
     finally:
         window.close()
         window.deleteLater()

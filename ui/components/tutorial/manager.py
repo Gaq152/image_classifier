@@ -57,6 +57,10 @@ class TutorialManager:
         self.current_step_index = 0
         self.is_active = False
         self.current_mock_widget = None  # 当前显示的虚拟组件
+        self._reposition_timer = QTimer(main_window)
+        self._reposition_timer.setSingleShot(True)
+        self._reposition_timer.setInterval(80)
+        self._reposition_timer.timeout.connect(self._reposition_current_step)
 
         # 定义教程步骤
         self.steps = self._define_tutorial_steps()
@@ -78,8 +82,7 @@ class TutorialManager:
                 title="欢迎使用图像分类工具",
                 content='欢迎使用图像分类工具！<br><br>这个工具可以帮助你快速整理和分类大量图片。<br><br>让我们通过详细教程了解所有功能。',
                 target_widget_name="main_window",
-                arrow_position=ArrowPosition.TOP,
-                offset_y=100
+                arrow_position=ArrowPosition.CENTER
             ),
 
             # 步骤2: 打开目录按钮
@@ -88,12 +91,9 @@ class TutorialManager:
                 content='点击顶部的<b>「📁 打开目录」</b>按钮，或者图片列表旁边的小图标，都可以选择包含图片的文件夹。<br><br>'
                         '程序会自动扫描目录中的所有图片文件（支持JPG、PNG、BMP等格式）。',
                 target_widget_name="open_directory_toolbar_button",
-                arrow_position=ArrowPosition.LEFT_RIGHT,
+                arrow_position=ArrowPosition.TOP,
                 highlight_padding=12,
-                offset_x=0,
-                offset_y=0,
-                highlight_widget_names=["open_directory_toolbar_button", "folder_button"],
-                secondary_target_widget_name="folder_button"
+                offset_y=10
             ),
 
             # 步骤3: 图片列表
@@ -119,16 +119,7 @@ class TutorialManager:
                 arrow_position=ArrowPosition.RIGHT,  # 气泡在左侧，箭头在气泡右侧指向按钮
                 highlight_padding=12,
                 offset_x=20,  # 气泡向右偏移，留出空间给箭头
-                offset_y=0,
-                mock_widget_type="menu",
-                mock_widget_content={
-                    "items": [
-                        ("☑", "⚠️ 显示未分类图片"),
-                        ("☑", "✅ 显示已分类图片"),
-                        ("☐", "❌ 显示已移除图片")
-                    ]
-                },
-                mock_widget_position="at_target"
+                offset_y=0
             ),
 
             # 步骤5: 图片预览
@@ -151,23 +142,11 @@ class TutorialManager:
             TutorialStep(
                 title="添加分类类别",
                 content='点击顶部的<b>「➕ 添加类别」</b>按钮，或者分类列表旁边的小图标，都可以创建新的分类类别。<br><br>'
-                        '你可以批量添加多个类别，多个类别用逗号或换行分隔。',
+                        '在打开的窗口中可以一次输入多个类别，使用逗号或换行分隔；预览确认后再添加。',
                 target_widget_name="add_category_toolbar_button",
-                arrow_position=ArrowPosition.LEFT_RIGHT,
+                arrow_position=ArrowPosition.TOP,
                 highlight_padding=12,
-                offset_x=0,
-                offset_y=0,
-                highlight_widget_names=["add_category_toolbar_button", "add_category_button"],
-                secondary_target_widget_name="add_category_button",
-                mock_widget_type="dialog",
-                mock_widget_content={
-                    "title": "批量添加类别",
-                    "items": [],
-                    "buttons": ["添加", "添加并继续", "取消"],
-                    "content_type": "text_edit",
-                    "has_preview": True
-                },
-                mock_widget_position="bottom_center"  # 改为底部居中，避免与气泡重叠
+                offset_y=10
             ),
 
             # 步骤7: 分类区域
@@ -198,6 +177,7 @@ class TutorialManager:
             TutorialStep(
                 title="类别管理菜单",
                 content='右键点击任意类别可以进行管理：<br><br>'
+                        '• <b>🎯 只看此类别</b>：图片列表只显示该类别；选择其他类别会替换，点击列表标题中的 <b>×</b> 可退出聚焦<br>'
                         '• <b>🏷️ 修改类别名称</b><br>'
                         '• <b>⌨️ 修改快捷键</b><br>'
                         '• <b>⊘ 忽略该类别</b>：从列表中隐藏<br>'
@@ -209,13 +189,14 @@ class TutorialManager:
                 mock_widget_type="menu",
                 mock_widget_content={
                     "items": [
+                        ("🎯", "只看此类别"),
                         ("🏷️", "修改类别名称"),
                         ("⌨️", "修改快捷键"),
                         ("⊘", "忽略该类别"),
                         ("⚙️", "管理忽略类别"),
                         ("🗑️", "删除类别")
                     ],
-                    "separator_after": 1  # 在"修改快捷键"后添加分隔线
+                    "separator_after": 0
                 },
                 mock_widget_position="at_target"
             ),
@@ -231,16 +212,7 @@ class TutorialManager:
                 arrow_position=ArrowPosition.RIGHT,  # 气泡在左侧，箭头在气泡右侧指向按钮
                 highlight_padding=12,
                 offset_x=20,  # 气泡向右偏移，留出空间给箭头
-                offset_y=0,
-                mock_widget_type="menu",
-                mock_widget_content={
-                    "items": [
-                        ("☑", "按名称排序"),
-                        ("☐", "按快捷键排序"),
-                        ("☐", "按分类数量排序")
-                    ]
-                },
-                mock_widget_position="at_target"
+                offset_y=0
             ),
 
             # 步骤11: 操作模式（复制/移动）
@@ -297,20 +269,13 @@ class TutorialManager:
             TutorialStep(
                 title="设置面板",
                 content='点击这个<b>「⚙」</b>按钮可以打开设置面板，配置应用的各项设置：<br><br>'
-                        '• <b>⚙️ 基本设置</b>：外观主题、教程状态、自动更新<br>'
-                        '• <b>🔧 高级设置</b>：日志级别、Toast提示、目录设置<br><br>'
+                        '• <b>⚙️ 基本设置</b>：外观、窗口、图像预览和教程状态<br>'
+                        '• <b>🔧 高级设置</b>：日志与提示、更新代理、工作目录和网络缓存<br><br>'
                         '你还可以在这里找到<b>「重新开始教程」</b>按钮，随时复习教程内容。',
                 target_widget_name="settings_button",
                 arrow_position=ArrowPosition.TOP,
                 highlight_padding=12,
-                offset_y=20,
-                mock_widget_type="tabbed_dialog",
-                mock_widget_content={
-                    "title": "设置",
-                    "tabs": ["⚙️ 基本设置", "🔧 高级设置"],
-                    "buttons": ["恢复默认", "重新开始教程"]
-                },
-                mock_widget_position="center"
+                offset_y=20
             ),
 
             # 步骤16: 帮助按钮
@@ -319,21 +284,13 @@ class TutorialManager:
                 content='点击这个<b>「?」</b>按钮可以随时查看：<br><br>'
                         '• <b>快速入门</b>：基础操作指南<br>'
                         '• <b>使用指南</b>：详细功能说明<br>'
-                        '• <b>高级功能</b>：进阶使用技巧<br>'
                         '• <b>常见问题</b>：常见问题解答<br>'
                         '• <b>关于</b>：版本信息和联系方式<br><br>'
                         '如需重新学习教程，请到<b>设置面板</b>中操作。',
                 target_widget_name="help_button",
                 arrow_position=ArrowPosition.TOP,
                 highlight_padding=12,
-                offset_y=20,
-                mock_widget_type="tabbed_dialog",
-                mock_widget_content={
-                    "title": "帮助和关于",
-                    "tabs": ["快速入门", "使用指南", "高级功能", "常见问题", "关于"],
-                    "buttons": []
-                },
-                mock_widget_position="center"
+                offset_y=20
             ),
 
             # 步骤17: 快捷键
@@ -349,8 +306,7 @@ class TutorialManager:
                         '• <b>F5</b> 刷新类别目录<br>'
                         '• <b>再次点击</b>已分类的类别或移除按钮可撤销操作',
                 target_widget_name="central_widget",
-                arrow_position=ArrowPosition.TOP,
-                offset_y=100
+                arrow_position=ArrowPosition.CENTER
             ),
 
             # 步骤18: 完成
@@ -361,8 +317,7 @@ class TutorialManager:
                         '开始整理你的图片吧！<br><br>'
                         '如需再次查看教程，可以在<b>设置面板</b>中点击<b>「重新开始教程」</b>按钮。',
                 target_widget_name="main_window",
-                arrow_position=ArrowPosition.TOP,
-                offset_y=100
+                arrow_position=ArrowPosition.CENTER
             )
         ]
 
@@ -394,6 +349,18 @@ class TutorialManager:
 
         # 延迟显示，确保主窗口已完全初始化
         QTimer.singleShot(500, self._show_current_step)
+
+    def handle_parent_resized(self):
+        """窗口尺寸变化时防抖刷新遮罩、高亮和气泡位置。"""
+        if not self.is_active:
+            return
+        self.overlay.setGeometry(self.main_window.rect())
+        self._reposition_timer.start()
+
+    def _reposition_current_step(self):
+        """重新按当前控件几何信息展示同一步骤。"""
+        if self.is_active:
+            self._show_current_step()
 
     def _show_current_step(self):
         """显示当前步骤"""
@@ -455,25 +422,10 @@ class TutorialManager:
             self.bubble.set_step_info(self.current_step_index + 1, len(self.steps))
             self.logger.debug("气泡内容设置完成")
 
-            # 显示气泡前，检查是否需要为虚拟组件调整位置
+            # 气泡自身会依据目标周围可用空间自动翻转方向，步骤这里只
+            # 保留少量语义偏移，不再按虚拟菜单宽度写死坐标。
             adjusted_offset_x = step.offset_x
             adjusted_offset_y = step.offset_y
-
-            # 如果有虚拟菜单且arrow_position是RIGHT（气泡在左侧），需要考虑虚拟菜单的宽度
-            if (step.mock_widget_type == "menu" and
-                step.mock_widget_position == "at_target" and
-                step.arrow_position == ArrowPosition.RIGHT):
-
-                # MockMenu的固定宽度是200px（从mock_widgets.py得知）
-                menu_width = 200
-                spacing = 20  # 气泡和菜单之间的间距
-
-                # 气泡应该在虚拟菜单左侧
-                # 计算需要的偏移量：从按钮位置算起，要移动到菜单左侧再减去气泡宽度和间距
-                # 简化：直接使用负的偏移量
-                adjusted_offset_x = -(menu_width + spacing)
-
-                self.logger.debug(f"调整气泡位置以避开虚拟菜单: offset_x从{step.offset_x}调整为{adjusted_offset_x}")
 
             self.logger.debug(f"开始显示气泡，offset_x={adjusted_offset_x}, offset_y={adjusted_offset_y}")
             self.logger.debug(f"目标控件geometry: {target_widget.geometry()}")
