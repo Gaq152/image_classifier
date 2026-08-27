@@ -106,11 +106,14 @@ The default limits are 2 GB for the pytest process tree and 10 minutes total run
 
 ### GitHub Actions release pipeline
 
-- Workflow file: `.github/workflows/build-release.yml`
-- Trigger: `push` tags matching `v*`
-- Output assets:
-  - `ImageClassifier_vX.Y.Z.exe`
-  - `manifest.json`
+The standard and AI editions use isolated release channels:
+
+| Edition | Tag | Executable | Update channel |
+| --- | --- | --- | --- |
+| Standard | `vX.Y.Z` | `ImageClassifier_vX.Y.Z.exe` | GitHub `latest` |
+| AI | `ai-vX.Y.Z` | `ImageClassifierAI_vX.Y.Z.exe` | `ai-latest` prerelease |
+
+The AI edition has a separate purple AI-marked icon, product identity, release tag, and update manifest. Publishing an `ai-v*` tag does not trigger or replace the standard edition release.
 
 ### Local build
 
@@ -118,6 +121,9 @@ The default limits are 2 GB for the pytest process tree and 10 minutes total run
 pip install -r requirements.txt
 pip install pyinstaller
 python build.py
+
+# Isolated AI edition
+python build.py --edition ai
 ```
 
 ## Auto Update

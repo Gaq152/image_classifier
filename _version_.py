@@ -14,11 +14,11 @@ from product_channel import get_product_info
 # ================================
 
 # 主版本号 - 这是唯一需要手动修改的地方
-__version__ = "7.2.3"
+__version__ = "7.2.4"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
-RELEASE_DATE = "2026-07-30"
+RELEASE_DATE = "2026-08-27"
 RELEASE_NAME = str(get_product_info()["application_name"])
 
 # ================================
@@ -26,6 +26,26 @@ RELEASE_NAME = str(get_product_info()["application_name"])
 # ================================
 
 VERSION_HISTORY = [
+    {
+        "version": "7.2.4",
+        "date": "2026-08-27",
+        "title": "AI 辅助与全自动分类",
+        "highlights": [
+            "🤖 新增辅助与全自动分类模式，均由 Tab 显式启停",
+            "🛡️ 全自动跳过不确定结果并提供风险确认、暂停确认和任务汇总",
+            "🎨 AI 版启用独立紫色 AI 标记图标及隔离更新通道",
+        ],
+        "details": [
+            "【AI 分类】",
+            "辅助模式按 Tab 开启或关闭，停止翻页后自动给出当前图片建议",
+            "全自动要求复制、单分类且每类至少 20 张样本，默认跳过已处理图片",
+            "不确定结果不自动标注，完成后定位第一张不确定图片",
+            "",
+            "【产品区分】",
+            "AI 版使用独立紫色 AI 图标、产品名称、发布标签和更新通道",
+            "基础版继续使用原蓝色图标及 stable 更新通道",
+        ],
+    },
     {
         "version": "7.2.3",
         "date": "2026-07-30",

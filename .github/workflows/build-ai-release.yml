@@ -112,7 +112,7 @@ jobs:
             display_name = $env:VERSIONED_NAME
             sha256 = $env:SHA256
             size_bytes = [int64]$env:SIZE_BYTES
-            notes = "AI preview build with CPU fallback and NVIDIA CUDA support"
+            notes = "AI-assisted and full-auto classification with isolated on-demand CPU/GPU resources"
           }
 
           $versioned = $common.Clone()
@@ -131,6 +131,8 @@ jobs:
 
           This is the isolated AI preview edition. It does not replace the public edition and uses its own automatic-update channel.
 
+          - Assisted and full-auto classification modes with uncertainty skipping and task summaries.
+          - Distinct purple AI product icon, identity, and isolated update channel.
           - CPU inference remains available as a safe fallback.
           - CPU/GPU ONNX Runtime and base models are downloaded on demand with visible progress and SHA-256 verification.
           - Base models remain outside the executable and project-trained data remains beside the project JSON.
