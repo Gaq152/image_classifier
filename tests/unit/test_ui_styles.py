@@ -265,15 +265,16 @@ def test_ai_removal_suggestion_requires_delete_confirmation(qtbot):
 
     category_panel.show_ai_prediction(
         category="建议移除",
-        score=0.91,
+        similarity=0.73,
         uncertain=False,
         latency_ms=25.0,
         provider="CPU",
-        alternatives=["1. 建议移除（相对匹配 91%）"],
+        alternatives=["1. 建议移除（相似度 73%）"],
         is_removal=True,
     )
 
     assert "Delete确认" in category_panel.ai_suggestion_label.text()
+    assert "相似度 73%" in category_panel.ai_suggestion_label.text()
     assert "Enter确认" not in category_panel.ai_suggestion_label.text()
     assert category_panel.ai_suggestion_label.property("tone") == "warning"
 
@@ -296,8 +297,8 @@ def test_image_preview_prediction_overlay_animates_and_renders_result(qtbot):
 
     panel.show_prediction_result(
         "AI 建议 · 白色车位内",
-        "相对匹配 88% · CPU 35ms · Enter 确认",
-        ["1. 白色车位内（相对匹配 88%）"],
+        "相似度 72% · CPU 35ms · Enter 确认",
+        ["1. 白色车位内（相似度 72%）"],
         "ready",
     )
 
@@ -308,6 +309,26 @@ def test_image_preview_prediction_overlay_animates_and_renders_result(qtbot):
 
     panel.clear_prediction_overlay()
     assert not panel.prediction_result_card.isVisible()
+
+
+def test_ai_prediction_toast_is_centered_in_image_preview(qtbot):
+    from ui._main_window.panels.image_view_panel import ImageViewPanel
+    from ui.components.toast import Toast
+
+    panel = ImageViewPanel()
+    qtbot.addWidget(panel)
+    panel.resize(800, 600)
+    panel.show()
+    qtbot.wait(20)
+
+    with patch.object(Toast, "_should_show_toast", return_value=True):
+        panel.show_prediction_toast("AI 建议：站立", duration=5000)
+
+    viewport = panel.image_scroll_area.viewport()
+    toast = viewport._toast
+    assert toast.parent() is viewport
+    assert toast.y() == 20
+    assert abs(toast.x() - (viewport.width() - toast.width()) // 2) <= 1
 
 
 def test_settings_only_styles_business_buttons(qtbot):

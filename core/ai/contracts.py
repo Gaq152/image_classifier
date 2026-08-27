@@ -12,7 +12,6 @@ class PredictionSuggestion:
     """One category candidate returned by an engine."""
 
     category: str
-    score: float
     similarity: float
 
 

@@ -21,10 +21,11 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
                             QSplitter, QLabel, QStatusBar, QToolBar
                             , QSizePolicy, QFileDialog,
                             QMessageBox, QApplication, QListView,
-                            QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu, QDialog)
+                            QPushButton, QAbstractItemView, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QMenu, QDialog, QCheckBox)
 # Phase 1.1: QListWidget已废弃，Model/View架构使用QListView
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint, QObject, QEvent, QItemSelectionModel
 from PyQt6.QtGui import QAction, QKeySequence, QPixmap, QColor, QIcon, QImage, QPainter, QPen, QBrush
+from PyQt6.QtWidgets import QSystemTrayIcon
 from .components.widgets import ExpandableSearch
 # Phase 1.1: ImageListItem已废弃，Model/View架构不再需要
 from .models.image_list_model import ImageListModel
@@ -49,6 +50,7 @@ from .managers.image_navigation_manager import ImageNavigationManager
 from .managers.file_operation_manager import FileOperationManager as UIFileOperationManager
 from .managers.category_manager import CategoryManager
 from .managers.ai_classification_manager import AIClassificationManager
+from .ai_resource_download import AIResourceDownloadManager
 from .update_download import get_update_download_controller
 from .update_popover import UpdateCenterPopover
 from core.ai import (
@@ -56,8 +58,12 @@ from core.ai import (
     AI_REMOVAL_LABEL,
     default_ai_project_state,
     get_ai_model_profile,
+    get_model_resource,
+    get_runtime_resource,
+    is_resource_installed,
     is_project_model_initialized,
     normalize_ai_project_state,
+    required_runtime_kind,
 )
 from core.config import Config
 from utils.app_config import get_app_config
@@ -107,6 +113,39 @@ class DisabledButtonEventFilter(QObject):
         return super().eventFilter(obj, event)
 
 
+class AITabEventFilter(QObject):
+    """Consume one physical Tab press for AI without reacting to auto-repeat."""
+
+    def __init__(self, parent_window):
+        super().__init__(parent_window)
+        self.parent_window = parent_window
+        self._pressed = False
+
+    def eventFilter(self, obj, event):
+        if event.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+            return False
+        if event.key() != Qt.Key.Key_Tab:
+            return False
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            return False
+        # 启动确认框可能在 KeyPress 处理中同步打开，KeyRelease 随后会
+        # 落到该模态框。释放必须优先解锁，不能被模态状态提前拦截。
+        if event.type() == QEvent.Type.KeyRelease:
+            self._pressed = False
+            return QApplication.activeModalWidget() is None
+        window = self.parent_window
+        modal = QApplication.activeModalWidget()
+        if modal is not None:
+            return False
+        if not window.isActiveWindow() or window._is_in_input_mode():
+            return False
+        if self._pressed or event.isAutoRepeat():
+            return True
+        self._pressed = True
+        window._handle_ai_tab()
+        return True
+
+
 class NoSearchListView(QListView):
     """禁用键盘搜索的 QListView，避免与分类快捷键冲突"""
     def keyboardSearch(self, search: str):
@@ -151,6 +190,15 @@ class ImageClassifier(QMainWindow):
 
         # 应用级更新下载控制器，允许进度窗口隐藏后继续在后台下载。
         self.update_download_controller = get_update_download_controller()
+
+        # AI 资源下载同样由主窗口托管；模型配置弹窗关闭后任务继续。
+        self._ai_resource_download_manager = AIResourceDownloadManager(self)
+        self._ai_resource_download_manager.resource_installed.connect(
+            self._on_ai_resource_installed
+        )
+        self._ai_resource_download_manager.resource_failed.connect(
+            self._on_ai_resource_failed
+        )
 
         # 初始化Manager（在状态变量之后）
         self._init_managers()
@@ -415,8 +463,14 @@ class ImageClassifier(QMainWindow):
         self.initial_batch_loaded = False
         self.background_loading = False
 
-        # 模型预测状态：自动模式停留 200ms 后触发，手动模式由 Tab 触发。
+        # AI 辅助/全自动任务状态。两种模式都必须由 Tab 显式启动。
         self.ai_prediction_mode = self.app_config.ai_prediction_mode
+        self._ai_assist_active = False
+        self._ai_auto_task = None
+        self._ai_auto_pause_requested = False
+        self._ai_auto_locked_widgets = []
+        self._ai_tab_event_filter = AITabEventFilter(self)
+        QApplication.instance().installEventFilter(self._ai_tab_event_filter)
         self._ai_current_image_data = None
         self._ai_current_image_path = None
         self._ai_prediction_loading = False
@@ -427,7 +481,7 @@ class ImageClassifier(QMainWindow):
         self._ai_prediction_timer.setSingleShot(True)
         self._ai_prediction_timer.setInterval(self.AI_PREDICTION_DEBOUNCE_MS)
         self._ai_prediction_timer.timeout.connect(
-            lambda: self._trigger_ai_prediction("auto")
+            self._trigger_scheduled_ai_prediction
         )
         self._ai_project_state = default_ai_project_state()
         self._ai_pending_initialization = {}
@@ -1226,7 +1280,7 @@ class ImageClassifier(QMainWindow):
         self.set_mode(self.is_copy_mode)
 
     def create_ai_prediction_mode_button(self, toolbar):
-        """创建自动/手动模型预测模式切换按钮。"""
+        """创建辅助/全自动模型预测模式切换按钮。"""
         self.ai_prediction_mode_button = QPushButton()
         self.ai_prediction_mode_button.setObjectName("ai_prediction_mode_button")
         self.ai_prediction_mode_button.clicked.connect(
@@ -1245,20 +1299,44 @@ class ImageClassifier(QMainWindow):
         if button is None:
             return
         initialized = self._is_active_ai_model_initialized()
-        is_auto = getattr(self, "ai_prediction_mode", "auto") == "auto"
-        if initialized:
-            button.setText("AI · 自动" if is_auto else "AI · 手动")
-            button.setToolTip(
-                "自动预测：停止翻页 200ms 后触发，点击切换为手动模式"
-                if is_auto
-                else "手动预测：按 Tab 分析当前图片，点击切换为自动模式"
+        resource_problem = (
+            self._active_ai_resource_problem() if initialized else None
+        )
+        manager = getattr(self, "_ai_manager", None)
+        ready = bool(
+            initialized
+            and resource_problem is None
+            and manager is not None
+            and manager.is_ready
+        )
+        is_auto = getattr(self, "ai_prediction_mode", "assist") == "auto"
+        active = bool(
+            getattr(self, "_ai_auto_task", None)
+            if is_auto
+            else getattr(self, "_ai_assist_active", False)
+        )
+        if ready:
+            button.setText(
+                ("AI · 自动" if is_auto else "AI · 辅助")
+                + (" · 运行中" if active else "")
             )
+            button.setToolTip(
+                "全自动分类：切换模式后按 Tab 校验并启动"
+                if is_auto
+                else "辅助预测：按 Tab 开启或关闭，点击切换为全自动模式"
+            )
+        elif initialized and resource_problem:
+            button.setText("AI · 未就绪")
+            button.setToolTip(f"{resource_problem}；点击打开模型配置")
+        elif initialized:
+            button.setText("AI · 加载中")
+            button.setToolTip("项目和资源已就绪，正在后台加载 AI 模型")
         else:
             button.setText("AI · 启用")
             button.setToolTip("首次启用：选择基础模型以及从零开始或导入旧标注")
         style_button(
             button,
-            "primary" if initialized and is_auto else "secondary",
+            "primary" if ready and active else "secondary",
             "compact",
             min_width=92,
         )
@@ -1278,19 +1356,36 @@ class ImageClassifier(QMainWindow):
         if not self._is_active_ai_model_initialized():
             self.show_ai_project_setup()
             return
+        resource_problem = self._active_ai_resource_problem()
+        if resource_problem:
+            self.show_ai_project_setup()
+            return
+        manager = getattr(self, "_ai_manager", None)
+        if manager is None or not manager.is_ready:
+            toast_info(self, "AI 模型正在后台加载，请稍候")
+            return
         self._toggle_ai_prediction_mode()
 
     def _toggle_ai_prediction_mode(self):
         mode = (
-            "manual"
-            if getattr(self, "ai_prediction_mode", "auto") == "auto"
+            "assist"
+            if getattr(self, "ai_prediction_mode", "assist") == "auto"
             else "auto"
         )
         self.set_ai_prediction_mode(mode)
 
     def set_ai_prediction_mode(self, mode: str, notify: bool = True):
         """切换预测模式并刷新当前图片的预测调度。"""
-        if mode not in ("auto", "manual"):
+        if mode not in ("assist", "auto"):
+            return
+        if not self._is_active_ai_prediction_ready():
+            self._update_ai_prediction_mode_button()
+            if notify:
+                problem = self._active_ai_resource_problem()
+                toast_warning(
+                    self,
+                    problem or "AI 模型正在后台加载，请稍候",
+                )
             return
         if getattr(self, "_ai_prediction_loading", False):
             self._notify_ai_navigation_locked()
@@ -1298,27 +1393,26 @@ class ImageClassifier(QMainWindow):
 
         self.ai_prediction_mode = mode
         self.app_config.ai_prediction_mode = mode
+        self._ai_assist_active = False
         self._ai_prediction_timer.stop()
         if hasattr(self, "image_view_panel"):
             self.image_view_panel.clear_prediction_overlay()
         self._update_ai_prediction_mode_button()
 
         if mode == "auto":
-            if self._ai_current_image_data is not None:
-                self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
             if hasattr(self, "category_panel"):
                 self.category_panel.set_ai_status(
-                    "AI 自动预测 · 停止翻页 200ms 后分析", "ready"
+                    "AI 全自动 · 按 Tab 校验并启动", "ready"
                 )
             if notify:
-                toast_info(self, "已开启自动模型预测：停止翻页 200ms 后分析")
+                toast_info(self, "已切换到全自动模式，按 Tab 启动")
         else:
             if hasattr(self, "category_panel"):
                 self.category_panel.set_ai_status(
-                    "AI 手动预测 · 按 Tab 分析当前图片", "ready"
+                    "AI 辅助 · 按 Tab 开启", "ready"
                 )
             if notify:
-                toast_info(self, "已切换手动模型预测：按 Tab 触发")
+                toast_info(self, "已切换到辅助模式，按 Tab 开启")
     
     def create_status_bar(self):
         """创建状态栏"""
@@ -1440,6 +1534,9 @@ class ImageClassifier(QMainWindow):
     def _safe_execute_shortcut(self, func):
         """安全执行快捷键函数"""
         try:
+            if self._ai_auto_task is not None:
+                self.logger.debug("全自动任务运行中，忽略非 Tab 快捷键")
+                return
             if not self._shortcuts_active:
                 self.logger.debug("快捷键被禁用，跳过执行")
                 return
@@ -2415,6 +2512,46 @@ class ImageClassifier(QMainWindow):
             project_state, project_dir, model_key
         )
 
+    def _active_ai_resource_problem(self) -> Optional[str]:
+        """Explain the first missing prerequisite for the active AI model."""
+        project_dir = self._current_ai_project_dir()
+        if project_dir is None:
+            return "请先打开图片目录"
+        project_state = getattr(
+            self, "_ai_project_state", default_ai_project_state()
+        )
+        model_key = project_state.get("active_model", "balanced")
+        if not is_project_model_initialized(
+            project_state, project_dir, model_key
+        ):
+            return "当前项目尚未初始化 AI"
+
+        model_resource = get_model_resource(model_key)
+        if not is_resource_installed(model_resource):
+            return f"{model_resource.display_name}尚未下载"
+
+        profile = get_ai_model_profile(model_key)
+        manager = getattr(self, "_ai_manager", None)
+        provider = (
+            manager.preferred_provider
+            if manager is not None
+            else get_app_config().ai_execution_provider
+        )
+        runtime_kind = required_runtime_kind(profile, provider)
+        if runtime_kind:
+            runtime_resource = get_runtime_resource(runtime_kind)
+            if not is_resource_installed(runtime_resource):
+                return f"{runtime_resource.display_name}尚未下载"
+        return None
+
+    def _is_active_ai_prediction_ready(self) -> bool:
+        manager = getattr(self, "_ai_manager", None)
+        return bool(
+            self._active_ai_resource_problem() is None
+            and manager is not None
+            and manager.is_ready
+        )
+
     def _collect_current_ai_samples(self, include_removed: Optional[bool] = None):
         """Collect usable, human-confirmed samples from the active project."""
         if include_removed is None:
@@ -2510,9 +2647,17 @@ class ImageClassifier(QMainWindow):
             ai_state=self._ai_project_state,
             existing_sample_count=len(classified_samples),
             removed_sample_count=len(removed_samples),
+            resource_download_manager=getattr(
+                self, "_ai_resource_download_manager", None
+            ),
             parent=self,
         )
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        self._ai_setup_dialog_active = True
+        try:
+            dialog_result = dialog.exec()
+        finally:
+            self._ai_setup_dialog_active = False
+        if dialog_result != QDialog.DialogCode.Accepted:
             return
         model_key = dialog.selected_model_key
         if model_key is None:
@@ -2648,9 +2793,13 @@ class ImageClassifier(QMainWindow):
         if manager is None or project_dir is None:
             return
         model_key = self._ai_project_state.get("active_model", "balanced")
-        if is_project_model_initialized(
+        initialized = is_project_model_initialized(
             self._ai_project_state, project_dir, model_key
-        ):
+        )
+        resource_problem = (
+            self._active_ai_resource_problem() if initialized else None
+        )
+        if initialized and resource_problem is None:
             token = (str(project_dir), model_key)
             if self._ai_configured_project_dir != token or not manager.is_ready:
                 self._configure_ai_for_current_project(
@@ -2667,14 +2816,32 @@ class ImageClassifier(QMainWindow):
             manager.clear_project()
             self._ai_configured_project_dir = None
             if hasattr(self, "category_panel"):
-                models = self._ai_project_state.get("models", {})
-                record = models.get(model_key, {})
-                if record.get("initialized"):
-                    message = "AI 项目模型文件缺失 · 点击模型按钮重新初始化"
+                if initialized and resource_problem:
+                    message = f"AI 未就绪 · {resource_problem} · 点击模型按钮继续"
                 else:
-                    message = "AI 未初始化 · 点击“AI · 启用”开始"
+                    models = self._ai_project_state.get("models", {})
+                    record = models.get(model_key, {})
+                    if record.get("initialized"):
+                        message = "AI 项目模型文件缺失 · 点击模型按钮重新初始化"
+                    else:
+                        message = "AI 未初始化 · 点击“AI · 启用”开始"
                 self.category_panel.set_ai_status(message, "warning")
         self._update_ai_prediction_mode_button()
+
+    def _on_ai_resource_installed(self, resource) -> None:
+        """Report a background install and resume an already initialized project."""
+        toast_success(self, f"{resource.display_name}已在后台安装完成")
+        self._update_ai_prediction_mode_button()
+        if (
+            not getattr(self, "_ai_setup_dialog_active", False)
+            and self._is_active_ai_model_initialized()
+            and self._active_ai_resource_problem() is None
+        ):
+            self._restore_ai_for_current_project()
+
+    def _on_ai_resource_failed(self, resource, error: str) -> None:
+        self._update_ai_prediction_mode_button()
+        toast_warning(self, f"{resource.display_name}下载失败：{error}")
 
     def _on_ai_model_state_changed(self, snapshot: dict):
         """Persist initialization and incremental-learning metadata in project JSON."""
@@ -2736,25 +2903,38 @@ class ImageClassifier(QMainWindow):
             self.save_state()
         if (
             is_active_model
+            # 普通 updated 事件来自上一张分类后的增量学习保存。此时当前
+            # 图片已经由翻页流程完成预测，不能再次启动自动预测。
+            and self._ai_model_event_requires_prediction(model_event)
             and
-            self.ai_prediction_mode == "auto"
+            self.ai_prediction_mode == "assist"
+            and self._ai_assist_active
             and self._ai_current_image_data is not None
             and not self._ai_prediction_loading
         ):
             self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
 
+    @staticmethod
+    def _ai_model_event_requires_prediction(model_event: str) -> bool:
+        """Only model availability changes warrant predicting the current image."""
+        return model_event in ("initialized", "reinitialized")
+
     def _on_ai_status_changed(self, message: str, tone: str):
         if hasattr(self, 'category_panel'):
             self.category_panel.set_ai_status(message, tone)
+        self._update_ai_prediction_mode_button()
         if tone in ("disabled", "error"):
             self._finish_ai_prediction_ui()
+            if tone == "error" and getattr(self, "_ai_auto_task", None) is not None:
+                self._finish_ai_auto_task(cancelled=True)
             if tone == "error":
                 toast_error(self, message)
             else:
                 toast_warning(self, message)
         elif (
             tone == "ready"
-            and self.ai_prediction_mode == "auto"
+            and self.ai_prediction_mode == "assist"
+            and self._ai_assist_active
             and self._ai_current_image_data is not None
             and not self._ai_prediction_loading
         ):
@@ -2769,9 +2949,28 @@ class ImageClassifier(QMainWindow):
 
     def _on_ai_image_ready(self, image_data):
         """记录当前图片，并依据模式调度预测。"""
-        self._ai_prediction_timer.stop()
         current_path = self.get_current_image_path()
-        self._ai_current_image_path = str(current_path) if current_path else None
+        current_path_text = str(current_path) if current_path else None
+        auto_task = getattr(self, "_ai_auto_task", None)
+        if (
+            auto_task is not None
+            and current_path_text != auto_task.get("active_path")
+        ):
+            # 文件操作管理器分类后会自行翻到下一张；全自动队列尚未正式
+            # 接管该图片前忽略这个过渡回调，避免并发提交错误图片。
+            return
+        # 同一张图可能先由导航缓存直接显示，随后又收到仍在途的异步
+        # 预加载完成信号。第二个回调不能重启自动预测，否则会连续出现
+        # 两次相同的“自动预测中”遮罩。
+        if (
+            current_path_text is not None
+            and self._ai_current_image_path == current_path_text
+            and self._ai_current_image_data is not None
+        ):
+            return
+
+        self._ai_prediction_timer.stop()
+        self._ai_current_image_path = current_path_text
         self._ai_current_image_data = self._coerce_ai_rgb_image(image_data)
         if hasattr(self, "image_view_panel"):
             self.image_view_panel.clear_prediction_overlay()
@@ -2791,15 +2990,45 @@ class ImageClassifier(QMainWindow):
                 )
             return
 
-        if self.ai_prediction_mode == "auto":
+        resource_problem = self._active_ai_resource_problem()
+        if resource_problem:
             if hasattr(self, "category_panel"):
                 self.category_panel.set_ai_status(
-                    "AI 自动预测 · 等待图片稳定 200ms…", "working"
+                    f"AI 未就绪 · {resource_problem} · 点击模型按钮继续",
+                    "warning",
+                )
+            return
+
+        manager = getattr(self, "_ai_manager", None)
+        if manager is None or not manager.is_ready:
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    "AI 模型正在后台加载…", "working"
+                )
+            return
+
+        if getattr(self, "_ai_auto_task", None) is not None or (
+            self.ai_prediction_mode == "assist"
+            and getattr(self, "_ai_assist_active", False)
+        ):
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    (
+                        "AI 全自动 · 正在处理…"
+                        if getattr(self, "_ai_auto_task", None) is not None
+                        else "AI 辅助 · 等待图片稳定 200ms…"
+                    ),
+                    "working",
                 )
             self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
         elif hasattr(self, "category_panel"):
             self.category_panel.set_ai_status(
-                "AI 手动预测 · 按 Tab 分析当前图片", "ready"
+                (
+                    "AI 全自动 · 按 Tab 校验并启动"
+                    if self.ai_prediction_mode == "auto"
+                    else "AI 辅助 · 按 Tab 开启"
+                ),
+                "ready",
             )
 
     def _coerce_ai_rgb_image(self, image_data):
@@ -2842,19 +3071,334 @@ class ImageClassifier(QMainWindow):
                 )
         return None
 
-    def trigger_manual_ai_prediction(self):
-        """Tab 快捷键入口：仅在手动模式下预测当前图片。"""
-        if not self._is_active_ai_model_initialized():
+    def _trigger_scheduled_ai_prediction(self):
+        source = "full_auto" if getattr(self, "_ai_auto_task", None) is not None else "assist"
+        self._trigger_ai_prediction(source)
+
+    def _handle_ai_tab(self):
+        """Handle one Tab action and reject nested delivery of the same key press."""
+        if getattr(self, "_ai_tab_handling", False):
+            return
+        self._ai_tab_handling = True
+        try:
+            self._handle_ai_tab_once()
+        finally:
+            self._ai_tab_handling = False
+
+    def _handle_ai_tab_once(self):
+        """Tab toggles assistance or starts/pauses a full-auto task."""
+        if (
+            not self._is_active_ai_model_initialized()
+            or self._active_ai_resource_problem()
+        ):
             self.show_ai_project_setup()
             return
-        if self.ai_prediction_mode != "manual":
-            toast_info(self, "当前是自动预测模式，将在停止翻页 200ms 后分析")
+        manager = getattr(self, "_ai_manager", None)
+        if manager is None or not manager.is_ready:
+            toast_info(self, "AI 模型正在后台加载，请稍候")
             return
-        self._trigger_ai_prediction("manual")
+
+        if self.ai_prediction_mode == "auto":
+            if self._ai_auto_task is not None:
+                self._request_ai_auto_pause()
+            else:
+                self._start_ai_auto_task()
+            return
+
+        self._ai_assist_active = not self._ai_assist_active
+        self._ai_prediction_timer.stop()
+        self._update_ai_prediction_mode_button()
+        if self._ai_assist_active:
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status(
+                    "AI 辅助已开启 · 停止翻页 200ms 后分析", "ready"
+                )
+            if self._ai_current_image_data is not None:
+                self._ai_prediction_timer.start(self.AI_PREDICTION_DEBOUNCE_MS)
+            toast_info(self, "AI 辅助已开启，再按 Tab 关闭")
+        else:
+            if hasattr(self, "image_view_panel"):
+                self.image_view_panel.clear_prediction_overlay()
+            if hasattr(self, "category_panel"):
+                self.category_panel.set_ai_status("AI 辅助 · 按 Tab 开启", "ready")
+            toast_info(self, "AI 辅助已关闭")
+
+    def _ai_auto_preflight_problem(self) -> Optional[str]:
+        if not self.is_copy_mode:
+            return "全自动分类只能在复制模式下使用"
+        if self.is_multi_category:
+            return "全自动分类仅支持单分类模式"
+        if not self.image_files:
+            return "当前目录没有可处理的图片"
+        model_key = self._ai_project_state.get("active_model", "balanced")
+        record = self._ai_project_state.get("models", {}).get(model_key, {})
+        counts = record.get("class_counts", {}) if isinstance(record, dict) else {}
+        required_labels = list(self.ordered_categories)
+        if self._ai_project_state.get("learn_removed_images", False):
+            required_labels.append(AI_REMOVAL_LABEL)
+        missing = [
+            f"{'移除' if label == AI_REMOVAL_LABEL else label} "
+            f"{int(counts.get(label, 0))}/20"
+            for label in required_labels
+            if int(counts.get(label, 0)) < 20
+        ]
+        if missing:
+            return "全自动要求每个参与预测的类别至少 20 张样本：" + "，".join(missing)
+        return None
+
+    def _confirm_ai_auto_start(self) -> Optional[bool]:
+        """Return whether existing labels should be reprocessed, or None on cancel."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("启动全自动分类")
+        dialog.setModal(True)
+        layout = QVBoxLayout(dialog)
+        configure_dialog(dialog, layout)
+        title = QLabel("⚠️ 全自动分类风险确认")
+        title.setProperty("uiRole", "title")
+        layout.addWidget(title)
+        warning = QLabel(
+            "全自动会依据当前样本库直接复制图片到预测类别。预测不确定的图片会跳过，"
+            "任务期间本窗口的翻页、分类、模式切换和鼠标操作都会被锁定。\n\n"
+            "请确认样本质量和类别定义可靠；AI 结果仍可能出错。窗口最小化不会暂停任务。"
+        )
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+        reprocess = QCheckBox("重新处理已经标注或移除的图片（默认跳过）")
+        reprocess.setChecked(False)
+        layout.addWidget(reprocess)
+        buttons = QHBoxLayout()
+        cancel = QPushButton("取消")
+        confirm = QPushButton("我已了解风险，开始全自动")
+        style_button(cancel, "secondary")
+        style_button(confirm, "danger", min_width=200)
+        cancel.clicked.connect(dialog.reject)
+        confirm.clicked.connect(dialog.accept)
+        buttons.addStretch()
+        buttons.addWidget(cancel)
+        buttons.addWidget(confirm)
+        layout.addLayout(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return reprocess.isChecked()
+
+    def _start_ai_auto_task(self) -> None:
+        problem = self._ai_auto_preflight_problem()
+        if problem:
+            toast_warning(self, problem)
+            return
+        reprocess_existing = self._confirm_ai_auto_start()
+        if reprocess_existing is None:
+            return
+        self._ai_assist_active = False
+        self._ai_auto_pause_requested = False
+        self._ai_auto_task = {
+            "paths": [str(path) for path in self.image_files],
+            "position": 0,
+            "total": len(self.image_files),
+            "processed": 0,
+            "skipped_existing": 0,
+            "uncertain_paths": [],
+            "auto_counts": {},
+            "auto_removed": 0,
+            "reprocess_existing": bool(reprocess_existing),
+            "active_path": None,
+        }
+        self._set_ai_auto_ui_locked(True)
+        self._update_ai_prediction_mode_button()
+        self.statusBar.showMessage("🤖 全自动分类正在运行；按 Tab 可请求暂停")
+        QTimer.singleShot(0, self._advance_ai_auto_task)
+
+    def _set_ai_auto_ui_locked(self, locked: bool) -> None:
+        names = (
+            "image_list", "image_search_widget", "filter_button", "folder_button",
+            "open_directory_toolbar_button", "refresh_button", "mode_button",
+            "ai_prediction_mode_button", "ai_model_button", "category_panel",
+        )
+        if locked:
+            self._ai_auto_locked_widgets = []
+            for name in names:
+                widget = getattr(self, name, None)
+                if widget is not None:
+                    self._ai_auto_locked_widgets.append((widget, widget.isEnabled()))
+                    widget.setEnabled(False)
+            if hasattr(self, "image_view_panel"):
+                button = self.image_view_panel.delete_button
+                self._ai_auto_locked_widgets.append((button, button.isEnabled()))
+                button.setEnabled(False)
+        else:
+            for widget, was_enabled in self._ai_auto_locked_widgets:
+                widget.setEnabled(was_enabled)
+            self._ai_auto_locked_widgets = []
+
+    def _advance_ai_auto_task(self) -> None:
+        task = self._ai_auto_task
+        if task is None or self._ai_auto_pause_requested:
+            return
+        paths = task["paths"]
+        while task["position"] < len(paths):
+            path = paths[task["position"]]
+            task["position"] += 1
+            if not task["reprocess_existing"] and (
+                path in self.classified_images or path in self.removed_images
+            ):
+                task["skipped_existing"] += 1
+                continue
+            matching_index = next(
+                (i for i, item in enumerate(self.image_files) if str(item) == path),
+                None,
+            )
+            if matching_index is None:
+                continue
+            task["active_path"] = path
+            self._ai_current_image_path = None
+            self._ai_current_image_data = None
+            self.current_index = matching_index
+            self._nav_manager.show_current_image()
+            return
+        self._finish_ai_auto_task()
+
+    def _handle_ai_auto_result(self, result) -> None:
+        task = self._ai_auto_task
+        if task is None or result.image_path != task.get("active_path"):
+            return
+        if self._ai_auto_pause_requested:
+            self._show_ai_auto_pause_confirmation(result)
+            return
+        task["processed"] += 1
+        if not result.suggestions or result.uncertain:
+            task["uncertain_paths"].append(result.image_path)
+            QTimer.singleShot(0, self._advance_ai_auto_task)
+            return
+        top = result.suggestions[0]
+        if top.category == AI_REMOVAL_LABEL:
+            task["auto_removed"] += 1
+            self._file_ops_manager.move_to_remove(result.image_path)
+        elif top.category in self.ordered_categories:
+            counts = task["auto_counts"]
+            counts[top.category] = counts.get(top.category, 0) + 1
+            self._file_ops_manager.move_to_category(result.image_path, top.category)
+        else:
+            task["uncertain_paths"].append(result.image_path)
+        QTimer.singleShot(0, self._advance_ai_auto_task)
+
+    def _request_ai_auto_pause(self) -> None:
+        if self._ai_auto_pause_requested:
+            return
+        self._ai_auto_pause_requested = True
+        self._ai_prediction_timer.stop()
+        self.statusBar.showMessage("⏸ 全自动任务已暂停，等待退出确认")
+        if not self._ai_prediction_loading:
+            self._show_ai_auto_pause_confirmation()
+
+    def _show_ai_auto_pause_confirmation(self, pending_result=None) -> None:
+        if self._ai_auto_task is None:
+            return
+        box = ThemedMessageBox(self)
+        box.setWindowTitle("全自动任务已暂停")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            "是否结束本次全自动任务？\n\n选择“否”将继续任务，当前进度不会丢失。"
+        )
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        box.set_destructive(True)
+        answer = box.exec()
+        if answer == QMessageBox.StandardButton.Yes:
+            self._finish_ai_auto_task(cancelled=True)
+            return
+        self._ai_auto_pause_requested = False
+        self.statusBar.showMessage("🤖 全自动分类正在运行；按 Tab 可请求暂停")
+        if pending_result is not None:
+            self._handle_ai_auto_result(pending_result)
+        else:
+            QTimer.singleShot(0, self._advance_ai_auto_task)
+
+    @staticmethod
+    def _count_classifications(classified_images) -> Dict[str, int]:
+        counts = {}
+        for value in classified_images.values():
+            labels = value if isinstance(value, (list, tuple, set)) else (value,)
+            for label in labels:
+                counts[label] = counts.get(label, 0) + 1
+        return counts
+
+    def _finish_ai_auto_task(self, cancelled: bool = False) -> None:
+        task = self._ai_auto_task
+        if task is None:
+            return
+        self._ai_prediction_timer.stop()
+        self._ai_auto_task = None
+        self._ai_auto_pause_requested = False
+        if self._ai_prediction_loading:
+            self._finish_ai_prediction_ui()
+        self._set_ai_auto_ui_locked(False)
+        self._update_ai_prediction_mode_button()
+        if hasattr(self, "category_panel"):
+            self.category_panel.set_ai_status(
+                "AI 全自动 · 按 Tab 校验并启动", "ready"
+            )
+        current_path = self.get_current_image_path()
+        if current_path is not None:
+            self.statusBar.showMessage(f"📷 {Path(current_path).name}")
+        else:
+            self.statusBar.clearMessage()
+        final_counts = self._count_classifications(self.classified_images)
+        category_text = "，".join(
+            f"{category} {final_counts.get(category, 0)}"
+            for category in self.ordered_categories
+        ) or "无"
+        auto_text = "，".join(
+            f"{category} {task['auto_counts'].get(category, 0)}"
+            for category in self.ordered_categories
+        ) or "无"
+        summary = (
+            f"{'任务已提前结束' if cancelled else '任务已完成'}\n\n"
+            f"总图片：{task['total']}\n"
+            f"当前分类：{category_text}\n"
+            f"当前移除：{len(self.removed_images)}\n\n"
+            f"本次自动标注：{auto_text}\n"
+            f"本次自动移除：{task['auto_removed']}\n"
+            f"不确定：{len(task['uncertain_paths'])}\n"
+            f"跳过已处理：{task['skipped_existing']}"
+        )
+        box = ThemedMessageBox(self)
+        box.setWindowTitle("全自动分类结果")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(summary)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if self.app_config.ai_auto_notify_on_complete:
+            self._show_ai_auto_system_notification(summary.split("\n\n", 1)[0])
+        if task["uncertain_paths"]:
+            first_path = task["uncertain_paths"][0]
+            index = next(
+                (i for i, item in enumerate(self.image_files) if str(item) == first_path),
+                None,
+            )
+            if index is not None:
+                self.current_index = index
+                self._nav_manager.show_current_image()
+
+    def _show_ai_auto_system_notification(self, message: str) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        tray = QSystemTrayIcon(self.windowIcon(), self)
+        tray.setToolTip(RELEASE_NAME)
+        tray.show()
+        tray.showMessage(
+            "全自动分类任务完成",
+            message,
+            QSystemTrayIcon.MessageIcon.Information,
+            8000,
+        )
+        self._ai_auto_notification_tray = tray
+        QTimer.singleShot(10000, tray.hide)
 
     def _trigger_ai_prediction(self, source: str):
         """提交当前图片预测，并在真正推理期间锁定导航。"""
-        if not self._is_active_ai_model_initialized():
+        if self._active_ai_resource_problem() is not None:
             return
         manager = getattr(self, '_ai_manager', None)
         current_path = self.get_current_image_path()
@@ -2898,15 +3442,16 @@ class ImageClassifier(QMainWindow):
 
     def _set_ai_prediction_loading(self, loading: bool, source: str = "auto"):
         self._ai_prediction_loading = loading
+        controls_enabled = not loading and getattr(self, "_ai_auto_task", None) is None
         if hasattr(self, "image_view_panel"):
             if loading:
-                mode_text = "自动预测" if source == "auto" else "手动预测"
+                mode_text = "全自动" if source == "full_auto" else "辅助预测"
                 self.image_view_panel.show_prediction_loading(
                     f"{mode_text}中，请稍候…"
                 )
             else:
                 self.image_view_panel.hide_prediction_loading()
-            self.image_view_panel.delete_button.setEnabled(not loading)
+            self.image_view_panel.delete_button.setEnabled(controls_enabled)
         locked_controls = (
             "image_list",
             "image_search_widget",
@@ -2919,7 +3464,7 @@ class ImageClassifier(QMainWindow):
         for control_name in locked_controls:
             control = getattr(self, control_name, None)
             if control is not None:
-                control.setEnabled(not loading)
+                control.setEnabled(controls_enabled)
         if loading and hasattr(self, 'category_panel'):
             self.category_panel.set_ai_status("AI 分析中…", "working")
         if loading:
@@ -2931,6 +3476,14 @@ class ImageClassifier(QMainWindow):
         self._set_ai_prediction_loading(False)
         self._ai_prediction_active_path = None
         self._ai_prediction_active_request_id = -1
+        if getattr(self, "_ai_auto_task", None) is not None:
+            self.statusBar.showMessage("🤖 全自动分类正在运行；按 Tab 可请求暂停")
+            return
+        current_path = self.get_current_image_path()
+        if current_path is not None:
+            self.statusBar.showMessage(f"📷 {Path(current_path).name}")
+        else:
+            self.statusBar.clearMessage()
 
     def _notify_ai_navigation_locked(self):
         now = time.monotonic()
@@ -2950,13 +3503,33 @@ class ImageClassifier(QMainWindow):
         if hasattr(self, "image_view_panel"):
             self.image_view_panel.clear_prediction_overlay()
         if hasattr(self, "category_panel"):
-            if self.ai_prediction_mode == "auto":
+            resource_problem = self._active_ai_resource_problem()
+            manager = getattr(self, "_ai_manager", None)
+            if resource_problem:
                 self.category_panel.set_ai_status(
-                    "AI 自动预测 · 等待当前图片显示…", "working"
+                    f"AI 未就绪 · {resource_problem} · 点击模型按钮继续",
+                    "warning",
+                )
+            elif manager is None or not manager.is_ready:
+                self.category_panel.set_ai_status(
+                    "AI 模型正在后台加载…", "working"
+                )
+            elif self._ai_auto_task is not None:
+                self.category_panel.set_ai_status(
+                    "AI 全自动 · 等待当前图片显示…", "working"
+                )
+            elif self.ai_prediction_mode == "assist" and self._ai_assist_active:
+                self.category_panel.set_ai_status(
+                    "AI 辅助 · 等待当前图片显示…", "working"
                 )
             else:
                 self.category_panel.set_ai_status(
-                    "AI 手动预测 · 图片显示后按 Tab", "ready"
+                    (
+                        "AI 全自动 · 按 Tab 校验并启动"
+                        if self.ai_prediction_mode == "auto"
+                        else "AI 辅助 · 按 Tab 开启"
+                    ),
+                    "ready",
                 )
         return True
 
@@ -2967,6 +3540,9 @@ class ImageClassifier(QMainWindow):
         current_path = self.get_current_image_path()
         if current_path is None or str(current_path) != result.image_path:
             return
+        if self._ai_auto_task is not None:
+            self._handle_ai_auto_result(result)
+            return
         if not hasattr(self, 'category_panel'):
             return
         if not result.suggestions:
@@ -2976,7 +3552,8 @@ class ImageClassifier(QMainWindow):
                 self.image_view_panel.show_prediction_result(
                     "AI 暂无建议", reason, [], "warning"
                 )
-            toast_warning(self, reason)
+            if hasattr(self, "image_view_panel"):
+                self.image_view_panel.show_prediction_toast(reason, "warning")
             return
 
         top = result.suggestions[0]
@@ -2986,12 +3563,12 @@ class ImageClassifier(QMainWindow):
 
         alternatives = [
             f"{index}. {display_category(suggestion.category)}"
-            f"（相对匹配 {suggestion.score * 100:.0f}%）"
+            f"（相似度 {suggestion.similarity * 100:.0f}%）"
             for index, suggestion in enumerate(result.suggestions, start=1)
         ]
         self.category_panel.show_ai_prediction(
             category=display_category(top.category),
-            score=top.score,
+            similarity=top.similarity,
             uncertain=result.uncertain,
             latency_ms=result.latency_ms,
             provider=result.provider,
@@ -3012,11 +3589,13 @@ class ImageClassifier(QMainWindow):
             )
             confirmation = "Enter 确认" if not result.uncertain else "请人工判断"
         other_suggestions = " · ".join(
-            f"{display_category(suggestion.category)} {suggestion.score * 100:.0f}%"
+            f"{display_category(suggestion.category)} "
+            f"相似度 {suggestion.similarity * 100:.0f}%"
             for suggestion in result.suggestions[1:]
         )
         detail = (
-            f"相对匹配 {top.score * 100:.0f}% · {result.provider} "
+            f"相似度 {top.similarity * 100:.0f}% · "
+            f"{result.provider} "
             f"{result.latency_ms:.0f}ms · {confirmation}"
         )
         if other_suggestions:
@@ -3028,15 +3607,22 @@ class ImageClassifier(QMainWindow):
             )
 
         if result.uncertain:
-            toast_warning(self, f"AI 预测不确定：{display_top}，请人工判断")
+            if hasattr(self, "image_view_panel"):
+                self.image_view_panel.show_prediction_toast(
+                    f"AI 预测不确定：{display_top}，请人工判断", "warning"
+                )
         elif is_removal:
-            toast_warning(self, "AI 建议移除当前图片，请按 Delete 确认")
+            if hasattr(self, "image_view_panel"):
+                self.image_view_panel.show_prediction_toast(
+                    "AI 建议移除当前图片，请按 Delete 确认", "warning"
+                )
         else:
-            toast_success(
-                self,
-                f"AI 建议：{display_top}（相对匹配 {top.score * 100:.0f}%）",
-                duration=1800,
-            )
+            if hasattr(self, "image_view_panel"):
+                self.image_view_panel.show_prediction_toast(
+                    f"AI 建议：{display_top}（相似度 "
+                    f"{top.similarity * 100:.0f}%）",
+                    duration=1800,
+                )
 
         # 高可信建议只预选，不执行文件操作；Enter/快捷键仍由用户确认。
         if (
@@ -6708,14 +7294,7 @@ class ImageClassifier(QMainWindow):
             super().keyPressEvent(event)
 
     def focusNextPrevChild(self, next_child: bool) -> bool:
-        """手动预测模式占用 Tab；输入控件和 Shift+Tab 保留焦点导航。"""
-        if (
-            next_child
-            and getattr(self, "ai_prediction_mode", "auto") == "manual"
-            and not self._is_in_input_mode()
-        ):
-            self.trigger_manual_ai_prediction()
-            return True
+        """Tab handling is centralized in AITabEventFilter."""
         return super().focusNextPrevChild(next_child)
     
     def select_previous_category(self):
@@ -6964,6 +7543,14 @@ class ImageClassifier(QMainWindow):
             controller = getattr(self, 'update_download_controller', None)
             if controller and not controller.shutdown(timeout_ms=10000):
                 self.logger.warning("更新下载尚未安全停止，暂缓关闭程序")
+                event.ignore()
+                return
+
+            ai_downloads = getattr(
+                self, '_ai_resource_download_manager', None
+            )
+            if ai_downloads and not ai_downloads.shutdown(timeout_ms=10000):
+                self.logger.warning("AI 资源下载尚未安全停止，暂缓关闭程序")
                 event.ignore()
                 return
 

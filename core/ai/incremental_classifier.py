@@ -401,17 +401,12 @@ class IncrementalEmbeddingClassifier:
                 class_scores.append((category, float(best.mean())))
             class_scores.sort(key=lambda item: item[1], reverse=True)
 
-            raw_scores = np.asarray([score for _, score in class_scores])
-            shifted = (raw_scores - raw_scores.max()) / 0.05
-            probabilities = np.exp(np.clip(shifted, -30, 0))
-            probabilities /= probabilities.sum()
             suggestions = tuple(
                 PredictionSuggestion(
                     category=category,
-                    score=float(probabilities[index]),
                     similarity=similarity,
                 )
-                for index, (category, similarity) in enumerate(class_scores[:3])
+                for category, similarity in class_scores[:3]
             )
             margin = (
                 class_scores[0][1] - class_scores[1][1]

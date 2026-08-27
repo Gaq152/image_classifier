@@ -76,7 +76,9 @@ class AppConfig:
             # 日志和提示相关配置
             "log_level": "INFO",  # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
             "toast_level": "INFO",  # Toast提示级别：DEBUG, INFO, WARNING, ERROR
-            "ai_prediction_mode": "auto",  # 模型预测：auto(自动) 或 manual(手动Tab触发)
+            "ai_prediction_mode": "assist",  # assist(辅助) 或 auto(全自动)
+            "ai_prediction_mode_schema": 2,
+            "ai_auto_notify_on_complete": True,
             "ai_execution_provider": "auto",  # auto/cuda/cpu
             # 图像预览相关配置
             "image_zoom_max": 3.0,  # 最大缩放倍数（范围：1.0-20.0）
@@ -102,6 +104,10 @@ class AppConfig:
                 with open(self._config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
                     self.logger.info(f"已加载应用配置: {self._config_file}")
+
+                    if int(config.get("ai_prediction_mode_schema", 1)) < 2:
+                        config["ai_prediction_mode"] = "assist"
+                        config["ai_prediction_mode_schema"] = 2
 
                     # 合并默认配置（处理新增配置项）
                     default_config = self._get_default_config()
@@ -402,19 +408,33 @@ class AppConfig:
     @property
     def ai_prediction_mode(self) -> str:
         """获取模型预测模式。"""
-        return self._config.get("ai_prediction_mode", "auto")
+        if int(self._config.get("ai_prediction_mode_schema", 1)) < 2:
+            return "assist"
+        value = self._config.get("ai_prediction_mode", "assist")
+        # 旧版 auto 是当前的辅助模式，manual 已移除，也迁移为辅助模式。
+        return value if value in ("assist", "auto") else "assist"
 
     @ai_prediction_mode.setter
     def ai_prediction_mode(self, value: str):
         """设置模型预测模式。"""
-        if value not in ("auto", "manual"):
+        if value not in ("assist", "auto"):
             self.logger.warning(f"无效的模型预测模式: {value}，已忽略")
             return
         self._config["ai_prediction_mode"] = value
+        self._config["ai_prediction_mode_schema"] = 2
         self._save_config()
         self.logger.info(
-            "模型预测模式已设置为: %s", "自动" if value == "auto" else "手动"
+            "模型预测模式已设置为: %s", "全自动" if value == "auto" else "辅助"
         )
+
+    @property
+    def ai_auto_notify_on_complete(self) -> bool:
+        return bool(self._config.get("ai_auto_notify_on_complete", True))
+
+    @ai_auto_notify_on_complete.setter
+    def ai_auto_notify_on_complete(self, value: bool):
+        self._config["ai_auto_notify_on_complete"] = bool(value)
+        self._save_config()
 
     @property
     def ai_execution_provider(self) -> str:
@@ -589,6 +609,9 @@ class AppConfig:
             if self._config_file.exists():
                 with open(self._config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
+                    if int(config.get("ai_prediction_mode_schema", 1)) < 2:
+                        config["ai_prediction_mode"] = "assist"
+                        config["ai_prediction_mode_schema"] = 2
                     # 合并默认配置
                     default_config = self._get_default_config()
                     for key, value in default_config.items():

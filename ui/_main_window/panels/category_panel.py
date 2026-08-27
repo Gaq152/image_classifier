@@ -173,26 +173,38 @@ class CategoryPanel(QWidget):
     def show_ai_prediction(
         self,
         category: str,
-        score: float,
+        similarity: float,
         uncertain: bool,
         latency_ms: float,
         provider: str,
         alternatives: List[str],
         is_removal: bool = False,
     ) -> None:
-        """显示统一预测结果；score 是相对匹配度，不冒充校准置信度。"""
-        match_text = f"{score * 100:.0f}%"
+        """显示预测结果；相似度用于判断预测可靠性。"""
+        similarity_text = f"{similarity * 100:.0f}%"
         if is_removal and uncertain:
-            text = f"AI可能建议移除 · 相对匹配 {match_text} · 请人工判断"
+            text = (
+                f"AI可能建议移除 · 相似度 {similarity_text} · "
+                "请人工判断"
+            )
             tone = "warning"
         elif is_removal:
-            text = f"AI建议移除 · 相对匹配 {match_text} · Delete确认"
+            text = (
+                f"AI建议移除 · 相似度 {similarity_text} · "
+                "Delete确认"
+            )
             tone = "warning"
         elif uncertain:
-            text = f"AI不确定：{category} · 相对匹配 {match_text} · 请人工判断"
+            text = (
+                f"AI不确定：{category} · 相似度 {similarity_text} · "
+                "请人工判断"
+            )
             tone = "warning"
         else:
-            text = f"AI建议：{category} · 相对匹配 {match_text} · Enter确认"
+            text = (
+                f"AI建议：{category} · 相似度 {similarity_text} · "
+                "Enter确认"
+            )
             tone = "ready"
         self.set_ai_status(text, tone)
         details = "\n".join(alternatives)

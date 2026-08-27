@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 from ...components.widgets.enhanced_image_label import EnhancedImageLabel
 from ...components.styles.theme import default_theme
 from ...components.dialog_utils import style_icon_button
+from ...components.toast import toast_success, toast_warning
 
 
 class ImageViewPanel(QWidget):
@@ -212,6 +213,19 @@ class ImageViewPanel(QWidget):
         self.hide_prediction_loading()
         if self.prediction_result_card:
             self.prediction_result_card.hide()
+
+    def show_prediction_toast(
+        self,
+        message: str,
+        tone: str = "ready",
+        duration: int = 3000,
+    ) -> None:
+        """在图片预览区域顶部居中显示 AI 预测临时提示。"""
+        if not self.image_scroll_area:
+            return
+        parent = self.image_scroll_area.viewport()
+        show_toast = toast_warning if tone == "warning" else toast_success
+        show_toast(parent, message, duration=duration)
 
     @property
     def prediction_loading(self) -> bool:
