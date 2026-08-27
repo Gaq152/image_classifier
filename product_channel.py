@@ -21,6 +21,7 @@ _PRODUCTS = {
         "release_tag_prefix": "v",
         "rolling_release_tag": None,
         "update_subdirectory": "update",
+        "icon_basename": "icon",
     },
     AI_EDITION: {
         "edition": AI_EDITION,
@@ -31,6 +32,7 @@ _PRODUCTS = {
         "release_tag_prefix": "ai-v",
         "rolling_release_tag": "ai-latest",
         "update_subdirectory": "update/ai",
+        "icon_basename": "icon-ai",
     },
 }
 

@@ -5,6 +5,10 @@ The application icon is based on the Tabler Icons `photo-check` icon:
 - Source: https://tabler.io/icons/icon/photo-check
 - License: MIT
 
+The AI edition icon uses the same MIT-licensed base glyph with an original
+purple color treatment and AI badge. Its generated files are `icon-ai.svg`,
+`icon-ai.png`, and `icon-ai.ico`.
+
 MIT License
 
 Copyright (c) 2020-2026 Paweł Kuna

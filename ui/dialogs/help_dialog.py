@@ -17,6 +17,7 @@ from ..components.styles.theme import default_theme
 from ..components.styles import DialogStyles
 from ..components.dialog_utils import configure_dialog
 from _version_ import CONTACT_INFO, get_about_info
+from product_channel import get_product_info
 
 
 class TabbedHelpDialog(QDialog):
@@ -281,7 +282,8 @@ class TabbedHelpDialog(QDialog):
         icon_label.setObjectName("aboutLogo")
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 关于页使用高分辨率 PNG；直接缩放 ICO 可能选中小尺寸帧而发糊。
-        icon_path = self._get_resource_path('assets/icon.png')
+        icon_name = get_product_info()["icon_basename"]
+        icon_path = self._get_resource_path(f'assets/{icon_name}.png')
         if icon_path:
             pixmap = QPixmap(str(icon_path))
             if not pixmap.isNull():

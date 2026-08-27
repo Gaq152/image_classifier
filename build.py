@@ -153,6 +153,7 @@ def build_executable(edition: str = "standard"):
     # 项目信息 - 使用英文名称避免编码问题
     version = __version__
     final_name = f"{product['ascii_executable_base']}_v{version}"
+    icon_path = f"assets/{product['icon_basename']}.ico"
     
     # 构建PyInstaller命令 - 精简版本
     cmd = [
@@ -160,7 +161,7 @@ def build_executable(edition: str = "standard"):
         '--onefile',  # 打包为单一文件
         '--windowed',  # Windows下不显示控制台
         '--name', final_name,  # 设置输出文件名
-        '--icon', 'assets/icon.ico',  # 设置图标
+        '--icon', icon_path,  # 按产品版本选择图标
         '--add-data', 'assets;assets',  # 包含assets目录
         
         # ========= 精简的必要导入 - 仅包含实际使用的模块 =========
@@ -301,8 +302,10 @@ def main(argv=None):
         return 1
     
     # 检查图标文件
-    if not Path('assets/icon.ico').exists():
-        print("✗ 图标文件 assets/icon.ico 不存在")
+    product = get_product_info(args.edition)
+    icon_path = Path("assets") / f"{product['icon_basename']}.ico"
+    if not icon_path.exists():
+        print(f"✗ 图标文件 {icon_path} 不存在")
         return 1
     
     # 检查PyInstaller

@@ -78,6 +78,7 @@ from core.update_utils import (
 from utils.performance import performance_monitor
 from utils.paths import get_update_dir
 from _version_ import RELEASE_NAME, __version__, compare_version, get_manifest_url
+from product_channel import get_product_info
 
 
 class DisabledButtonEventFilter(QObject):
@@ -916,7 +917,8 @@ class ImageClassifier(QMainWindow):
             
             # 设置应用程序图标
             try:
-                icon_path = self._get_resource_path('assets/icon.ico')
+                icon_name = get_product_info()["icon_basename"]
+                icon_path = self._get_resource_path(f'assets/{icon_name}.ico')
                 if icon_path and icon_path.exists():
                     app_icon = QIcon(str(icon_path))
                     self.setWindowIcon(app_icon)
@@ -2377,7 +2379,8 @@ class ImageClassifier(QMainWindow):
 
             # 设置程序图标
             try:
-                icon_path = self._get_resource_path('assets/icon.ico')
+                icon_name = get_product_info()["icon_basename"]
+                icon_path = self._get_resource_path(f'assets/{icon_name}.ico')
                 if icon_path and icon_path.exists():
                     msg_box.setWindowIcon(QIcon(str(icon_path)))
             except Exception:
@@ -7626,7 +7629,8 @@ class ImageClassifier(QMainWindow):
 
         # 设置程序图标
         try:
-            icon_path = self._get_resource_path('assets/icon.ico')
+            icon_name = get_product_info()["icon_basename"]
+            icon_path = self._get_resource_path(f'assets/{icon_name}.ico')
             if icon_path and icon_path.exists():
                 msgBox.setWindowIcon(QIcon(str(icon_path)))
         except Exception:

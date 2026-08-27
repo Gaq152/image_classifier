@@ -40,6 +40,8 @@ def test_standard_and_ai_release_urls_are_isolated():
     assert ai["release_tag"].startswith("ai-v")
     assert ai["exe_name"].startswith("ImageClassifierAI_v")
     assert ai["rolling_exe_name"] == "ImageClassifierAI_latest.exe"
+    assert get_product_info("standard")["icon_basename"] == "icon"
+    assert get_product_info("ai")["icon_basename"] == "icon-ai"
 
 
 def test_embedded_ai_edition_changes_identity_and_update_directory(
@@ -116,6 +118,8 @@ def test_ai_build_embeds_edition_and_restores_source(monkeypatch, tmp_path):
 
     def fake_pyinstaller(_command, **_kwargs):
         assert 'APP_EDITION = "ai"' in channel_file.read_text(encoding="utf-8")
+        icon_index = _command.index("--icon") + 1
+        assert _command[icon_index] == "assets/icon-ai.ico"
         output = (
             tmp_path
             / "dist"
