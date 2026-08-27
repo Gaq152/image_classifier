@@ -1,9 +1,11 @@
 """Tests for project AI learning-scope choices."""
 
 import json
+import threading
 from unittest.mock import patch
 
 from core.ai import default_ai_project_state
+from ui.ai_resource_download import AIResourceDownloadManager
 from ui.dialogs.ai_setup_dialog import AIProjectSetupDialog
 
 
@@ -133,3 +135,49 @@ def test_missing_resources_are_shown_with_separate_progress_bars(qtbot, tmp_path
     assert "需要下载" in dialog.model_status_label.text()
     assert dialog.runtime_progress.format() == "等待下载"
     assert dialog.model_progress.format() == "等待下载"
+
+
+def test_closing_setup_dialog_keeps_main_window_download_running(qtbot, tmp_path):
+    """The dialog observes downloads but no longer owns their lifetime."""
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_download(resource, progress_cb, cancel_cb, status_cb, proxy):
+        status_cb(f"正在下载 {resource.display_name}…")
+        progress_cb(1024, resource.size_bytes)
+        started.set()
+        release.wait(timeout=5)
+
+    manager = AIResourceDownloadManager()
+    with patch(
+        "ui.dialogs.ai_setup_dialog.get_ai_model_dir",
+        return_value=tmp_path / "missing-model",
+    ), patch(
+        "ui.dialogs.ai_setup_dialog.is_resource_installed",
+        return_value=False,
+    ), patch(
+        "ui.ai_resource_download.download_and_install_resource",
+        side_effect=fake_download,
+    ):
+        dialog = AIProjectSetupDialog(
+            project_dir=tmp_path,
+            ai_state=default_ai_project_state(),
+            existing_sample_count=0,
+            resource_download_manager=manager,
+        )
+        qtbot.addWidget(dialog)
+        dialog.show()
+
+        dialog._download_model()
+        qtbot.waitUntil(started.is_set, timeout=2000)
+        assert "后台下载中" in dialog.model_download_button.text()
+
+        dialog.reject()
+
+        assert not dialog.isVisible()
+        assert manager.has_active_downloads
+
+        release.set()
+        qtbot.waitUntil(
+            lambda: not manager.has_active_downloads, timeout=3000
+        )

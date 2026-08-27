@@ -30,7 +30,7 @@ from core.ai import (
 from utils.app_config import get_app_config
 from utils.paths import get_ai_model_dir
 
-from ..ai_resource_download import AIResourceDownloadThread
+from ..ai_resource_download import AIResourceDownloadManager
 from ..components.dialog_utils import configure_dialog, style_button
 from ..components.styles.theme import default_theme
 
@@ -44,6 +44,7 @@ class AIProjectSetupDialog(QDialog):
         ai_state: Dict,
         existing_sample_count: int,
         removed_sample_count: int = 0,
+        resource_download_manager: Optional[AIResourceDownloadManager] = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -53,10 +54,20 @@ class AIProjectSetupDialog(QDialog):
         self.removed_sample_count = removed_sample_count
         self.import_state_path: Optional[Path] = None
         self.model_buttons: Dict[str, QRadioButton] = {}
-        self._download_workers: Dict[str, AIResourceDownloadThread] = {}
-        self._download_errors: Dict[str, tuple[str, str]] = {}
+        self._resource_download_manager = (
+            resource_download_manager or AIResourceDownloadManager(self)
+        )
         self._pending_accept = False
-        self._close_after_download_cancel = False
+        self._download_signals_connected = True
+        self._resource_download_manager.resource_state_changed.connect(
+            self._on_resource_state_changed
+        )
+        self._resource_download_manager.resource_installed.connect(
+            self._on_resource_installed
+        )
+        self._resource_download_manager.resource_failed.connect(
+            self._on_resource_failed
+        )
 
         self.setWindowTitle("初始化项目 AI")
         self.setModal(True)
@@ -175,7 +186,8 @@ class AIProjectSetupDialog(QDialog):
 
         hint = QLabel(
             "仅在首次使用或切换资源版本时下载。下载支持断点续传、"
-            "大小校验和 SHA-256 校验；项目学习结果不会上传。"
+            "大小校验和 SHA-256 校验；可关闭本窗口让下载在后台继续，"
+            "项目学习结果不会上传。"
         )
         hint.setWordWrap(True)
         group_layout.addWidget(hint)
@@ -246,6 +258,17 @@ class AIProjectSetupDialog(QDialog):
         )
         group_layout.addWidget(self.learn_removed_checkbox)
 
+        self.auto_notify_checkbox = QCheckBox(
+            "全自动任务完成后发送系统通知"
+        )
+        self.auto_notify_checkbox.setChecked(
+            get_app_config().ai_auto_notify_on_complete
+        )
+        self.auto_notify_checkbox.toggled.connect(
+            self._set_auto_notification_enabled
+        )
+        group_layout.addWidget(self.auto_notify_checkbox)
+
         hint = QLabel(
             "默认关闭。移除通常表示跳过或暂不分类，不一定具有统一视觉特征；"
             "关闭后，已有和之后移除的图片都不会参与学习。"
@@ -254,6 +277,10 @@ class AIProjectSetupDialog(QDialog):
         group_layout.addWidget(hint)
         layout.addWidget(group)
         self._refresh_existing_sample_details()
+
+    @staticmethod
+    def _set_auto_notification_enabled(enabled: bool) -> None:
+        get_app_config().ai_auto_notify_on_complete = bool(enabled)
 
     def _refresh_existing_sample_details(self) -> None:
         include_removed = self.selected_learn_removed_images
@@ -280,13 +307,13 @@ class AIProjectSetupDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch()
-        cancel_button = QPushButton("取消")
+        self.cancel_button = QPushButton("关闭")
         self.confirm_button = QPushButton("初始化 AI")
-        style_button(cancel_button, "secondary")
+        style_button(self.cancel_button, "secondary")
         style_button(self.confirm_button, "primary")
-        cancel_button.clicked.connect(self.reject)
+        self.cancel_button.clicked.connect(self.reject)
         self.confirm_button.clicked.connect(self.accept)
-        actions.addWidget(cancel_button)
+        actions.addWidget(self.cancel_button)
         actions.addWidget(self.confirm_button)
         layout.addLayout(actions)
 
@@ -355,94 +382,133 @@ class AIProjectSetupDialog(QDialog):
         if not hasattr(self, "runtime_progress"):
             return
         self._refresh_model_button_labels()
+        runtime = self._selected_runtime_resource()
+        if runtime is None:
+            self.runtime_status_label.setStyleSheet("")
+            self.runtime_status_label.setText(
+                "当前组合使用程序已有的 OpenCV CPU 后端，无需额外下载。"
+            )
+            self.runtime_progress.setRange(0, 100)
+            self.runtime_progress.setValue(100)
+            self.runtime_progress.setFormat("无需下载")
+            self.runtime_download_button.setText("无需下载")
+            self.runtime_download_button.setEnabled(False)
+        else:
+            self._render_resource_panel(
+                runtime,
+                self.runtime_status_label,
+                self.runtime_progress,
+                self.runtime_download_button,
+                installed=is_resource_installed(runtime),
+                download_text="下载运行时",
+            )
 
-        runtime_worker = self._download_workers.get("runtime")
-        if runtime_worker is None:
-            runtime = self._selected_runtime_resource()
-            if runtime is None:
-                self.runtime_status_label.setStyleSheet("")
-                self.runtime_status_label.setText(
-                    "当前组合使用程序已有的 OpenCV CPU 后端，无需额外下载。"
-                )
-                self.runtime_progress.setValue(100)
-                self.runtime_progress.setFormat("无需下载")
-                self.runtime_download_button.setText("无需下载")
-                self.runtime_download_button.setEnabled(False)
-            elif is_resource_installed(runtime):
-                self.runtime_status_label.setStyleSheet("")
-                self.runtime_status_label.setText(
-                    f"已安装：{runtime.display_name} {runtime.version}"
-                )
-                self.runtime_progress.setValue(100)
-                self.runtime_progress.setFormat("已安装")
-                self.runtime_download_button.setText("已安装")
-                self.runtime_download_button.setEnabled(False)
-            else:
-                runtime_error_record = self._download_errors.get("runtime")
-                runtime_error = (
-                    runtime_error_record[1]
-                    if runtime_error_record
-                    and runtime_error_record[0] == runtime.key
-                    else ""
-                )
-                self.runtime_status_label.setText(
-                    f"下载失败：{runtime_error}。可点击按钮重试。"
-                    if runtime_error
-                    else (
-                        f"未安装：{runtime.display_name} · "
-                        f"需要下载 {format_resource_size(runtime.size_bytes)}"
-                    )
-                )
-                self.runtime_status_label.setStyleSheet(
-                    f"color: {default_theme.colors.ERROR};"
-                    if runtime_error
-                    else ""
-                )
-                self.runtime_progress.setValue(0)
-                self.runtime_progress.setFormat("等待下载")
-                self.runtime_download_button.setText("下载运行时")
-                self.runtime_download_button.setEnabled(True)
-
-        model_worker = self._download_workers.get("model")
-        if model_worker is None and self.selected_model_key:
+        if self.selected_model_key:
             model = get_model_resource(self.selected_model_key)
-            if self._is_model_installed(self.selected_model_key):
-                self.model_status_label.setStyleSheet("")
-                self.model_status_label.setText(
-                    f"已安装：{model.display_name}"
-                )
-                self.model_progress.setValue(100)
-                self.model_progress.setFormat("已安装")
-                self.model_download_button.setText("已安装")
-                self.model_download_button.setEnabled(False)
-            else:
-                model_error_record = self._download_errors.get("model")
-                model_error = (
-                    model_error_record[1]
-                    if model_error_record and model_error_record[0] == model.key
-                    else ""
-                )
-                self.model_status_label.setText(
-                    f"下载失败：{model_error}。可点击按钮重试。"
-                    if model_error
-                    else (
-                        f"未安装：{model.display_name} · "
-                        f"需要下载 {format_resource_size(model.size_bytes)}"
-                    )
-                )
-                self.model_status_label.setStyleSheet(
-                    f"color: {default_theme.colors.ERROR};"
-                    if model_error
-                    else ""
-                )
-                self.model_progress.setValue(0)
-                self.model_progress.setFormat("等待下载")
-                self.model_download_button.setText("下载模型")
-                self.model_download_button.setEnabled(True)
+            self._render_resource_panel(
+                model,
+                self.model_status_label,
+                self.model_progress,
+                self.model_download_button,
+                installed=self._is_model_installed(self.selected_model_key),
+                download_text="下载模型",
+            )
 
         missing = self._required_resources()
-        if missing and not self._download_workers:
+        active_missing = any(
+            self._resource_download_manager.is_active(resource)
+            for resource in missing
+        )
+        if self._pending_accept and active_missing:
+            self.confirm_button.setText("正在后台下载…")
+            self.confirm_button.setEnabled(False)
+        elif missing:
             self.confirm_button.setText("下载并初始化 AI")
+            self.confirm_button.setEnabled(True)
+        else:
+            self.confirm_button.setEnabled(True)
+        self.cancel_button.setText(
+            "关闭（后台继续）"
+            if self._resource_download_manager.has_active_downloads
+            else "关闭"
+        )
+
+    def _render_resource_panel(
+        self,
+        resource,
+        label: QLabel,
+        progress: QProgressBar,
+        button: QPushButton,
+        *,
+        installed: bool,
+        download_text: str,
+    ) -> None:
+        """Render an installed, downloading, paused, or missing resource."""
+        snapshot = self._resource_download_manager.snapshot(resource)
+        active = self._resource_download_manager.is_active(resource)
+        state = snapshot.get("state") if snapshot else ""
+
+        label.setStyleSheet("")
+        progress.setRange(0, 100)
+        if installed:
+            label.setText(f"已安装：{resource.display_name} {resource.version}")
+            progress.setValue(100)
+            progress.setFormat("已安装")
+            button.setText("已安装")
+            button.setEnabled(False)
+            return
+
+        if active or state in ("downloading", "installing"):
+            label.setText(
+                snapshot.get("status", f"正在下载 {resource.display_name}…")
+            )
+            self._set_progress_from_snapshot(progress, snapshot or {})
+            button.setText("后台下载中…")
+            button.setEnabled(False)
+            return
+
+        if state == "failed":
+            error = snapshot.get("error", "未知错误")
+            label.setText(f"下载失败：{error}。可点击按钮重试。")
+            label.setStyleSheet(f"color: {default_theme.colors.ERROR};")
+            self._set_progress_from_snapshot(progress, snapshot)
+            button.setText("重试下载")
+            button.setEnabled(True)
+            return
+
+        if state == "cancelled":
+            label.setText("下载已暂停，下次会从断点继续。")
+            self._set_progress_from_snapshot(progress, snapshot)
+            button.setText("继续下载")
+            button.setEnabled(True)
+            return
+
+        label.setText(
+            f"未安装：{resource.display_name} · "
+            f"需要下载 {format_resource_size(resource.size_bytes)}"
+        )
+        progress.setValue(0)
+        progress.setFormat("等待下载")
+        button.setText(download_text)
+        button.setEnabled(True)
+
+    @staticmethod
+    def _set_progress_from_snapshot(
+        progress: QProgressBar, snapshot: dict
+    ) -> None:
+        done = int(snapshot.get("done") or 0)
+        total = int(snapshot.get("total") or 0)
+        if total <= 0:
+            progress.setRange(0, 0)
+            progress.setFormat("正在获取大小…")
+            return
+        percent = min(100, int(done * 100 / total))
+        progress.setRange(0, 100)
+        progress.setValue(percent)
+        progress.setFormat(
+            f"{percent}% · {format_resource_size(done)} / "
+            f"{format_resource_size(total)}"
+        )
 
     def _download_runtime(self) -> None:
         resource = self._selected_runtime_resource()
@@ -456,111 +522,59 @@ class AIProjectSetupDialog(QDialog):
             )
 
     def _start_resource_download(self, resource) -> None:
-        slot = resource.kind
-        worker = self._download_workers.get(slot)
-        if worker is not None and worker.isRunning():
-            return
-
-        worker = AIResourceDownloadThread(resource, self)
-        self._download_errors.pop(slot, None)
-        self._download_workers[slot] = worker
-        worker.progress_changed.connect(
-            lambda done, total, name=slot: self._on_download_progress(
-                name, done, total
-            )
-        )
-        worker.status_changed.connect(
-            lambda text, name=slot: self._on_download_status(name, text)
-        )
-        worker.installed.connect(
-            lambda _resource, name=slot: self._on_download_installed(name)
-        )
-        worker.failed.connect(
-            lambda error, name=slot: self._on_download_failed(name, error)
-        )
-        worker.cancelled.connect(
-            lambda name=slot: self._on_download_cancelled(name)
-        )
-        worker.finished.connect(
-            lambda name=slot, current=worker: self._on_download_finished(
-                name, current
-            )
-        )
-        self._set_selection_enabled(False)
-        self.confirm_button.setEnabled(False)
-        if slot == "runtime":
-            self.runtime_download_button.setEnabled(False)
-            self.runtime_download_button.setText("下载中…")
-        else:
-            self.model_download_button.setEnabled(False)
-            self.model_download_button.setText("下载中…")
-        worker.start()
+        self._resource_download_manager.start(resource)
+        self._refresh_resource_panels()
 
     def _set_selection_enabled(self, enabled: bool) -> None:
         self.provider_combo.setEnabled(enabled)
         for button in self.model_buttons.values():
             button.setEnabled(enabled)
 
-    def _on_download_progress(self, slot: str, done: int, total: int) -> None:
-        bar = self.runtime_progress if slot == "runtime" else self.model_progress
-        if total > 0:
-            percent = min(100, int(done * 100 / total))
-            bar.setRange(0, 100)
-            bar.setValue(percent)
-            bar.setFormat(
-                f"{percent}% · {format_resource_size(done)} / "
-                f"{format_resource_size(total)}"
-            )
-        else:
-            bar.setRange(0, 0)
-            bar.setFormat("正在获取大小…")
+    def _on_resource_state_changed(self, key: str, _snapshot: dict) -> None:
+        selected = []
+        runtime = self._selected_runtime_resource()
+        if runtime is not None:
+            selected.append(runtime.key)
+        if self.selected_model_key:
+            selected.append(get_model_resource(self.selected_model_key).key)
+        if key in selected:
+            self._refresh_resource_panels()
 
-    def _on_download_status(self, slot: str, text: str) -> None:
-        label = (
-            self.runtime_status_label if slot == "runtime" else self.model_status_label
-        )
-        label.setStyleSheet("")
-        label.setText(text)
+    def _on_resource_installed(self, _resource) -> None:
+        self._refresh_selection_details()
+        if self._pending_accept and not self._required_resources():
+            self._pending_accept = False
+            self._detach_download_manager()
+            super().accept()
 
-    def _on_download_installed(self, slot: str) -> None:
-        self._download_errors.pop(slot, None)
-        bar = self.runtime_progress if slot == "runtime" else self.model_progress
-        bar.setRange(0, 100)
-        bar.setValue(100)
-        bar.setFormat("下载并安装完成")
-
-    def _on_download_failed(self, slot: str, error: str) -> None:
+    def _on_resource_failed(self, _resource, _error: str) -> None:
         self._pending_accept = False
-        worker = self._download_workers.get(slot)
-        resource_key = worker.resource.key if worker is not None else slot
-        self._download_errors[slot] = (resource_key, error)
-        label = (
-            self.runtime_status_label if slot == "runtime" else self.model_status_label
-        )
-        label.setStyleSheet(f"color: {default_theme.colors.ERROR};")
-        label.setText(f"下载失败：{error}。可点击按钮重试。")
+        self._set_selection_enabled(True)
+        self._refresh_selection_details()
 
-    def _on_download_cancelled(self, slot: str) -> None:
-        label = (
-            self.runtime_status_label if slot == "runtime" else self.model_status_label
-        )
-        label.setText("下载已暂停，下次会从断点继续。")
-
-    def _on_download_finished(
-        self, slot: str, worker: AIResourceDownloadThread
-    ) -> None:
-        if self._download_workers.get(slot) is worker:
-            self._download_workers.pop(slot, None)
-        if not self._download_workers:
-            self._set_selection_enabled(True)
-            self.confirm_button.setEnabled(True)
-            self._refresh_selection_details()
-            if self._close_after_download_cancel:
-                super().reject()
-                return
-            if self._pending_accept and not self._required_resources():
-                self._pending_accept = False
-                super().accept()
+    def _detach_download_manager(self) -> None:
+        """Stop updating this dialog after it has been accepted or closed."""
+        if not self._download_signals_connected:
+            return
+        self._download_signals_connected = False
+        for signal, slot in (
+            (
+                self._resource_download_manager.resource_state_changed,
+                self._on_resource_state_changed,
+            ),
+            (
+                self._resource_download_manager.resource_installed,
+                self._on_resource_installed,
+            ),
+            (
+                self._resource_download_manager.resource_failed,
+                self._on_resource_failed,
+            ),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
 
     def _refresh_selection_details(self) -> None:
         key = self.selected_model_key
@@ -663,24 +677,20 @@ class AIProjectSetupDialog(QDialog):
         missing = self._required_resources()
         if missing:
             self._pending_accept = True
+            self._set_selection_enabled(False)
             for resource in missing:
                 self._start_resource_download(resource)
+            self._refresh_resource_panels()
             return
+        self._detach_download_manager()
         super().accept()
 
     def reject(self) -> None:
-        if self._download_workers:
-            self._pending_accept = False
-            self._close_after_download_cancel = True
-            self.confirm_button.setEnabled(False)
-            for worker in tuple(self._download_workers.values()):
-                worker.requestInterruption()
-            return
+        self._pending_accept = False
+        self._detach_download_manager()
         super().reject()
 
     def closeEvent(self, event) -> None:
-        if self._download_workers:
-            event.ignore()
-            self.reject()
-            return
+        self._pending_accept = False
+        self._detach_download_manager()
         super().closeEvent(event)
