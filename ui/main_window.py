@@ -2700,6 +2700,7 @@ class ImageClassifier(QMainWindow):
         samples = []
         source_kind = "reuse"
         source_path = None
+        model_store_path = None
         if needs_initialization:
             source_kind = dialog.selected_source_kind
             if source_kind == "existing":
@@ -2716,8 +2717,14 @@ class ImageClassifier(QMainWindow):
                     toast_error(self, f"无法导入旧标注：{error}")
                     return
                 if not samples:
-                    toast_warning(self, "所选 JSON 中没有找到可读取的人工分类图片")
+                    toast_warning(
+                        self,
+                        "JSON 只保存分类记录，无法在原图片缺失时重建特征；"
+                        "请改选旧项目中的 AI .npz 特征库",
+                    )
                     return
+            elif source_kind == "model_store":
+                model_store_path = dialog.selected_model_store_path
 
         models = self._ai_project_state.setdefault("models", {})
         record = models.setdefault(model_key, {})
@@ -2730,6 +2737,9 @@ class ImageClassifier(QMainWindow):
                     "model_id": profile.expected_model_id,
                     "source": source_kind,
                     "source_state_file": str(source_path) if source_path else None,
+                    "source_model_file": (
+                        str(model_store_path) if model_store_path else None
+                    ),
                     "requested_sample_count": len(samples),
                 }
             )
@@ -2759,6 +2769,7 @@ class ImageClassifier(QMainWindow):
             excluded_labels=(
                 () if learn_removed_images else (AI_REMOVAL_LABEL,)
             ),
+            import_store_path=model_store_path,
         )
 
     def _configure_ai_for_current_project(
@@ -2769,6 +2780,7 @@ class ImageClassifier(QMainWindow):
         force_reinitialize: bool = False,
         merge_samples=None,
         excluded_labels=None,
+        import_store_path: Optional[Path] = None,
     ):
         """Load or initialize one project-local model store."""
         manager = getattr(self, '_ai_manager', None)
@@ -2787,6 +2799,7 @@ class ImageClassifier(QMainWindow):
             force_reinitialize=force_reinitialize,
             merge_samples=merge_samples or (),
             excluded_labels=excluded_labels or (),
+            import_store_path=import_store_path,
         )
 
     def _restore_ai_for_current_project(self):

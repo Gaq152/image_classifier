@@ -4,6 +4,8 @@ import json
 import threading
 from unittest.mock import patch
 
+import numpy as np
+
 from core.ai import default_ai_project_state
 from ui.ai_resource_download import AIResourceDownloadManager
 from ui.dialogs.ai_setup_dialog import AIProjectSetupDialog
@@ -20,6 +22,18 @@ def _write_balanced_base_model(directory):
         encoding="utf-8",
     )
     (directory / "model.onnx").touch()
+
+
+def _write_feature_store(path, model_id="resnet18-imagenet-embedding-v1"):
+    np.savez_compressed(
+        path,
+        store_version=np.asarray([1]),
+        model_id=np.asarray([model_id]),
+        paths=np.asarray(["old/a.jpg"]),
+        labels=np.asarray(["类别A"]),
+        deep=np.zeros((1, 512), dtype=np.float16),
+        colors=np.zeros((1, 512), dtype=np.float16),
+    )
 
 
 def test_removed_directory_learning_is_off_by_default(qtbot, tmp_path):
@@ -46,6 +60,61 @@ def test_removed_directory_learning_is_off_by_default(qtbot, tmp_path):
 
     assert dialog.selected_learn_removed_images is True
     assert "含移除 7 张" in dialog.existing_radio.text()
+
+
+def test_existing_npz_can_be_selected_without_old_images(qtbot, tmp_path):
+    _write_balanced_base_model(tmp_path)
+    store_path = tmp_path / "old-model.npz"
+    _write_feature_store(store_path)
+    with patch(
+        "ui.dialogs.ai_setup_dialog.get_ai_model_dir",
+        return_value=tmp_path,
+    ), patch(
+        "ui.dialogs.ai_setup_dialog.is_resource_installed",
+        return_value=True,
+    ):
+        dialog = AIProjectSetupDialog(
+            project_dir=tmp_path,
+            ai_state=default_ai_project_state(),
+            existing_sample_count=0,
+        )
+    qtbot.addWidget(dialog)
+    dialog.import_model_path = store_path
+    dialog.model_store_radio.setChecked(True)
+
+    dialog.accept()
+
+    assert dialog.result() == dialog.DialogCode.Accepted
+    assert dialog.selected_model_store_path == store_path
+
+
+def test_npz_from_another_base_model_is_rejected(qtbot, tmp_path):
+    _write_balanced_base_model(tmp_path)
+    store_path = tmp_path / "speed-model.npz"
+    _write_feature_store(
+        store_path,
+        model_id="mobilenet-v3-large-imagenet-embedding-v1",
+    )
+    with patch(
+        "ui.dialogs.ai_setup_dialog.get_ai_model_dir",
+        return_value=tmp_path,
+    ), patch(
+        "ui.dialogs.ai_setup_dialog.is_resource_installed",
+        return_value=True,
+    ):
+        dialog = AIProjectSetupDialog(
+            project_dir=tmp_path,
+            ai_state=default_ai_project_state(),
+            existing_sample_count=0,
+        )
+    qtbot.addWidget(dialog)
+    dialog.import_model_path = store_path
+    dialog.model_store_radio.setChecked(True)
+
+    dialog.accept()
+
+    assert dialog.result() != dialog.DialogCode.Accepted
+    assert "基础模型不匹配" in dialog.model_store_path_label.text()
 
 
 def test_initialized_model_can_be_safely_reinitialized(qtbot, tmp_path):

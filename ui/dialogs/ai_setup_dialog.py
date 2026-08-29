@@ -24,6 +24,7 @@ from core.ai import (
     get_model_resource,
     get_runtime_resource,
     is_resource_installed,
+    inspect_feature_store,
     iter_ai_model_profiles,
     required_runtime_kind,
 )
@@ -53,6 +54,7 @@ class AIProjectSetupDialog(QDialog):
         self.existing_sample_count = existing_sample_count
         self.removed_sample_count = removed_sample_count
         self.import_state_path: Optional[Path] = None
+        self.import_model_path: Optional[Path] = None
         self.model_buttons: Dict[str, QRadioButton] = {}
         self._resource_download_manager = (
             resource_download_manager or AIResourceDownloadManager(self)
@@ -214,10 +216,15 @@ class AIProjectSetupDialog(QDialog):
         self.cold_start_radio.setProperty("sourceKind", "cold_start")
         self.import_radio = QRadioButton("导入其他 classification_state.json")
         self.import_radio.setProperty("sourceKind", "import")
+        self.model_store_radio = QRadioButton(
+            "复用已有 AI 特征库（.npz，无需原图片）"
+        )
+        self.model_store_radio.setProperty("sourceKind", "model_store")
         for button in (
             self.existing_radio,
             self.cold_start_radio,
             self.import_radio,
+            self.model_store_radio,
         ):
             self.source_group.addButton(button)
             source_layout.addWidget(button)
@@ -236,6 +243,16 @@ class AIProjectSetupDialog(QDialog):
         import_row.addWidget(self.import_path_label, 1)
         import_row.addWidget(self.import_button)
         source_layout.addLayout(import_row)
+
+        model_store_row = QHBoxLayout()
+        self.model_store_path_label = QLabel("尚未选择文件")
+        self.model_store_path_label.setWordWrap(True)
+        self.model_store_button = QPushButton("选择 NPZ…")
+        style_button(self.model_store_button, "secondary", "compact")
+        self.model_store_button.clicked.connect(self._choose_model_store_file)
+        model_store_row.addWidget(self.model_store_path_label, 1)
+        model_store_row.addWidget(self.model_store_button)
+        source_layout.addLayout(model_store_row)
 
         self.source_hint = QLabel(
             "冷启动阶段每个类别至少需要 5 张有效样本；建议达到每类 20 张后再依赖预测。"
@@ -329,6 +346,20 @@ class AIProjectSetupDialog(QDialog):
         self.import_state_path = Path(file_name)
         self.import_path_label.setText(str(self.import_state_path))
         self.import_radio.setChecked(True)
+
+    def _choose_model_store_file(self) -> None:
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择已有 AI 特征库",
+            str(self.project_dir),
+            "AI 特征库 (*.npz)",
+        )
+        if not file_name:
+            return
+        self.import_model_path = Path(file_name)
+        self.model_store_path_label.setStyleSheet("")
+        self.model_store_path_label.setText(str(self.import_model_path))
+        self.model_store_radio.setChecked(True)
 
     def _is_model_installed(self, model_key: str) -> bool:
         profile = get_ai_model_profile(model_key)
@@ -639,6 +670,10 @@ class AIProjectSetupDialog(QDialog):
         return self.import_state_path
 
     @property
+    def selected_model_store_path(self) -> Optional[Path]:
+        return self.import_model_path
+
+    @property
     def selected_learn_removed_images(self) -> bool:
         checkbox = getattr(self, "learn_removed_checkbox", None)
         return bool(checkbox and checkbox.isChecked())
@@ -671,6 +706,39 @@ class AIProjectSetupDialog(QDialog):
             if self.import_state_path is None or not self.import_state_path.is_file():
                 self.import_path_label.setText("请先选择有效的 classification_state.json")
                 self.import_path_label.setStyleSheet(
+                    f"color: {default_theme.colors.ERROR};"
+                )
+                return
+        if (
+            (not initialized or self.selected_reinitialize)
+            and self.selected_source_kind == "model_store"
+        ):
+            if self.import_model_path is None or not self.import_model_path.is_file():
+                self.model_store_path_label.setText("请先选择有效的 AI 特征库（.npz）")
+                self.model_store_path_label.setStyleSheet(
+                    f"color: {default_theme.colors.ERROR};"
+                )
+                return
+            try:
+                summary = inspect_feature_store(self.import_model_path)
+            except ValueError as error:
+                self.model_store_path_label.setText(f"特征库无效：{error}")
+                self.model_store_path_label.setStyleSheet(
+                    f"color: {default_theme.colors.ERROR};"
+                )
+                return
+            expected_model_id = get_ai_model_profile(key).expected_model_id
+            if summary["model_id"] != expected_model_id:
+                self.model_store_path_label.setText(
+                    "基础模型不匹配：请切换到生成此 NPZ 的模型版本"
+                )
+                self.model_store_path_label.setStyleSheet(
+                    f"color: {default_theme.colors.ERROR};"
+                )
+                return
+            if not summary["sample_count"]:
+                self.model_store_path_label.setText("该特征库没有可复用的学习样本")
+                self.model_store_path_label.setStyleSheet(
                     f"color: {default_theme.colors.ERROR};"
                 )
                 return
