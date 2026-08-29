@@ -6,7 +6,10 @@ import numpy as np
 
 import core.ai.incremental_classifier as classifier_module
 from core.ai import AI_REMOVAL_LABEL
-from core.ai.incremental_classifier import IncrementalEmbeddingClassifier
+from core.ai.incremental_classifier import (
+    IncrementalEmbeddingClassifier,
+    inspect_feature_store,
+)
 
 
 def _deep_feature(index: int) -> np.ndarray:
@@ -58,6 +61,28 @@ def _add_sample(classifier, path, label, feature_index):
         _deep_feature(feature_index),
         np.zeros(512, dtype=np.float32),
     )
+
+
+def test_feature_store_can_be_reused_without_source_images(tmp_path):
+    store_path = tmp_path / "old-project.npz"
+    np.savez_compressed(
+        store_path,
+        store_version=np.asarray([1]),
+        model_id=np.asarray(["fake-embedding-v1"]),
+        paths=np.asarray(["missing/a.jpg", "missing/b.jpg"]),
+        labels=np.asarray(["类别A", "类别B"]),
+        deep=np.zeros((2, 512), dtype=np.float16),
+        colors=np.zeros((2, 512), dtype=np.float16),
+    )
+
+    summary = inspect_feature_store(store_path)
+
+    assert summary == {
+        "store_version": 1,
+        "model_id": "fake-embedding-v1",
+        "sample_count": 2,
+        "class_counts": {"类别A": 1, "类别B": 1},
+    }
 
 
 def test_predict_returns_top_suggestions_without_majority_bias(monkeypatch, tmp_path):

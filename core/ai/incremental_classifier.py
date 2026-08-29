@@ -18,6 +18,49 @@ TrainingSample = Tuple[str, str, str]
 ProgressCallback = Callable[[int, int], None]
 
 
+def inspect_feature_store(cache_path: Path) -> Dict[str, object]:
+    """Validate a reusable feature store without loading its source images."""
+    cache_path = Path(cache_path)
+    try:
+        with np.load(cache_path, allow_pickle=False) as stored:
+            required = {"store_version", "model_id", "paths", "labels", "deep", "colors"}
+            missing = required.difference(stored.files)
+            if missing:
+                raise ValueError(f"缺少字段：{', '.join(sorted(missing))}")
+            store_version = int(stored["store_version"][0])
+            model_id = str(stored["model_id"][0])
+            paths = stored["paths"].astype(str)
+            labels = stored["labels"].astype(str)
+            deep = stored["deep"]
+            colors = stored["colors"]
+    except ValueError:
+        raise
+    except Exception as error:
+        raise ValueError(f"无法读取 AI 特征库：{error}") from error
+
+    if store_version != IncrementalEmbeddingClassifier.STORE_VERSION:
+        raise ValueError(
+            f"特征库版本不兼容（文件版本 {store_version}，"
+            f"当前版本 {IncrementalEmbeddingClassifier.STORE_VERSION}）"
+        )
+    sample_count = len(paths)
+    if len(labels) != sample_count:
+        raise ValueError("图片标识与类别标签数量不一致")
+    if deep.ndim != 2 or deep.shape[0] != sample_count:
+        raise ValueError("视觉特征数量或维度不正确")
+    if colors.ndim != 2 or colors.shape[0] != sample_count:
+        raise ValueError("颜色特征数量或维度不正确")
+    class_counts: Dict[str, int] = {}
+    for label in labels.tolist():
+        class_counts[label] = class_counts.get(label, 0) + 1
+    return {
+        "store_version": store_version,
+        "model_id": model_id,
+        "sample_count": sample_count,
+        "class_counts": class_counts,
+    }
+
+
 class IncrementalEmbeddingClassifier:
     """A reusable engine whose public result is independent of model internals."""
 
@@ -99,6 +142,14 @@ class IncrementalEmbeddingClassifier:
         for label in self.labels:
             counts[label] = counts.get(label, 0) + 1
         return counts
+
+    def rekey_samples(self, namespace: str) -> None:
+        """Detach imported exemplars from source paths that may no longer exist."""
+        with self._lock:
+            self.paths = [
+                f"__imported_ai_sample__/{namespace}/{index}"
+                for index in range(len(self.paths))
+            ]
 
     def _load_store(self) -> None:
         if not self.cache_path.exists():

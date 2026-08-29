@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from core.ai import project_model_path
+import core.ai.incremental_classifier as classifier_module
 import ui.managers.ai_classification_manager as manager_module
 from ui.managers.ai_classification_manager import AIClassificationManager
 
@@ -69,6 +70,58 @@ def test_execution_provider_can_be_changed_before_configuration():
         assert manager.preferred_provider == "cuda"
         manager.set_preferred_provider("invalid")
         assert manager.preferred_provider == "auto"
+    finally:
+        manager.shutdown()
+
+
+def test_imported_npz_is_copied_and_detached_from_missing_source_paths(
+    monkeypatch, tmp_path
+):
+    class BalancedFakeExtractor:
+        model_id = "resnet18-imagenet-embedding-v1"
+        provider_label = "CPU"
+        provider_fallback_reason = None
+        manifest = {
+            "output": {"dimensions": 512},
+            "classifier": {"minimum_samples_per_class": 1},
+        }
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(
+        classifier_module,
+        "OnnxEmbeddingExtractor",
+        BalancedFakeExtractor,
+    )
+    source_path = tmp_path / "backup" / "ai_model_balanced_v1.npz"
+    source_path.parent.mkdir()
+    np.savez_compressed(
+        source_path,
+        store_version=np.asarray([1]),
+        model_id=np.asarray([BalancedFakeExtractor.model_id]),
+        paths=np.asarray(["gone/a.jpg", "gone/b.jpg"]),
+        labels=np.asarray(["类别A", "类别B"]),
+        deep=np.zeros((2, 512), dtype=np.float16),
+        colors=np.zeros((2, 512), dtype=np.float16),
+    )
+    project_dir = tmp_path / "new-project"
+    manager = AIClassificationManager(preferred_provider="cpu")
+    try:
+        manager.configure_project(
+            project_dir,
+            (),
+            model_key="balanced",
+            import_store_path=source_path,
+        )
+
+        assert _wait_until(lambda: manager.is_ready)
+        assert project_model_path(project_dir, "balanced").is_file()
+        assert manager._classifier.sample_count == 2
+        assert all(
+            path.startswith("__imported_ai_sample__/")
+            for path in manager._classifier.paths
+        )
     finally:
         manager.shutdown()
 

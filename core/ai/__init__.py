@@ -5,7 +5,10 @@ from .feature_extractor import (
     find_cuda_runtime_directory,
     is_cuda_execution_available,
 )
-from .incremental_classifier import IncrementalEmbeddingClassifier
+from .incremental_classifier import (
+    IncrementalEmbeddingClassifier,
+    inspect_feature_store,
+)
 from .model_registry import (
     AI_MODEL_PROFILES,
     DEFAULT_AI_MODEL_KEY,
@@ -48,6 +51,7 @@ __all__ = [
     "get_model_resource",
     "get_runtime_resource",
     "is_project_model_initialized",
+    "inspect_feature_store",
     "is_cuda_execution_available",
     "iter_ai_model_profiles",
     "normalize_ai_project_state",

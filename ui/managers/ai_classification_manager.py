@@ -17,6 +17,7 @@ from core.ai import (
     DEFAULT_AI_MODEL_KEY,
     IncrementalEmbeddingClassifier,
     get_ai_model_profile,
+    inspect_feature_store,
     project_model_path,
 )
 from core.ai.feature_extractor import AIModelUnavailableError
@@ -117,6 +118,7 @@ class AIClassificationManager(QObject):
         force_reinitialize: bool = False,
         merge_samples: Sequence[ProjectSample] = (),
         excluded_labels: Sequence[str] = (),
+        import_store_path: Optional[Path] = None,
     ) -> None:
         profile = get_ai_model_profile(model_key)
         project_dir = Path(project_dir)
@@ -160,6 +162,7 @@ class AIClassificationManager(QObject):
             tuple(merge_samples),
             tuple(excluded_labels),
             preferred_provider,
+            Path(import_store_path) if import_store_path else None,
         )
 
     def clear_project(self) -> None:
@@ -187,8 +190,10 @@ class AIClassificationManager(QObject):
         merge_samples: Sequence[ProjectSample],
         excluded_labels: Sequence[str],
         preferred_provider: str,
+        import_store_path: Optional[Path],
     ) -> None:
         rebuild_cache_path: Optional[Path] = None
+        import_cache_path: Optional[Path] = None
         try:
             profile = get_ai_model_profile(model_key)
             final_cache_path = project_model_path(project_dir, model_key)
@@ -200,6 +205,13 @@ class AIClassificationManager(QObject):
                 with self._cache_io_lock:
                     rebuild_cache_path.unlink(missing_ok=True)
                 cache_path = rebuild_cache_path
+            elif import_store_path is not None:
+                import_cache_path = final_cache_path.with_name(
+                    f".{final_cache_path.stem}.import{final_cache_path.suffix}"
+                )
+                with self._cache_io_lock:
+                    import_cache_path.unlink(missing_ok=True)
+                cache_path = import_cache_path
             if (
                 migrate_legacy
                 and not force_reinitialize
@@ -210,12 +222,40 @@ class AIClassificationManager(QObject):
                 if legacy_path.exists():
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(legacy_path, cache_path)
+            if import_store_path is not None:
+                summary = inspect_feature_store(import_store_path)
+                if summary["model_id"] != profile.expected_model_id:
+                    raise ValueError(
+                        "所选 AI 特征库与当前基础模型不匹配"
+                    )
+                if not summary["sample_count"]:
+                    raise ValueError("所选 AI 特征库没有学习样本")
+                if import_store_path.resolve() != cache_path.resolve():
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    staged_path = cache_path.with_name(
+                        f".{cache_path.name}.importing"
+                    )
+                    with self._cache_io_lock:
+                        staged_path.unlink(missing_ok=True)
+                        shutil.copy2(import_store_path, staged_path)
+                        staged_path.replace(cache_path)
             classifier = IncrementalEmbeddingClassifier(
                 model_dir=get_ai_model_dir(profile.model_dir_name),
                 cache_path=cache_path,
                 preferred_provider=preferred_provider,
                 logger=self.logger,
             )
+            if (
+                import_store_path is not None
+                and classifier.sample_count != summary["sample_count"]
+            ):
+                raise ValueError("AI 特征库内容与当前基础模型不兼容")
+            imported_store = import_store_path is not None
+            if imported_store:
+                namespace = hashlib.sha256(
+                    str(import_store_path.resolve()).encode("utf-8")
+                ).hexdigest()[:12]
+                classifier.rekey_samples(namespace)
             removed_count = sum(
                 classifier.forget_label(label) for label in excluded_labels
             )
@@ -252,7 +292,7 @@ class AIClassificationManager(QObject):
                         merge_samples,
                         progress_callback=report_progress,
                     )
-            elif removed_count:
+            elif removed_count or imported_store:
                 with self._cache_io_lock:
                     classifier.save()
             elif not cache_path.exists():
@@ -265,6 +305,10 @@ class AIClassificationManager(QObject):
                         raise _ConfigurationCancelled()
                 with self._cache_io_lock:
                     cache_path.replace(final_cache_path)
+                    classifier.cache_path = final_cache_path
+            elif import_cache_path is not None:
+                with self._cache_io_lock:
+                    import_cache_path.replace(final_cache_path)
                     classifier.cache_path = final_cache_path
 
             with self._lock:
@@ -315,6 +359,8 @@ class AIClassificationManager(QObject):
         except _ConfigurationCancelled:
             if rebuild_cache_path is not None:
                 rebuild_cache_path.unlink(missing_ok=True)
+            if import_cache_path is not None:
+                import_cache_path.unlink(missing_ok=True)
             with self._lock:
                 if generation == self._generation:
                     self._configuration_running = False
@@ -322,6 +368,8 @@ class AIClassificationManager(QObject):
         except AIModelUnavailableError as error:
             if rebuild_cache_path is not None:
                 rebuild_cache_path.unlink(missing_ok=True)
+            if import_cache_path is not None:
+                import_cache_path.unlink(missing_ok=True)
             with self._lock:
                 if generation != self._generation or self._closed:
                     return
@@ -345,6 +393,8 @@ class AIClassificationManager(QObject):
         except Exception as error:
             if rebuild_cache_path is not None:
                 rebuild_cache_path.unlink(missing_ok=True)
+            if import_cache_path is not None:
+                import_cache_path.unlink(missing_ok=True)
             with self._lock:
                 if generation != self._generation or self._closed:
                     return
