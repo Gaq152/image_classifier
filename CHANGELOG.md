@@ -9,6 +9,13 @@
 
 ## [未发布]
 
+## [7.2.5] - 2026-08-30
+
+### 🔗 仓库地址迁移与 AI 特征库复用
+- AI 更新清单、安装包及 CPU/GPU 运行时与模型资源地址迁移至 `AnLifeX/image_classifier`
+- 项目初始化支持直接导入旧项目的 AI `.npz` 特征库，无需保留原图片
+- 同步更新稳定版与 AI 版发布工作流、中英文 README、克隆命令和 Issues 入口
+
 ## [7.2.4] - 2026-08-27
 
 ### 🤖 AI 预览版
@@ -294,7 +301,7 @@
 - 新增 `README_CN.md` 中文文档
 
 ### 🔄 变更
-- 更新默认更新端点为：`https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json`
+- 更新默认更新端点为：`https://github.com/AnLifeX/image_classifier/releases/latest/download/manifest.json`
 - 更新下载 URL 生成逻辑，适配 GitHub Releases
 - 联系信息更新：公司 `GAQ`，反馈邮箱 `anlife123456@gmail.com`
 

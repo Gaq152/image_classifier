@@ -25,7 +25,7 @@ from .model_registry import AIModelProfile, get_ai_model_profile
 
 
 AI_RESOURCE_RELEASE_BASE = (
-    "https://github.com/Gaq152/image_classifier/releases/download/"
+    "https://github.com/AnLifeX/image_classifier/releases/download/"
     "ai-resources-v1"
 )
 ONNXRUNTIME_VERSION = "1.23.2"

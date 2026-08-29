@@ -123,7 +123,7 @@ jobs:
           $size = $env:SIZE_BYTES
           $safe_name = $env:SAFE_NAME
           $date = (Get-Date -Format "yyyy-MM-dd")
-          $download_url = "https://github.com/Gaq152/image_classifier/releases/download/v${version}/${safe_name}"
+          $download_url = "https://github.com/AnLifeX/image_classifier/releases/download/v${version}/${safe_name}"
 
           # Extract update notes from _version_.py
           $notes = & python -c @"
@@ -254,7 +254,7 @@ jobs:
           ```
 
           ### Full Changelog
-          See [CHANGELOG.md](https://github.com/Gaq152/image_classifier/blob/${{ github.ref_name }}/CHANGELOG.md) for complete details.
+          See [CHANGELOG.md](https://github.com/AnLifeX/image_classifier/blob/${{ github.ref_name }}/CHANGELOG.md) for complete details.
           "@
 
           $body | Out-File -FilePath "dist/release_body.md" -Encoding utf8NoBOM

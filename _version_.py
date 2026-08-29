@@ -14,11 +14,11 @@ from product_channel import get_product_info
 # ================================
 
 # 主版本号 - 这是唯一需要手动修改的地方
-__version__ = "7.2.4"
+__version__ = "7.2.5"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
-RELEASE_DATE = "2026-08-27"
+RELEASE_DATE = "2026-08-30"
 RELEASE_NAME = str(get_product_info()["application_name"])
 
 # ================================
@@ -26,6 +26,26 @@ RELEASE_NAME = str(get_product_info()["application_name"])
 # ================================
 
 VERSION_HISTORY = [
+    {
+        "version": "7.2.5",
+        "date": "2026-08-30",
+        "title": "仓库地址迁移与特征库复用",
+        "highlights": [
+            "🔗 AI 更新通道、资源包与下载地址迁移至 AnLifeX/image_classifier",
+            "🧠 支持直接复用旧项目 AI 特征库，无需保留原图片",
+            "📖 同步更新中英文说明文档、克隆地址与问题反馈入口"
+        ],
+        "details": [
+            "【仓库迁移】",
+            "更新：AI 清单、安装包及 CPU/GPU 运行时与模型资源地址使用新用户名",
+            "更新：程序内仓库信息、稳定版与 AI 版发布工作流指向新仓库",
+            "同步：README、测试与历史文档中的仓库链接",
+            "",
+            "【特征库复用】",
+            "新增：项目初始化可直接导入已有 AI .npz 特征库",
+            "优化：导入样本与旧图片路径脱钩，原图片迁移或删除后仍可复用"
+        ]
+    },
     {
         "version": "7.2.4",
         "date": "2026-08-27",
@@ -907,8 +927,8 @@ DOWNLOAD_INFO = {
     "exe_name_template": "ImageClassifier_v{version}.exe",
     "exe_name_chinese_template": "图像分类工具_v{version}.exe",
     "expected_size_mb": "~86MB",
-    "github_repo": "Gaq152/image_classifier",
-    "releases_base": "https://github.com/Gaq152/image_classifier/releases"
+    "github_repo": "AnLifeX/image_classifier",
+    "releases_base": "https://github.com/AnLifeX/image_classifier/releases"
 }
 
 # 联系信息

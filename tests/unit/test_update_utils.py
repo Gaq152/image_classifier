@@ -113,7 +113,7 @@ def test_persistent_updater_never_installs_arbitrary_partial_exe(tmp_path, monke
 
 
 def test_update_proxy_supports_clash_and_github_accelerator():
-    github_url = "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json"
+    github_url = "https://github.com/AnLifeX/image_classifier/releases/latest/download/manifest.json"
 
     clash = normalize_update_proxy("127.0.0.1:7890")
     accelerator = normalize_update_proxy("ghfast.top")

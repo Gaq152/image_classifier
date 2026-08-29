@@ -23,8 +23,8 @@ Image Classifier is a PyQt6-based Windows application designed for fast image tr
 
 ## Download
 
-- Latest release page: https://github.com/Gaq152/image_classifier/releases
-- Latest manifest: https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json
+- Latest release page: https://github.com/AnLifeX/image_classifier/releases
+- Latest manifest: https://github.com/AnLifeX/image_classifier/releases/latest/download/manifest.json
 
 | Version | Platform | Asset |
 |---|---|---|
@@ -44,14 +44,14 @@ Image Classifier is a PyQt6-based Windows application designed for fast image tr
 
 ### Option 1: Run executable (recommended)
 
-1. Open: https://github.com/Gaq152/image_classifier/releases
+1. Open: https://github.com/AnLifeX/image_classifier/releases
 2. Download the latest `ImageClassifier_vX.Y.Z.exe`
 3. Double-click to run
 
 ### Option 2: Run from source
 
 ```bash
-git clone https://github.com/Gaq152/image_classifier.git
+git clone https://github.com/AnLifeX/image_classifier.git
 cd image_classifier
 pip install -r requirements.txt
 python run.py
@@ -130,7 +130,7 @@ python build.py --edition ai
 
 The app checks updates using:
 
-- Manifest endpoint: `https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json`
+- Manifest endpoint: `https://github.com/AnLifeX/image_classifier/releases/latest/download/manifest.json`
 - Download URL: provided by the `url` field in `manifest.json`
 
 `manifest.json` fields used by the app:

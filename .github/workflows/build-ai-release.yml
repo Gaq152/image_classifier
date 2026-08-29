@@ -116,11 +116,11 @@ jobs:
           }
 
           $versioned = $common.Clone()
-          $versioned.url = "https://github.com/Gaq152/image_classifier/releases/download/$env:AI_TAG/$env:VERSIONED_NAME"
+          $versioned.url = "https://github.com/AnLifeX/image_classifier/releases/download/$env:AI_TAG/$env:VERSIONED_NAME"
           $versioned | ConvertTo-Json -Depth 3 | Out-File "release-assets/versioned/manifest.json" -Encoding utf8NoBOM
 
           $rolling = $common.Clone()
-          $rolling.url = "https://github.com/Gaq152/image_classifier/releases/download/ai-latest/$env:ROLLING_NAME"
+          $rolling.url = "https://github.com/AnLifeX/image_classifier/releases/download/ai-latest/$env:ROLLING_NAME"
           $rolling | ConvertTo-Json -Depth 3 | Out-File "release-assets/latest/manifest.json" -Encoding utf8NoBOM
 
       - name: Compose AI release notes
