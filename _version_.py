@@ -12,11 +12,11 @@ from typing import Dict
 # ================================
 
 # 主版本号 - 这是唯一需要手动修改的地方
-__version__ = "7.2.3"
+__version__ = "7.2.4"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
-RELEASE_DATE = "2026-07-30"
+RELEASE_DATE = "2026-08-30"
 RELEASE_NAME = "图像分类工具"
 
 # ================================
@@ -24,6 +24,22 @@ RELEASE_NAME = "图像分类工具"
 # ================================
 
 VERSION_HISTORY = [
+    {
+        "version": "7.2.4",
+        "date": "2026-08-30",
+        "title": "仓库地址迁移",
+        "highlights": [
+            "🔗 项目、更新检查与下载地址迁移至 AnLifeX/image_classifier",
+            "📖 同步更新中英文说明文档、克隆地址与问题反馈入口",
+            "🚀 发布迁移补丁，确保后续版本可从新仓库正常更新"
+        ],
+        "details": [
+            "【仓库迁移】",
+            "更新：稳定版清单、安装包下载与 Release 地址指向 AnLifeX/image_classifier",
+            "更新：程序内仓库信息及默认更新端点使用新用户名",
+            "同步：README、工作流、测试与历史文档中的仓库链接"
+        ]
+    },
     {
         "version": "7.2.3",
         "date": "2026-07-30",
@@ -885,8 +901,8 @@ DOWNLOAD_INFO = {
     "exe_name_template": "ImageClassifier_v{version}.exe",
     "exe_name_chinese_template": "图像分类工具_v{version}.exe",
     "expected_size_mb": "~86MB",
-    "github_repo": "Gaq152/image_classifier",
-    "releases_base": "https://github.com/Gaq152/image_classifier/releases"
+    "github_repo": "AnLifeX/image_classifier",
+    "releases_base": "https://github.com/AnLifeX/image_classifier/releases"
 }
 
 # 联系信息

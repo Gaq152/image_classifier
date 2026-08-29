@@ -11,6 +11,13 @@
 
 暂无。
 
+## [7.2.4] - 2026-08-30
+
+### 🔗 仓库地址迁移
+- 项目仓库、Release、更新清单及安装包下载地址迁移至 `AnLifeX/image_classifier`
+- 同步更新中英文 README、克隆命令、Issues 入口与 GitHub Actions 发布链接
+- 发布迁移补丁，确保已安装版本能够通过新仓库地址继续检查并下载更新
+
 ## [7.2.3] - 2026-07-30
 
 ### 🌟 版本概述
@@ -282,7 +289,7 @@
 - 新增 `README_CN.md` 中文文档
 
 ### 🔄 变更
-- 更新默认更新端点为：`https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json`
+- 更新默认更新端点为：`https://github.com/AnLifeX/image_classifier/releases/latest/download/manifest.json`
 - 更新下载 URL 生成逻辑，适配 GitHub Releases
 - 联系信息更新：公司 `GAQ`，反馈邮箱 `anlife123456@gmail.com`
 

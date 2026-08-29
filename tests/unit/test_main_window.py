@@ -309,7 +309,7 @@ def test_version_button_opens_popover_before_manual_check(qapp):
         assert window.update_center_popover.primary_button.text().startswith("正在检查")
         assert not window.update_center_popover.primary_button.isEnabled()
         factory.assert_called_once_with(
-            "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json",
+            "https://github.com/AnLifeX/image_classifier/releases/latest/download/manifest.json",
             "",
             "http://127.0.0.1:7890",
         )

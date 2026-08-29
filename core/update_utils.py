@@ -664,7 +664,7 @@ def ensure_persistent_updater(target_exe: Path) -> Path:
     batch_path = update_dir / "update.bat"
 
     manifest_url = (
-        "https://github.com/Gaq152/image_classifier/releases/latest/download/manifest.json"
+        "https://github.com/AnLifeX/image_classifier/releases/latest/download/manifest.json"
     )
     escaped_target = _escape_win_path(str(exe_path))
     escaped_dir = _escape_win_path(str(exe_dir))

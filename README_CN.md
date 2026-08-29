@@ -23,11 +23,11 @@
 
 ## 快速下载
 
-**最新版本**: [访问 Releases 页面下载](https://github.com/Gaq152/image_classifier/releases)
+**最新版本**: [访问 Releases 页面下载](https://github.com/AnLifeX/image_classifier/releases)
 
 | 版本 | 平台 | 下载链接 | 大小 |
 |------|------|----------|------|
-| Latest | Windows | [Releases 页面](https://github.com/Gaq152/image_classifier/releases/latest) | ~86MB |
+| Latest | Windows | [Releases 页面](https://github.com/AnLifeX/image_classifier/releases/latest) | ~86MB |
 
 > 下载 exe 文件后双击即可运行，无需安装 Python 环境。
 
@@ -96,7 +96,7 @@
 
 下载已编译的可执行文件，无需安装Python环境：
 
-1. 访问项目地址：https://github.com/Gaq152/image_classifier
+1. 访问项目地址：https://github.com/AnLifeX/image_classifier
 2. 进入 **Releases** 页面下载最新版本的 `ImageClassifier_vx.x.x.exe`
 3. 双击运行即可使用
 
@@ -106,7 +106,7 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/Gaq152/image_classifier.git
+git clone https://github.com/AnLifeX/image_classifier.git
 cd image_classifier
 
 # 2. 安装依赖
@@ -182,7 +182,7 @@ image_classifier/
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/Gaq152/image_classifier.git
+git clone https://github.com/AnLifeX/image_classifier.git
 cd image_classifier
 
 # 2. 创建虚拟环境（推荐）
@@ -280,7 +280,7 @@ A: 确保有足够的网络权限，程序对网络路径进行了特殊优化�
 
 ### 报告问题
 
-1. 在 [Issues 页面](https://github.com/Gaq152/image_classifier/issues) 创建新问题
+1. 在 [Issues 页面](https://github.com/AnLifeX/image_classifier/issues) 创建新问题
 2. 描述问题的重现步骤
 3. 提供错误日志和系统信息
 4. 如可能，提供截图说明
