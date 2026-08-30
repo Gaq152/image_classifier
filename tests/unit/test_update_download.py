@@ -77,6 +77,40 @@ def build_manifest(payload: bytes):
     }
 
 
+def test_controller_uses_manifest_display_name_for_download(tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.update_download.get_update_dir", lambda: tmp_path)
+    monkeypatch.setattr("ui.update_download.load_ready_update", lambda: None)
+    monkeypatch.setattr("ui.update_download.load_pending_update", lambda: None)
+    monkeypatch.setattr("ui.update_download.cleanup_incomplete_updates", lambda: None)
+    controller = UpdateDownloadController()
+    monkeypatch.setattr(controller, "_start_worker", lambda: True)
+
+    manifest = {
+        **build_manifest(b"ai-package"),
+        "display_name": "ImageClassifierAI_v9.9.9.exe",
+    }
+    assert controller.start(manifest, "9.9.9") is True
+    assert controller._destination == tmp_path / "ImageClassifierAI_v9.9.9.exe"
+
+
+def test_controller_falls_back_to_current_product_name_without_display_name(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("ui.update_download.get_update_dir", lambda: tmp_path)
+    monkeypatch.setattr("ui.update_download.load_ready_update", lambda: None)
+    monkeypatch.setattr("ui.update_download.load_pending_update", lambda: None)
+    monkeypatch.setattr("ui.update_download.cleanup_incomplete_updates", lambda: None)
+    monkeypatch.setattr(
+        "ui.update_download.get_product_info",
+        lambda: {"ascii_executable_base": "ImageClassifierAI"},
+    )
+    controller = UpdateDownloadController()
+    monkeypatch.setattr(controller, "_start_worker", lambda: True)
+
+    assert controller.start(build_manifest(b"ai-package"), "9.9.9") is True
+    assert controller._destination == tmp_path / "ImageClassifierAI_v9.9.9.exe"
+
+
 def test_download_resumes_after_midstream_network_interruption(tmp_path):
     """网络中断自动重试时，应从已写入字节处发送 Range 继续下载。"""
     payload = b"resume-payload" * 60000

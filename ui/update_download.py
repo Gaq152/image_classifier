@@ -30,6 +30,24 @@ from core.update_utils import (
 )
 from utils.app_config import get_app_config
 from utils.paths import get_update_dir
+from product_channel import get_product_info
+
+
+def _update_package_name(manifest: Dict[str, Any], version: str) -> str:
+    """Return a safe, product-specific filename for a downloaded update."""
+    display_name = str(manifest.get("display_name", "") or "").strip()
+    # Release manifests normally provide this name.  Reject path components so
+    # a malformed manifest cannot escape the channel's update directory.
+    if (
+        display_name
+        and display_name not in {".", ".."}
+        and "/" not in display_name
+        and "\\" not in display_name
+        and Path(display_name).suffix.lower() == ".exe"
+    ):
+        return display_name
+    product_base = str(get_product_info()["ascii_executable_base"])
+    return f"{product_base}_v{version}.exe"
 
 
 class UpdateDownloadWorker(QThread):
@@ -271,11 +289,17 @@ class UpdateDownloadController(QObject):
             discard_pending_update()
 
         update_dir = get_update_dir()
+        destination = update_dir / _update_package_name(manifest, str(version))
         self._destination = (
-            pending["path"]
+            Path(pending["path"])
             if same_pending
-            else update_dir / f"ImageClassifier_v{version}.exe"
+            else destination
         )
+        if same_pending and self._destination.name != destination.name:
+            # Do not carry forward the pre-fix generic AI filename.  A stale
+            # partial is intentionally discarded rather than resumed under a
+            # misleading product name.
+            self._destination = destination
         self._manifest = dict(manifest)
         self._version = str(version)
         self._token = token or ""

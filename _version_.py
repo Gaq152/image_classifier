@@ -14,7 +14,7 @@ from product_channel import get_product_info
 # ================================
 
 # 主版本号 - 这是唯一需要手动修改的地方
-__version__ = "7.2.5"
+__version__ = "7.2.6"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # 发布信息
@@ -26,6 +26,21 @@ RELEASE_NAME = str(get_product_info()["application_name"])
 # ================================
 
 VERSION_HISTORY = [
+    {
+        "version": "7.2.6",
+        "date": "2026-08-30",
+        "title": "修复 AI 版更新文件名",
+        "highlights": [
+            "🛠️ 修复 AI 版更新包被保存为标准版 ImageClassifier 文件名的问题",
+            "📦 更新下载优先使用 manifest.display_name，缺失时按产品通道生成文件名",
+            "🔁 旧的错误命名断点不会再被继续沿用"
+        ],
+        "details": [
+            "【自动更新】",
+            "修复：AI 版下载目标错误硬编码为 ImageClassifier_vX.Y.Z.exe",
+            "优化：标准版和 AI 版均保留各自独立的安装包文件名与桌面识别"
+        ]
+    },
     {
         "version": "7.2.5",
         "date": "2026-08-30",
